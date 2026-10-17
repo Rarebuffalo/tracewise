@@ -18,9 +18,9 @@ Replaces `research/archive/2026-10-15-s1-plan/OPEN-QUESTIONS.md`.
 
 | ID | Default |
 |---|---|
-| D-1 | G-2 is a metadata-only lower bound. ≥15% supports BUILD. Below 15% alone does not trigger ABANDON. |
-| D-2 | Implementation is Python only (no TypeScript service). Customer repos supported: Python and TypeScript. |
-| D-3 | `research/final-audit/evidence/` (contains quarantined data) is excluded from git via `.gitignore`. Files stay untouched on disk. |
+| D-1 | **Provisional validation hypothesis, not a finding and not an implementation gate** (clarified 2026-10-18). H-G2: "at least 15% of first-attempt red default-branch runs are, at job/step level, pre-existing or flaky." The denominator and measurement method are defined in [VALIDATION-PLAN.md](VALIDATION-PLAN.md) §3. The result informs the commercial decision together with G-1 and G-3. It never blocks or unblocks engineering tasks automatically, and it is never quoted as a market statistic. |
+| D-2 | **Python is the backend implementation language for now** (FastAPI service, worker, investigation pipeline). TypeScript is added only where a concrete, written requirement justifies it; there is none today. No UI and no extra runtime or service without such a requirement and your approval. Customer repositories analysed: Python and TypeScript (extractors only). |
+| D-3 | Quarantined evidence (`research/final-audit/evidence/`) stays **excluded from git** (`.gitignore`) and **untouched on disk**. It is never read as evidence, copied, moved or deleted. |
 
 ## Open (need approval later; not needed for offline work)
 

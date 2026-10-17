@@ -1,5 +1,54 @@
 # Change Log
 
+## 2026-10-18 (c): T-104 schema and repositories, T-105 job queue and worker
+
+### Code
+
+| File | Content |
+|---|---|
+| `db/migrations/versions/0001_initial.py` | The 10 tables from ARCHITECTURE §3, CHECK constraints for every state column, a write-once trigger for published commit comments, runtime-role grants (DML only; `audit_event` append-only) |
+| `db/migrate.py`, `db/migrations/env.py`, `db/urls.py` | Programmatic Alembic upgrade and downgrade, run with the owner role |
+| `db/session.py` | Pool for the runtime role. `transaction()` maps pool timeouts and connection failures to `DatabaseUnavailable`, with no URL in the message. |
+| `db/repositories.py` | Deliveries, installations and repos, runs, analyses, publications (reserve/lock, write-once, upsert), signatures (counted once per run, redacted), usage, audit. Errors are stored redacted and capped at 500 chars. |
+| `jobs/queue.py` | Explicit state machine. Enqueue deduped on `dedupe_key`. Serialised claims with `SKIP LOCKED`, ≤2 running per installation, one running job per run. Lease, heartbeat and reaping. Backoff of 30 s and 120 s (±20%, ≥ `retry-after`). `RetryableError` vs `PermanentError`. 10-minute deadline from the first claim. Every transition out of `running` is fenced on `locked_by`. |
+| `jobs/worker.py` | Claim, handle, then complete or fail. A heartbeat thread runs alongside; a lost lease raises before side effects. When the DB fails while recording an outcome, the job is retried after lease expiry (handlers must be idempotent). `run_forever` backs off exponentially while the DB is down. |
+| `contracts.py` | `workflow_id` and `head_repo_id` added to the job payload; `WorkflowRunEvent.dedupe_key` |
+| `tests/pg.py`, `tests/db/` | **Disposable Postgres:** `initdb` into a private 0700 temp dir, Unix socket only, removed after the session. System Postgres, its configuration and user data are not touched. |
+
+### Docs
+
+- **D-1, D-2, D-3** clarified as requested ([DECISIONS.md](DECISIONS.md)). D-1 is now a provisional hypothesis, with its denominator and method in [VALIDATION-PLAN.md](VALIDATION-PLAN.md) §3.
+- **ARCHITECTURE §3:** the job state machine and `target_key`.
+- **Package layout:** the `db/` file names.
+
+### Validation (actually run)
+
+| Command | Result |
+|---|---|
+| `uv run ruff check`, `ruff format --check`, `uv run mypy` (strict, 31 files) | pass |
+| `uv run pytest -m "not slow"` | **82 passed** (45 earlier + 37 new DB tests) |
+| Timing-sensitive DB tests (concurrency, heartbeat, lost lease, DB down) | 10 consecutive runs, all passed |
+| `python3 -I scripts/check_docs.py` | PASS |
+
+**The DB tests cover:**
+
+- **Migrations and roles:** down/up/down; runtime role refused DDL and audit edits.
+- **Constraints:** CHECK violations.
+- **Delivery and run idempotency.**
+- **Publications:** commit comment write-once; PR comment and Check Run upsert.
+- **Signatures:** counting.
+- **Queue state machine:** every transition, retries, `retry-after`, attempts exhausted, permanent errors, the deadline, lease expiry fencing, cancel, and a rollback mid-claim.
+- **Caps and concurrency:** the per-installation cap with 50 jobs from one installation; one running job per run; 8 concurrent workers × 50 jobs with no double claim and the cap never exceeded.
+- **Worker:** handler outcomes; heartbeat; lost lease; DB down at claim (no URL leaked); DB failure on complete or fail, leading to a safe re-run.
+
+### Coverage gaps (not claimed as passed)
+
+| Test | Status |
+|---|---|
+| AT-EVT-05, AT-EVT-06 | Need the webhook endpoint (T-106) |
+| AT-REL-04 | Queue level only (cap of 2 per installation, other installations progress). The end-to-end check through webhook and worker is still open. |
+| AT-PUB-01, AT-PUB-02 | Only the storage half (write-once and upsert keys). Publishing is T-502. |
+
 ## 2026-10-18 (b): offline implementation, Phases 0–2
 
 **Tasks done:** T-001, T-002, T-101…T-103, T-201…T-206 (12.0 of 30.0 offline-core dd, as estimated). No network calls, no credentials, no LLM.

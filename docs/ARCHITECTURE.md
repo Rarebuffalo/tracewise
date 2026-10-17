@@ -65,10 +65,10 @@ The tenant key is `installation_id`. RLS is added at pilot hardening (T-705).
 | `installation` | `id` (GitHub id) PK, `account_login`, `status`, `deleted_at`, `purge_after`, `monthly_quota` | System table |
 | `repository` | `id` PK, `installation_id` FK, `full_name`, `default_branch`, `enabled`, `removed_at` | — |
 | `webhook_delivery` | `delivery_id` PK, `event`, `action`, `installation_id`, `received_at`, `outcome` | System; retained 14 days |
-| `job` | `id`, `kind`, `installation_id`, `dedupe_key` UNIQUE, `payload` JSONB, `status`, `attempts`, `run_after`, `locked_until`, `last_error` | System |
+| `job` | `id`, `kind`, `installation_id`, `run_key`, `dedupe_key` UNIQUE, `payload` JSONB (IDs only), `status`, `attempts`, `max_attempts`, `run_after`, `deadline_at`, `locked_by`, `locked_until`, `last_error` (redacted, ≤500), `result` | States: `queued` → `running` → `succeeded`; `running` → `retry_wait` → `running`; `running` → `dead`; `queued`/`retry_wait` → `cancelled`. Transitions out of `running` require lease ownership. Deadline: 10 min from the first claim. |
 | `workflow_run` | `id`, `installation_id`, `repo_id`, `github_run_id`, `run_attempt`, `workflow_id`, `head_sha`, `head_branch`, `head_repo_id`, `event`, `conclusion` | UNIQUE (repo, run, attempt) |
 | `analysis` | `id`, `installation_id`, `run_pk` UNIQUE, `status`, `category`, `confidence_band`, `diagnosis` JSONB (SPEC §3.1), `provider`, `model`, `tokens_in`, `tokens_out`, `cost_usd`, `latency_ms` | Retained 180 days |
-| `publication` | `id`, `analysis_id`, `surface` (commit_comment / pr_comment / check_run), `github_id`, `target` (sha, PR or run), `state`, `last_error` | UNIQUE (`surface`, `target_key`). Enforces write-once and upsert. |
+| `publication` | `id`, `analysis_id`, `surface` (commit_comment / pr_comment / check_run), `github_id`, `target_key` (repo:sha:workflow, repo:pr:workflow or repo:run), `state`, `last_error` | UNIQUE (`surface`, `target_key`). A DB trigger makes a published commit comment write-once; PR comments and Check Runs are upserted. |
 | `failure_signature` | `repo_id`, `fingerprint` UNIQUE per repo, `normalized_message` (≤300 chars, redacted), `first_seen_run`, `last_seen_run`, `occurrences` | Retained 365 days |
 | `usage_event` | `installation_id`, `analysis_id`, `kind`, `quantity` | Quota and cost |
 | `audit_event` | `installation_id`, `actor`, `action`, `detail` | Retained 1 year, content-free |
