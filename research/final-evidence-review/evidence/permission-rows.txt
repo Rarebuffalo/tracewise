@@ -1,0 +1,22 @@
+L602	Repository permissions for "Actions"	| `GET /repos/{owner}/{repo}/actions/jobs/{job_id}/logs` | read | UAT, IAT | ✗ |
+L610	Repository permissions for "Actions"	| `GET /repos/{owner}/{repo}/actions/runs/{run_id}/attempts/{attempt_number}/jobs` | read | UAT, IAT | ✗ |
+L613	Repository permissions for "Actions"	| `GET /repos/{owner}/{repo}/actions/runs/{run_id}/jobs` | read | UAT, IAT | ✗ |
+L619	Repository permissions for "Actions"	| `GET /repos/{owner}/{repo}/actions/workflows/{workflow_id}/runs` | read | UAT, IAT | ✗ |
+L835	Repository permissions for "Checks"	| `POST /repos/{owner}/{repo}/check-runs` | write | UAT, IAT | ✗ |
+L836	Repository permissions for "Checks"	| `PATCH /repos/{owner}/{repo}/check-runs/{check_run_id}` | write | UAT, IAT | ✗ |
+L845	Repository permissions for "Checks"	| `GET /repos/{owner}/{repo}/commits/{ref}/check-runs` | read | UAT, IAT | ✗ |
+L936	Repository permissions for "Contents"	| `PATCH /repos/{owner}/{repo}/comments/{comment_id}` | write | UAT, IAT | ✗ |
+L987	Repository permissions for "Contents"	| `POST /repos/{owner}/{repo}/commits/{commit_sha}/comments` | read | UAT, IAT | ✗ |
+L990	Repository permissions for "Contents"	| `GET /repos/{owner}/{repo}/compare/{basehead}` | read | UAT, IAT | ✗ |
+L991	Repository permissions for "Contents"	| `GET /repos/{owner}/{repo}/contents/{path}` | read | UAT, IAT | ✗ |
+L1003	Repository permissions for "Contents"	| `GET /repos/{owner}/{repo}/git/trees/{tree_sha}` | read | UAT, IAT | ✗ |
+L1007	Repository permissions for "Contents"	| `GET /repos/{owner}/{repo}/pulls/{pull_number}` | read | UAT, IAT | ✓ |
+L1016	Repository permissions for "Contents"	| `GET /repos/{owner}/{repo}/tarball/{ref}` | read | UAT, IAT | ✗ |
+L1093	Repository permissions for "Issues"	| `PATCH /repos/{owner}/{repo}/issues/comments/{comment_id}` | write | UAT, IAT | ✓ |
+L1102	Repository permissions for "Issues"	| `POST /repos/{owner}/{repo}/issues/{issue_number}/comments` | write | UAT, IAT | ✓ |
+L1139	Repository permissions for "Issues"	| `GET /repos/{owner}/{repo}/issues/{issue_number}/comments` | read | UAT, IAT | ✓ |
+L1218	Repository permissions for "Pull requests"	| `PATCH /repos/{owner}/{repo}/issues/comments/{comment_id}` | write | UAT, IAT | ✓ |
+L1223	Repository permissions for "Pull requests"	| `POST /repos/{owner}/{repo}/issues/{issue_number}/comments` | write | UAT, IAT | ✓ |
+L1263	Repository permissions for "Pull requests"	| `GET /repos/{owner}/{repo}/commits/{commit_sha}/pulls` | read | UAT, IAT | ✗ |
+L1268	Repository permissions for "Pull requests"	| `GET /repos/{owner}/{repo}/issues/{issue_number}/comments` | read | UAT, IAT | ✓ |
+L1282	Repository permissions for "Pull requests"	| `GET /repos/{owner}/{repo}/pulls/{pull_number}` | read | UAT, IAT | ✓ |

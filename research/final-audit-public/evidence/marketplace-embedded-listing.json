@@ -1,0 +1,49 @@
+{
+ "bgColor": "ffffff",
+ "businessId": null,
+ "categories": [
+  {
+   "name": "Continuous integration",
+   "slug": "continuous-integration"
+  },
+  {
+   "name": "AI Assisted",
+   "slug": "ai-assisted"
+  }
+ ],
+ "copilotApp": false,
+ "documentationUrl": "https://theplumber.dev/examples",
+ "euTrader": "No - Does not classify as a trader in the European Union",
+ "extendedDescription": "<h2>What it does</h2>\n<p>When a CI pipeline fails on a connected repository, The Plumber:</p>\n<ol>\n<li>Downloads the CI log from the failing workflow run</li>\n<li>Clones the repository at the failing commit</li>\n<li>Runs an agentic analysis through the actual codebase</li>\n<li>Posts a structured <strong>Plumbing Report</strong> on your commit or PR \u2014 in under two minutes</li>\n</ol>\n<p>No config changes. No new CLI tools. No dashboard to monitor. Install once, works on every failure.</p>\n<h2>The Plumbing Report</h2>\n<p>Every report includes:</p>\n<ul>\n<li><strong>Root cause</strong> \u2014 not just the error message, but <em>why</em> the code is wrong</li>\n<li><strong>Problematic code</strong> \u2014 exact file and line number</li>\n<li><strong>Recommended fix</strong> \u2014 a ready-to-apply code change</li>\n<li><strong>For AI Agents</strong> \u2014 a structured section optimized for Cursor, Claude Code, Windsurf, and other AI coding assistants. Attach the report and say \"fix this.\"</li>\n</ul>\n<p><a href=\"https://theplumber.dev/examples\">See real example reports \u2192</a></p>\n<h2>How it works</h2>\n<p>The Plumber installs as a GitHub App and listens for <code>workflow_run</code> failure events. When CI breaks, analysis begins automatically \u2014 no action required from your team.</p>\n<h2>Privacy</h2>\n<p>Your code is never stored. The analysis environment \u2014 including the cloned repository and CI log \u2014 is destroyed immediately after the report is posted. <a href=\"https://theplumber.dev/privacy\">Full privacy policy \u2192</a></p>",
+ "fullDescription": "<p>CI broke. Again. Now someone has to dig through logs, trace the stack, find the line, figure out the fix.</p>\n<p><strong>The Plumber does that for you.</strong></p>\n<p>Install once. When your GitHub Actions workflow fails, The Plumber automatically analyzes the failure and posts a structured repair report \u2014 root cause, exact file and line, ready-to-apply fix \u2014 directly on your commit or PR. In under two minutes.</p>",
+ "id": 26714,
+ "installationCount": 4,
+ "isAiHighRisk": null,
+ "isVerifiedOwner": false,
+ "listableType": "Integration",
+ "listingLogoUrl": "https://avatars.githubusercontent.com/ml/26714?s=400&v=4",
+ "llmsInUse": null,
+ "name": "The Plumber App",
+ "ownerImage": "https://avatars.githubusercontent.com/u/276016965?s=48&v=4",
+ "ownerLogin": "theplumber-dev",
+ "ownerSafeProfileName": "theplumber.dev",
+ "ownerType": "Organization",
+ "pricingUrl": null,
+ "privacyPolicyUrl": "https://theplumber.dev/privacy",
+ "publisher2faRequired": "Yes - Publisher organization requires 2FA",
+ "repositoryVisibility": "private",
+ "repositoryUrl": null,
+ "shortDescription": "AI-powered CI failure diagnosis. When your pipeline breaks, The Plumber analyzes and provides the fix",
+ "slug": "the-plumber-app",
+ "statusUrl": "https://api.theplumber.dev/health",
+ "supportEmail": null,
+ "supportUrl": "https://theplumber.dev/support",
+ "thirdPartyServices": "AI inference provider (LLM API)",
+ "tosUrl": "https://theplumber.dev/terms",
+ "traderAddress": null,
+ "transparencyDisclosure": "<p>The Plumber uses an AI inference provider to analyze CI logs and source code for the purpose of generating failure diagnosis reports. No user code or CI log data is stored after analysis completes. The analysis environment is destroyed immediately after each report is posted. AI-generated reports are provided for informational purposes and may contain errors. Users should review all recommended fixes before applying them.</p>",
+ "type": "marketplace_listing",
+ "verifiedProfileDomains": [
+  "theplumber.dev"
+ ]
+}
