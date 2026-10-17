@@ -236,7 +236,7 @@ class FileExamined(_Strict):
 class Attribution(_Strict):
     trigger_sha: Sha
     trigger_changed_files: list[str] = Field(default_factory=list)
-    touches_implicated: bool
+    touches_implicated: bool | None  # FS-ATR-1: true / false / unknown
     statement: str = Field(max_length=400)
     basis: list[str] = Field(default_factory=list)
 

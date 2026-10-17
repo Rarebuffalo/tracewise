@@ -1,5 +1,44 @@
 # Change Log
 
+## 2026-10-18 (i): T-306 trigger diff and `touches_implicated`
+
+### Code
+
+| File | Content |
+|---|---|
+| `context/trigger.py` | `compute_trigger_diff`: parent lookup for a push, or a supplied base for a PR; the compare API with validated SHAs; file names validated; renames counted; truncation flagged; failures become an explicit unknown. `relevance` is three-valued and code-only; unknown, truncated-without-overlap and empty-implicated cases give `None`. Wording follows FS-ATR-1 and never uses causal language. `to_attribution`. `TriggerDiff.render` feeds the `get_diff` tool. |
+| `contracts.py` | `Attribution.touches_implicated` is now `bool \| None` (FS-ATR-1 says true/false/unknown); the SPEC JSON was updated to match |
+
+### Tests
+
+`tests/context/test_trigger.py` (13 tests):
+
+- **AT-ATR-01:** README-only push.
+- **AT-ATR-02:** the implicated file was changed.
+- **AT-ATR-03:** fork PR given a base SHA.
+- **AT-ATR-09:** B-17 touch reported as evidence only; META P-03 using the **real recorded** pallets/flask commit with no implicated paths gives unknown.
+- **Unknown cases:** root commit, compare 404, invalid parent, malformed response.
+- **Truncation:** at 300 files and at 251 commits.
+- **Inputs:** renames and unsafe names.
+- **Output:** statement length; `render` and `get_diff`.
+
+The fixture `recorded/flask-commit-d73fa1cdcb.json` was copied unchanged from the public evidence folder.
+
+### Validation (actually run)
+
+| Command | Result |
+|---|---|
+| ruff check and format check | pass (83 files) |
+| mypy | no issues (48 files) |
+| `uv run pytest -o addopts="--strict-markers" -p no:warnings` (all, slow included) | **281 passed** in 97.2 s |
+| `check_docs.py` | PASS |
+
+### Acceptance tests
+
+| Test | Status |
+|---|---|
+| AT-ATR-01, AT-ATR-02, AT-ATR-03, AT-ATR-09 | **Partial: unit level only.** Their environments are B-02/B-17 benchmark runs (T-601+), and AT-ATR-02 needs the diagnosis location from T-403. |
+
 ## 2026-10-18 (h): T-305 read-only investigation tools
 
 ### Code
