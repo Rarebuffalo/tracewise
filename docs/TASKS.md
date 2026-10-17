@@ -32,8 +32,8 @@ Version 2.0, 2026-10-18. Dependency-ordered. Each task lists the SPEC requiremen
 | T-101 | Project scaffold: `pyproject.toml` (uv), ruff, mypy, pytest, Makefile, package `tracewise` | FS-INS-1 | — | T-001 | 0.5 | done |
 | T-102 | Settings (env, `SecretStr`), JSON logging, correlation IDs; secrets never logged | FS-SEC-5 | AT-SEC-05 | T-101 | 0.5 | done |
 | T-103 | Contracts: webhook event, job payload, Diagnosis v2 (Pydantic) | FS-EVT-1, FS-DX-4, FS-DX-5 | AT-DX-12 | T-101 | 0.75 | done |
-| T-104 | DB schema + Alembic + repositories (ARCHITECTURE §3), incl. `publication` | FS-EVT-4, FS-PUB-1, FS-PUB-2 | AT-EVT-06 | T-103 | 1.5 | todo |
-| T-105 | Postgres job queue: tx enqueue, SKIP LOCKED claim, lease, backoff, dead letter, ≤2 per installation | FS-EVT-2, FS-EVT-4, FS-EVT-6 | AT-EVT-05, AT-REL-04 | T-104 | 1.5 | todo |
+| T-104 | DB schema + Alembic + repositories (ARCHITECTURE §3), incl. `publication` | FS-EVT-4, FS-PUB-1, FS-PUB-2 | AT-EVT-06 | T-103 | 1.5 | done |
+| T-105 | Postgres job queue: tx enqueue, SKIP LOCKED claim, lease, backoff, dead letter, ≤2 per installation | FS-EVT-2, FS-EVT-4, FS-EVT-6 | AT-EVT-05, AT-REL-04 | T-104 | 1.5 | done |
 | T-106 | Webhook endpoint: raw-body HMAC (constant-time), 25 MB cap, event filter, delivery + run dedupe | FS-EVT-1, FS-EVT-3, FS-EVT-4 | AT-EVT-01, AT-EVT-02, AT-EVT-03, AT-SEC-02 | T-105 | 1.0 | todo |
 | **Phase 2: deterministic pre-pass (offline)** | | | | | | |
 | T-201 | GitHub log envelope parser; step slicing driven by jobs-API `steps[]`; job/step/command identification | FS-LOG-2, FS-SEC-2 | AT-LOG-02, AT-SEC-11 | T-103 | 1.0 | done |

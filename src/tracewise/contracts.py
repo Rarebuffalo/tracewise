@@ -52,6 +52,7 @@ class HeadRepoRef(_Lenient):
 class WorkflowRun(_Lenient):
     id: int
     run_attempt: int = 1
+    workflow_id: int | None = None
     head_sha: Sha
     head_branch: str | None = None
     event: str
@@ -72,6 +73,12 @@ class WorkflowRunEvent(_Lenient):
     repository: RepoRef
     installation: Installation
 
+    @property
+    def dedupe_key(self) -> str:
+        """FS-EVT-4: one analysis per (repo, run, attempt)."""
+        r = self.workflow_run
+        return f"analyze:{self.repository.id}:{r.id}:{r.run_attempt}"
+
     def should_analyse(self) -> bool:
         return self.action == "completed" and self.workflow_run.conclusion in ANALYSED_CONCLUSIONS
 
@@ -89,9 +96,11 @@ class AnalysisJob(_Strict):
     repo: str
     run_id: int
     attempt: int = Field(ge=1)
+    workflow_id: int | None = None
     head_sha: Sha
     head_branch: str | None = None
     head_repo: str | None = None
+    head_repo_id: int | None = None
     event: str
     conclusion: Literal["failure", "timed_out"]
     delivery_id: str
@@ -109,7 +118,9 @@ class AnalysisJob(_Strict):
             attempt=run.run_attempt,
             head_sha=run.head_sha,
             head_branch=run.head_branch,
+            workflow_id=run.workflow_id,
             head_repo=run.head_repository.full_name if run.head_repository else None,
+            head_repo_id=run.head_repository.id if run.head_repository else None,
             event=run.event,
             conclusion=cast(Literal["failure", "timed_out"], run.conclusion),
             delivery_id=delivery_id,

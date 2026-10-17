@@ -32,7 +32,7 @@ tracewise/                       repo root (~/tracewise)
 │  ├─ config.py   logging.py   contracts.py
 │  ├─ web/        app.py  webhooks.py  health.py                 (T-106)
 │  ├─ jobs/       queue.py  worker.py  handlers/                 (T-105, T-701…T-704)
-│  ├─ db/         models.py  session.py  migrations/             (T-104, T-705)
+│  ├─ db/         repositories.py  session.py  migrate.py  migrations/   (T-104, T-705)
 │  ├─ github/     auth.py  client.py  pulls.py  publish.py       (T-301…T-303, T-502)
 │  ├─ prepass/    envelope.py  sanitize.py  extractors/{python,typescript,generic}.py  primary.py  (T-201…T-206)
 │  ├─ context/    workspace.py  tools.py  trigger.py             (T-304…T-306)

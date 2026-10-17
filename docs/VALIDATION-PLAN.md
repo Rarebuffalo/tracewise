@@ -69,7 +69,22 @@ No scraping of personal data beyond public contact routes.
   - (b) the **same SHA** has another attempt that passed (*flaky signal*);
   - (c) otherwise *undetermined from metadata*.
 
-**Metric:** the share of red runs in (a) ∪ (b). This is a **lower bound** on "blaming the push would be wrong". Dependency, environment and config causes are **not countable** without logs.
+**Measurement definitions (D-1, provisional hypothesis H-G2):**
+
+| Term | Definition |
+|---|---|
+| Lane | (repository, `workflow_id`, default branch) |
+| Window | The 90 days before the study date, fixed when the study starts |
+| **Denominator** | Workflow runs in the window on the default branch with `conclusion ∈ {failure, timed_out}` and `run_attempt = 1` (re-runs are not separate cases). At most the 50 most recent per repository, so no single repo dominates. **Excluded and reported separately:** runs whose jobs list is unavailable, and runs with no earlier completed run in their lane (no history to compare). |
+| Numerator | Denominator runs labelled (a) or (b) |
+| (a) Pre-existing | The **immediately preceding** completed run in the same lane also failed, with the **same job name and the same failed step name** |
+| (b) Flaky signal | Another attempt of the same run (same `head_sha`, `run_attempt > 1`) concluded `success` |
+| Reported | Pooled share with a Wilson 95% CI; the per-repository median share; the count per label; exclusions; and the full run list with provenance |
+
+**Interpretation:**
+
+- The share is a **lower bound** on "blaming the push would be wrong". Dependency, environment and config causes are **not countable** without logs.
+- It is a hypothesis test for the commercial decision only, not a market finding, and not a gate on implementation.
 
 **Rules:** no log downloads; no `gh` CLI; provenance recorded per run (endpoint, time, anonymous).
 
@@ -78,7 +93,7 @@ No scraping of personal data beyond public contact routes.
 | Gate | Evidence | Threshold |
 |---|---|---|
 | G-1 Pain | Interviews | ≥7/12 describe a costly "was it us or something else?" episode **unprompted** (Q1–Q3) |
-| G-2 Base rate | §3 lower bound, with a 95% CI | **≥15% supports BUILD.** Below 15% does **not** alone trigger ABANDON (it is a lower bound); then G-1/G-3 decide. |
+| G-2 Base rate (provisional hypothesis H-G2) | §3 lower bound, with a Wilson 95% CI | **≥15% supports** the hypothesis; below 15% does **not** refute the product (lower bound). Input to the BUILD decision together with G-1 and G-3; never an automatic gate. |
 | G-3 Commitment | Named repo + date | ≥5 leads commit to installing |
 | G-PAY | Written pilot terms (price, start, exit criteria) | ≥2, before any external install |
 
