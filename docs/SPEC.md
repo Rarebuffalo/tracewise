@@ -158,8 +158,8 @@ Version 2.0, 2026-10-18. Supersedes all earlier specs (see `research/README.md` 
   "run": {"repo_id": 0, "repo": "o/r", "run_id": 0, "attempt": 1, "head_sha": "<40 hex>", "event": "push|pull_request", "pr_number": null},
   "status": "diagnosed | inconclusive | logs_unavailable | permission_denied",
   "failed": [{"job_id": 0, "job": "Tests (Python 3.11)", "step": "Run pytest", "command": "pytest --tb=short -v"}],
-  "primary_error": {"log_ref": {"job_id": 0, "line_start": 0, "line_end": 0}, "excerpt": "<redacted>", "fingerprint": "<16 hex>"},
-  "siblings": {"count": 0, "names": []},
+  "primary_errors": [{"log_ref": {"job_id": 0, "line_start": 0, "line_end": 0}, "excerpt": "<redacted>", "fingerprint": "<16 hex>",
+                      "siblings": {"count": 0, "names": []}}],
   "category": "code_regression | test_defect | dependency | config_secret | infra_runner | flaky_suspect | workflow_invalid | unknown",
   "root_cause": "≤300 chars",
   "why": "≤800 chars",
@@ -176,7 +176,7 @@ Version 2.0, 2026-10-18. Supersedes all earlier specs (see `research/README.md` 
 
 ### 3.2 Validator rules (fail closed to `inconclusive`)
 
-1. Each `primary_error.log_ref` range exists in the retained log, and the excerpt is a substring of it after redaction.
+1. Each `primary_errors[].log_ref` range exists in the retained log, and the excerpt is a substring of it after redaction.
 2. `problem_location` lies within a `files_examined` range, and `files_examined` equals the tool log.
 3. `fix.replacement.path == problem_location.path`, and the replaced lines exist.
 4. Every path in `root_cause`, `why` or `fix.description` exists at `head_sha`. Otherwise it is stripped and flagged.

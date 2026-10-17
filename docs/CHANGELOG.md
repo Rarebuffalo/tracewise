@@ -1,5 +1,58 @@
 # Change Log
 
+## 2026-10-18 (b): offline implementation, Phases 0–2
+
+**Tasks done:** T-001, T-002, T-101…T-103, T-201…T-206 (12.0 of 30.0 offline-core dd, as estimated). No network calls, no credentials, no LLM.
+
+### Code
+
+| Area | Files | Notes |
+|---|---|---|
+| Scaffold (T-101) | `pyproject.toml`, `uv.lock`, `Makefile`, `.env.example` | uv, ruff, mypy `--strict`, pytest. `.env.example` holds placeholders only. Runtime deps: pydantic, pydantic-settings. |
+| Settings, logging (T-102) | `src/tracewise/config.py`, `logging.py` | `SecretStr` everywhere. `LLM_PROVIDER=fake` by default; `openai` refuses to start without a local key. JSON logs with a correlation ID. A filter scrubs registered secrets, token shapes and URL credentials from messages, extras and tracebacks. |
+| Contracts (T-103) | `src/tracewise/contracts.py` | Webhook subset, `AnalysisJob` (IDs only), Diagnosis v2 with schema-level rules. |
+| Pre-pass (T-201…T-206) | `src/tracewise/prepass/` | Steps come from the jobs API; runner timestamps slice the log. Sanitise, then redact. pytest, traceback, ruff, mypy, tsc, jest, vitest and eslint extractors, plus a generic fallback. Ranking, cascades, siblings and fingerprints. Streaming retention ≤2 MB. |
+
+### Spec change (contract)
+
+- Diagnosis v2 `primary_error` + top-level `siblings` became **`primary_errors[]` (1–3)**, each with its own `siblings`.
+- **Reason:** FS-DX-2 and AT-DX-16 require ≤3 independent primaries, which the single-object contract could not express. Validator rule 1 already said "each".
+- SPEC §3.1 and §3.2 were updated.
+
+### Fixtures
+
+| Kind | Files |
+|---|---|
+| **Real tool output** | `pytest_b02.out` (B-02 replica, defect at `pricing.py:41`), `ruff_b10.out`, `ruff_full_b10.out`, `mypy_b10.out`, `traceback.out`. All regenerable offline with `scripts/gen_python_fixtures.py`; host paths are rewritten to runner paths. |
+| **Hand-written** (`*.handwritten.out`) | tsc, jest, vitest, eslint, from the documented formats. Real TypeScript tool runs need npm downloads; they belong to the benchmark harness (T-601). |
+
+### Bugs found by the tests and fixed
+
+- The tsc regex missed the colon in `file(3,10): error`.
+- The error-window detector missed exception names such as `AssertionError`. A 200 MB log dropped its only error.
+- The generic extractor took 3.3 s per 50 MB; a prefilter brought it to 1.4 s.
+
+### Validation (actually run)
+
+| Command | Result |
+|---|---|
+| `uv run ruff check src tests scripts`, `ruff format --check` | pass |
+| `uv run mypy` (strict, 21 files) | pass |
+| `uv run pytest -m "not slow"` | **45 passed** |
+| `uv run pytest -m slow` | **10 passed**. AT-LOG-04: 200 MB log in ≈50 s, peak RSS < 300 MB. AT-SEC-15: 50 MB per extractor in ≤2 s. |
+| `python3 -I scripts/check_docs.py` | PASS |
+
+### Coverage of the acceptance tests touched (honest scope)
+
+| Test | Covered now | Still needs |
+|---|---|---|
+| AT-LOG-02, AT-LOG-04, AT-LOG-05, AT-LOG-06, AT-SEC-15 | Full | — |
+| AT-DX-02, AT-DX-03, AT-DX-07, AT-DX-16 | Pre-pass level | The end-to-end BENCH runs (T-601+) |
+| AT-SEC-04 | Redaction | The storage, fake-provider-capture and report assertions (T-104, T-401, T-501) |
+| AT-SEC-05 | Logging | Per-installation token scope (T-301) |
+| AT-SEC-11 | Step attribution | The "no drift claim above `low`" part (T-306) |
+| AT-DX-12 | Schema (band + ≥1 basis) | The corroboration rule (T-404) |
+
 ## 2026-10-18: canonical documentation set, archive cleanup, git initialisation
 
 **Decisions applied:** Q1–Q6 (user, 2026-10-18), plus defaults D-1…D-3 ([DECISIONS.md](DECISIONS.md)). The plan of changes was written first: [DOC-CHANGE-PLAN.md](DOC-CHANGE-PLAN.md).

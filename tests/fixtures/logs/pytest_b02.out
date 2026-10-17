@@ -1,0 +1,38 @@
+[1m============================= test session starts ==============================[0m
+platform linux -- Python 3.14.3, pytest-9.1.1, pluggy-1.7.0 -- /home/runner/tracewise/.venv/bin/python
+rootdir: /home/runner/work/coffee/coffee
+configfile: pyproject.toml
+[1mcollecting ... [0mcollected 4 items
+
+tests/test_pricing.py::test_total_single [31mFAILED[0m[31m                          [ 25%][0m
+tests/test_pricing.py::test_total_two [31mFAILED[0m[31m                             [ 50%][0m
+tests/test_pricing.py::test_total_mixed [31mFAILED[0m[31m                           [ 75%][0m
+tests/test_pricing.py::test_total_large [31mFAILED[0m[31m                           [100%][0m
+
+=================================== FAILURES ===================================
+[31m[1m______________________________ test_total_single _______________________________[0m
+[1m[31mtests/test_pricing.py[0m:5: in test_total_single
+    [0m[94massert[39;49;00m total([([94m1.0[39;49;00m, [94m1[39;49;00m)]) == [94m1.21[39;49;00m[90m[39;49;00m
+[1m[31mE   assert 0.21 == 1.21[0m
+[1m[31mE    +  where 0.21 = total([(1.0, 1)])[0m
+[31m[1m________________________________ test_total_two ________________________________[0m
+[1m[31mtests/test_pricing.py[0m:9: in test_total_two
+    [0m[94massert[39;49;00m total([([94m1.0[39;49;00m, [94m2[39;49;00m)]) == [94m2.42[39;49;00m[90m[39;49;00m
+[1m[31mE   assert 0.42 == 2.42[0m
+[1m[31mE    +  where 0.42 = total([(1.0, 2)])[0m
+[31m[1m_______________________________ test_total_mixed _______________________________[0m
+[1m[31mtests/test_pricing.py[0m:13: in test_total_mixed
+    [0m[94massert[39;49;00m total([([94m1.0[39;49;00m, [94m1[39;49;00m), ([94m0.5[39;49;00m, [94m2[39;49;00m)]) == [94m2.42[39;49;00m[90m[39;49;00m
+[1m[31mE   assert 0.42 == 2.42[0m
+[1m[31mE    +  where 0.42 = total([(1.0, 1), (0.5, 2)])[0m
+[31m[1m_______________________________ test_total_large _______________________________[0m
+[1m[31mtests/test_pricing.py[0m:17: in test_total_large
+    [0m[94massert[39;49;00m total([([94m10.0[39;49;00m, [94m1[39;49;00m)]) == [94m12.1[39;49;00m[90m[39;49;00m
+[1m[31mE   assert 2.1 == 12.1[0m
+[1m[31mE    +  where 2.1 = total([(10.0, 1)])[0m
+[36m[1m=========================== short test summary info ============================[0m
+[31mFAILED[0m tests/test_pricing.py::[1mtest_total_single[0m - assert 0.21 == 1.21
+[31mFAILED[0m tests/test_pricing.py::[1mtest_total_two[0m - assert 0.42 == 2.42
+[31mFAILED[0m tests/test_pricing.py::[1mtest_total_mixed[0m - assert 0.42 == 2.42
+[31mFAILED[0m tests/test_pricing.py::[1mtest_total_large[0m - assert 2.1 == 12.1
+[31m============================== [31m[1m4 failed[0m[31m in 0.05s[0m[31m ===============================[0m

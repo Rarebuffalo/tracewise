@@ -1,0 +1,23 @@
+FAIL src/Button.test.tsx
+  ● Button › renders label
+
+    expect(received).toMatchSnapshot()
+
+    Snapshot name: `Button renders label 1`
+
+    - Snapshot  - 1
+    + Received  + 1
+
+    -   Buy now
+    +   Purchase
+
+      10 |   const { container } = render(<Button label="Purchase" />);
+    > 11 |   expect(container).toMatchSnapshot();
+         |                     ^
+      12 | });
+
+      at Object.toMatchSnapshot (src/Button.test.tsx:11:21)
+
+ › 1 snapshot failed.
+Snapshot Summary
+ › 1 snapshot failed from 1 test suite. Inspect your code changes or run `npm test -- -u` to update them.

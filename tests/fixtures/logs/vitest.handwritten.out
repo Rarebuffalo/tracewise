@@ -1,0 +1,25 @@
+ ❯ src/sum.test.ts (2 tests | 1 failed) 4ms
+   × sum > adds numbers
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/sum.test.ts > sum > adds numbers
+AssertionError: expected 4 to be 5 // Object.is equality
+
+- Expected
++ Received
+
+- 5
++ 4
+
+ ❯ src/sum.test.ts:6:22
+      4| describe('sum', () => {
+      5|   it('adds numbers', () => {
+      6|     expect(sum(2, 2)).toBe(5)
+       |                      ^
+      7|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed (2)

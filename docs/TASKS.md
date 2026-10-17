@@ -26,22 +26,22 @@ Version 2.0, 2026-10-18. Dependency-ordered. Each task lists the SPEC requiremen
 | ID | Task | Implements (FS) | Accepted by (AT) | Depends on | dd | Status |
 |---|---|---|---|---|---|---|
 | **Phase 0: repo and docs** | | | | | | |
-| T-001 | `git init` (no remote), `.gitignore` (D-3), sensitive-file check, initial local commit | — | — | — | 0.25 | todo |
-| T-002 | Doc consistency checker (`scripts/check_docs.py`): links, traceability, banned instructions, B-case consolidation | — | — | — | 0.25 | todo |
+| T-001 | `git init` (no remote), `.gitignore` (D-3), sensitive-file check, initial local commit | — | — | — | 0.25 | done |
+| T-002 | Doc consistency checker (`scripts/check_docs.py`): links, traceability, banned instructions, B-case consolidation | — | — | — | 0.25 | done |
 | **Phase 1: foundation (offline)** | | | | | | |
-| T-101 | Project scaffold: `pyproject.toml` (uv), ruff, mypy, pytest, Makefile, package `tracewise` | FS-INS-1 | — | T-001 | 0.5 | todo |
-| T-102 | Settings (env, `SecretStr`), JSON logging, correlation IDs; secrets never logged | FS-SEC-5 | AT-SEC-05 | T-101 | 0.5 | todo |
-| T-103 | Contracts: webhook event, job payload, Diagnosis v2 (Pydantic) | FS-EVT-1, FS-DX-4, FS-DX-5 | AT-DX-12 | T-101 | 0.75 | todo |
+| T-101 | Project scaffold: `pyproject.toml` (uv), ruff, mypy, pytest, Makefile, package `tracewise` | FS-INS-1 | — | T-001 | 0.5 | done |
+| T-102 | Settings (env, `SecretStr`), JSON logging, correlation IDs; secrets never logged | FS-SEC-5 | AT-SEC-05 | T-101 | 0.5 | done |
+| T-103 | Contracts: webhook event, job payload, Diagnosis v2 (Pydantic) | FS-EVT-1, FS-DX-4, FS-DX-5 | AT-DX-12 | T-101 | 0.75 | done |
 | T-104 | DB schema + Alembic + repositories (ARCHITECTURE §3), incl. `publication` | FS-EVT-4, FS-PUB-1, FS-PUB-2 | AT-EVT-06 | T-103 | 1.5 | todo |
 | T-105 | Postgres job queue: tx enqueue, SKIP LOCKED claim, lease, backoff, dead letter, ≤2 per installation | FS-EVT-2, FS-EVT-4, FS-EVT-6 | AT-EVT-05, AT-REL-04 | T-104 | 1.5 | todo |
 | T-106 | Webhook endpoint: raw-body HMAC (constant-time), 25 MB cap, event filter, delivery + run dedupe | FS-EVT-1, FS-EVT-3, FS-EVT-4 | AT-EVT-01, AT-EVT-02, AT-EVT-03, AT-SEC-02 | T-105 | 1.0 | todo |
 | **Phase 2: deterministic pre-pass (offline)** | | | | | | |
-| T-201 | GitHub log envelope parser; step slicing driven by jobs-API `steps[]`; job/step/command identification | FS-LOG-2, FS-SEC-2 | AT-LOG-02, AT-SEC-11 | T-103 | 1.0 | todo |
-| T-202 | Sanitiser (ANSI/OSC/C1/CR) + secret redaction | FS-LOG-5 | AT-LOG-06, AT-SEC-04 | T-101 | 0.75 | todo |
-| T-203 | Python extractors: pytest, traceback, ruff, mypy | FS-DX-9 | AT-LOG-05 | T-201 | 1.25 | todo |
-| T-204 | TypeScript extractors: tsc, jest/vitest, eslint | FS-DX-9 | AT-LOG-05 | T-201 | 1.25 | todo |
-| T-205 | Generic extractor; primary ranking; cascades; sibling grouping; fingerprint | FS-DX-1, FS-DX-2, FS-DX-9 | AT-DX-02, AT-DX-03, AT-DX-07, AT-DX-16, AT-SEC-15 | T-203, T-204 | 1.0 | todo |
-| T-206 | Streaming and truncation (≤2 MB per job; `log_truncated`) | FS-LOG-4 | AT-LOG-04 | T-201 | 0.5 | todo |
+| T-201 | GitHub log envelope parser; step slicing driven by jobs-API `steps[]`; job/step/command identification | FS-LOG-2, FS-SEC-2 | AT-LOG-02, AT-SEC-11 | T-103 | 1.0 | done |
+| T-202 | Sanitiser (ANSI/OSC/C1/CR) + secret redaction | FS-LOG-5 | AT-LOG-06, AT-SEC-04 | T-101 | 0.75 | done |
+| T-203 | Python extractors: pytest, traceback, ruff, mypy | FS-DX-9 | AT-LOG-05 | T-201 | 1.25 | done |
+| T-204 | TypeScript extractors: tsc, jest/vitest, eslint | FS-DX-9 | AT-LOG-05 | T-201 | 1.25 | done |
+| T-205 | Generic extractor; primary ranking; cascades; sibling grouping; fingerprint | FS-DX-1, FS-DX-2, FS-DX-9 | AT-DX-02, AT-DX-03, AT-DX-07, AT-DX-16, AT-SEC-15 | T-203, T-204 | 1.0 | done |
+| T-206 | Streaming and truncation (≤2 MB per job; `log_truncated`) | FS-LOG-4 | AT-LOG-04 | T-201 | 0.5 | done |
 | **Phase 3: GitHub client and code context (offline with REPLAY/fixtures)** | | | | | | |
 | T-301 | App JWT; installation tokens scoped to repo + permissions; memory-only cache | FS-INS-2, FS-SEC-5 | AT-SEC-01, AT-SEC-05 | T-102 | 0.5 | todo |
 | T-302 | REST client: pagination, primary/secondary rate limits, retries, log redirect, 404/410/403 handling | FS-LOG-1, FS-LOG-3, FS-ERR-2 | AT-LOG-01, AT-LOG-03, AT-REL-02 | T-301 | 1.25 | todo |
