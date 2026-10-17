@@ -83,6 +83,21 @@ The tenant key is `installation_id`. RLS is added at pilot hardening (T-705).
 | Workspace → host | `realpath` confinement; no hooks, LFS or submodules; no execution |
 | Tenant → tenant | Scoped tokens; RLS |
 | Secrets | Redaction before storage or LLM; the key comes from env |
+| Service → GitHub (T-301, T-302) | See §4.1 |
+
+### 4.1 GitHub credentials and calls
+
+| Control | Implementation |
+|---|---|
+| App JWT | RS256; `iat` −60 s; lifetime 9 min. The key is loaded from a file path and held only as a parsed key object; `repr` hides it. |
+| Installation tokens | Minted **per repository and per purpose**: the `analysis` scope is Actions, Contents and Metadata read; the `publish` scope is Contents and Metadata read, plus Pull requests and Checks write. Each token sends `repository_ids=[repo]`. |
+| Token checks | The grant is checked against the request; any extra permission, a non-`selected` repository selection or a different repository set fails closed. |
+| Token storage | Cached in memory only, keyed by (installation, repo, scope), dropped 5 min before expiry, and registered with the log scrubber while alive. |
+| Endpoint registry | `github/endpoints.py` lists every callable endpoint and the one permission that authorises it. The client cannot call anything else. A test checks the list statically against FS-INS-2 (AT-SEC-01). Only `github/client.py` may import an HTTP library or name the API host. |
+| Repository binding | A `RepoClient` is bound to one repository; `owner`/`repo` cannot be overridden. The contents path rejects `..`, absolute paths and backslashes. |
+| Errors and retries | Rate limits: `retry-after`, then `x-ratelimit-reset`, otherwise ≥60 s (doubling). Waits ≤10 s happen inline; longer ones go back to the queue with `retry_after_s`. 5xx and transport errors: ≤3 inline retries with backoff. 401: re-mint once. Other 403s: `PermissionDenied`, naming the permission when GitHub sends `x-accepted-github-permissions`. 404, 410 and 422 are permanent. |
+| Log download | A 302 is followed only to an `https` URL without credentials whose host is on the allowlist. The request carries **no** `Authorization` header and follows no further redirects. Streamed and capped at 512 MB. |
+| Response bounds | JSON ≤10 MB; pagination only to the API host, ≤20 pages |
 
 See [SPEC.md](SPEC.md) FS-SEC-*, and [ACCEPTANCE-TESTS.md](ACCEPTANCE-TESTS.md) §9.
 
@@ -91,5 +106,6 @@ See [SPEC.md](SPEC.md) FS-SEC-*, and [ACCEPTANCE-TESTS.md](ACCEPTANCE-TESTS.md) 
 | ID | Item | Resolved by |
 |---|---|---|
 | G-PLAT-1…7 | Live platform behaviours (startup_failure, re-run delivery, output limits, forks, commit comment with Contents read, uninstall, declined permissions) | LIVE tests after you approve a test org |
+| G-PLAT-8 | **Log-redirect host allowlist** (`*.actions.githubusercontent.com`, `*.blob.core.windows.net`) is an assumption: GitHub documents the 302 but not its host. If the real host differs, logs fail closed (`UnsafeRedirect`). It also needs checking that the token grant response echoes `repositories`. | LIVE (T-801…T-803) |
 | UD-2 | Shallow fetch vs contents API in practice (size, latency) | T-304 measurement |
 | UD-3 | OpenAI model choice | T-605 measured evaluation |

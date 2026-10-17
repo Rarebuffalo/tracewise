@@ -1,5 +1,61 @@
 # Change Log
 
+## 2026-10-18 (e): T-301 GitHub App auth, T-302 REST client
+
+### Code
+
+| File | Content |
+|---|---|
+| `src/tracewise/github/endpoints.py` | Registry of the 16 callable endpoints, each with its authorising permission. `APP_PERMISSIONS` lists the five in FS-INS-2. Per-purpose scopes: `ANALYSIS_SCOPE` (read only) and `PUBLISH_SCOPE`. |
+| `src/tracewise/github/auth.py` | `AppCredentials` (RS256 App JWT, 9 min; key hidden). `TokenProvider` mints repository-scoped, purpose-scoped installation tokens; checks the grant and fails closed on over-broad grants; keeps them in memory per (installation, repo, scope); refreshes 5 min before expiry; supports invalidate and drop-installation; registers tokens with the log scrubber. |
+| `src/tracewise/github/client.py` | `GitHubHTTP`: registry-only calls; rate-limit handling (`retry-after`, `x-ratelimit-reset`, ≥60 s secondary; inline ≤10 s, otherwise deferred to the queue); 5xx and transport retries; error taxonomy; JSON cap; API-host-only pagination with a page cap; safe log redirect (https, allowlisted host, no credentials, **no Authorization header**, streamed, 512 MB cap). `RepoClient`: bound to one repository, re-mints once on 401, encoded path parameters, contents-path guard, `list_jobs`, `failed_jobs`, `job_log_lines`. |
+| `src/tracewise/github/errors.py` | Errors mapped onto queue semantics: `GitHubRetryable`, `PermissionDenied`, `NotFound`, `Gone`, `InstallationUnavailable`, `TokenScopeError`, `UnsafeRedirect`, `ResponseTooLarge` |
+| `pyproject.toml`, `uv.lock` | `httpx` moved to runtime; `pyjwt[crypto]` added |
+
+### Tests and fixtures
+
+| File | Content |
+|---|---|
+| `tests/github_fake.py` | In-process fake GitHub on `httpx.MockTransport`. The RSA key is generated in memory per session; no key file exists. |
+| `tests/fixtures/github/recorded/` | Two **real anonymous** responses copied unchanged from the public evidence folder (provenance in `tests/fixtures/github/README.md`). All other responses are **synthetic**, shaped after the GitHub docs. |
+| `tests/unit/test_github_auth.py` | 16 tests |
+| `tests/unit/test_github_client.py` | 25 tests |
+| `tests/db/test_github_worker.py` | 1 test |
+
+### Bug found by the tests and fixed
+
+A log chunk crossing the download cap was discarded whole, losing complete lines that fit. The client now keeps everything up to the cap.
+
+### Docs
+
+- **ARCHITECTURE:** §4.1 (GitHub credentials and calls); G-PLAT-8 (the log-redirect host allowlist is an unverified assumption).
+- **IMPLEMENTATION-PLAN:** package layout.
+- **TASKS:** T-301 and T-302 marked done.
+
+### Validation (actually run, in `~/tracewise`)
+
+| Command | Result |
+|---|---|
+| `uv run ruff check src tests scripts` | All checks passed |
+| `uv run ruff format --check src tests scripts` | 64 files already formatted |
+| `uv run mypy` (strict) | no issues in 39 source files |
+| `uv run pytest -o addopts="--strict-markers" -p no:warnings` (all, slow included) | **169 passed** in 80.9 s |
+| `python3 -I scripts/check_docs.py` | PASS |
+| Secret scan of the staged diff | No private keys, PATs or API keys outside the redaction code and tests |
+
+### Acceptance-test status (honest scope)
+
+| Test | Status |
+|---|---|
+| AT-SEC-01 | **Passed (static):** every registered endpoint is covered by the five permissions; no contents, workflow or issues writes; no HTTP import or API host outside the client. Whether GitHub's real permission checks agree (e.g. a commit comment with Contents read) is **G-PLAT, LIVE**. |
+| AT-SEC-05 | **Passed (fixture level):** tokens are never logged (not emitted, and scrubbed if they were) and never reused across installations, repos or scopes |
+| AT-LOG-01 | **Partial:** the token request is scoped, only failed jobs are selected, and the redirect is followed within one call (fake transport). The pipeline wiring that downloads only failed jobs' logs is T-701-era handler work. |
+| AT-LOG-03 | **Partial:** the client raises `NotFound`, `Gone` or `PermissionDenied`. The `logs_unavailable` / `permission_denied` report is T-503. |
+| AT-REL-02 | **Partial:** the rate limit reschedules ≥60 s through the real queue, and the next attempt survives a 502. "No duplicate publish" needs T-502. |
+| AT-SEC-03 | Not claimed. The client binding prevents cross-repo paths, but the RLS half is T-705. |
+
+**Not tested anywhere:** real GitHub behaviour. No network calls were made.
+
 ## 2026-10-18 (d): T-106 webhook endpoint
 
 ### Code
