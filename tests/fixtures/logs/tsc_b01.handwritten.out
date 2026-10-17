@@ -1,0 +1,7 @@
+src/app.ts(3,10): error TS2305: Module '"./lib"' has no exported member 'formatPrice'.
+src/cart.ts:12:5 - error TS2305: Module '"./lib"' has no exported member 'formatPrice'.
+
+12     formatPrice(total)
+       ~~~~~~~~~~~
+
+Found 2 errors in 2 files.

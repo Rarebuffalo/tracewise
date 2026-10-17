@@ -9,6 +9,7 @@ Checks:
 
 Exit code 0 when all checks pass, 1 otherwise. Read-only; no network.
 """
+
 from __future__ import annotations
 
 import re
@@ -19,8 +20,7 @@ ROOT = Path(__file__).resolve().parent.parent
 DOCS = ROOT / "docs"
 
 ACTIVE = sorted(DOCS.glob("*.md")) + [
-    p for p in [ROOT / "research" / "README.md", *sorted((ROOT / "research" / "archive").glob("*/README.md"))]
-    if p.exists()
+    p for p in [ROOT / "research" / "README.md", *sorted((ROOT / "research" / "archive").glob("*/README.md"))] if p.exists()
 ]
 # Change records describe removed instructions on purpose; they are exempt from check 3.
 CHANGE_RECORDS = {"DOC-CHANGE-PLAN.md", "CHANGELOG.md"}
@@ -120,7 +120,7 @@ def check_traceability() -> None:
                 errors.append(f"[trace] {at} references undefined requirement FS-{short}")
 
     # Every test should be referenced somewhere in SPEC or TASKS.
-    referenced = (ids(r"AT-[A-Z]+-\d+", spec + tasks) | expand_ranges(spec + tasks, "AT"))
+    referenced = ids(r"AT-[A-Z]+-\d+", spec + tasks) | expand_ranges(spec + tasks, "AT")
     unref = sorted(at_defined - referenced - {"AT-CMP-01", "AT-RPT-10"})
     for a in unref:
         errors.append(f"[trace] test {a} is not referenced by any requirement or task")
@@ -144,11 +144,22 @@ def check_banned() -> None:
 
 
 KEY_PHRASES = {
-    "B-01": ["TS2305"], "B-02": ["subtotal * TAX_RATE", "0.21 == 2.71"], "B-03": ["snapshot"],
-    "B-04": ["GITHUB_RUN_ATTEMPT", "random"], "B-05": ["foo", "no attribute 'bar'"],
-    "B-06": ["ResolutionImpossible", "ERESOLVE"], "B-07": ["DB_URL"], "B-08": ["connection refused"],
-    "B-09": ["ReadTimeout"], "B-10": ["F401"], "B-11": ["utcnow"], "B-12": ["40"],
-    "B-13": ["maximum execution time"], "B-14": ["137"], "B-15": ["B-04"], "B-16": ["C4"],
+    "B-01": ["TS2305"],
+    "B-02": ["subtotal * TAX_RATE", "0.21 == 2.71"],
+    "B-03": ["snapshot"],
+    "B-04": ["GITHUB_RUN_ATTEMPT", "random"],
+    "B-05": ["foo", "no attribute 'bar'"],
+    "B-06": ["ResolutionImpossible", "ERESOLVE"],
+    "B-07": ["DB_URL"],
+    "B-08": ["connection refused"],
+    "B-09": ["ReadTimeout"],
+    "B-10": ["F401"],
+    "B-11": ["utcnow"],
+    "B-12": ["40"],
+    "B-13": ["maximum execution time"],
+    "B-14": ["137"],
+    "B-15": ["B-04"],
+    "B-16": ["C4"],
 }
 
 

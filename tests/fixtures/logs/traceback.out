@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import coffee_shop.pricing as p; p.total(None)
+                                     ~~~~~~~^^^^^^
+  File "/home/runner/work/coffee/coffee/coffee_shop/pricing.py", line 14, in total
+    subtotal_ = subtotal(items)
+  File "/home/runner/work/coffee/coffee/coffee_shop/pricing.py", line 10, in subtotal
+    return sum(line_total(p, q) for p, q in items)
+                                            ^^^^^
+TypeError: 'NoneType' object is not iterable
