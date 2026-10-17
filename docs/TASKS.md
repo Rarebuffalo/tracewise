@@ -47,7 +47,7 @@ Version 2.0, 2026-10-18. Dependency-ordered. Each task lists the SPEC requiremen
 | T-302 | REST client: pagination, primary/secondary rate limits, retries, log redirect, 404/410/403 handling | FS-LOG-1, FS-LOG-3, FS-ERR-2 | AT-LOG-01, AT-LOG-03, AT-REL-02 | T-301 | 1.25 | done |
 | T-303 | PR association (same-repo + fork-aware) | FS-PUB-7 | AT-PUB-09, AT-PUB-10 | T-302 | 0.5 | done |
 | T-304 | Code context: shallow single-commit fetch, hardening, size caps, contents-API fallback, `finally` cleanup + startup sweep | FS-CTX-1, FS-CTX-4 | AT-CTX-01, AT-CTX-02, AT-SEC-06 | T-302 | 1.5 | done |
-| T-305 | Read-only tools (`read_file`, `grep`, `list_dir`, `get_diff`) with realpath confinement, limits, tool log | FS-CTX-2, FS-CTX-5 | AT-CTX-03, AT-CTX-04, AT-SEC-09 | T-304 | 1.0 | todo |
+| T-305 | Read-only tools (`read_file`, `grep`, `list_dir`, `get_diff`) with realpath confinement, limits, tool log | FS-CTX-2, FS-CTX-5 | AT-CTX-03, AT-CTX-04, AT-SEC-09 | T-304 | 1.0 | done |
 | T-306 | Trigger diff + `touches_implicated` (code-computed) | FS-CTX-3, FS-ATR-1, FS-SEC-2 | AT-ATR-01, AT-ATR-02, AT-ATR-03, AT-ATR-09 | T-302, T-205 | 0.75 | todo |
 | **Phase 4: investigation (offline with the fake provider)** | | | | | | |
 | T-401 | Provider interface; deterministic fake provider; OpenAI adapter (not exercised offline) | FS-DX-3 | AT-SEC-10 | T-103 | 1.0 | todo |

@@ -1,5 +1,42 @@
 # Change Log
 
+## 2026-10-18 (h): T-305 read-only investigation tools
+
+### Code
+
+| File | Content |
+|---|---|
+| `context/tools.py` | `ToolBox` over one `CodeSource`. Tools: `read_file(path, start, end)` with numbered lines, ≤250 lines, clipped to EOF, the resolved symlink path logged; `list_dir(path)` showing files, dirs, symlinks and submodules ("not inspected"); `grep(pattern, glob, ignore_case)`; `get_diff()`. ≤12 calls, output cap, a call log, and `files_examined()` derived from successful reads only. Unknown tools and bad arguments are returned as errors. |
+| `context/grep_worker.py` | Isolated matcher process (`-I`, empty env, `cwd=/`, CPU and memory rlimits) with a parent timeout. Contains ReDoS from model-supplied patterns. |
+| `context/paths.py` | `"/"` is no longer accepted as the repository root (only `""` and `"."`) |
+
+### Tests
+
+| File | Coverage |
+|---|---|
+| `tests/context/test_tools.py` (23 tests) | **AT-CTX-03:** read and list refuse 7 and 6 escape forms; grep never reads outside the tree and skips symlinks. **AT-CTX-04:** `files_examined` equals the log, including EOF clipping, symlink resolution, and excluding beyond-EOF reads, failed reads and grep. **AT-SEC-09 (tool half).** ReDoS `(a+)+$` contained. Budget, output cap, statuses, `list_dir` and `get_diff`. A run over real Git objects from the local server. |
+| `tests/context/test_paths.py` (35 tests) | Path, link, repo and SHA rules |
+
+### Validation (actually run)
+
+| Command | Result |
+|---|---|
+| `uv run ruff check …`, `ruff format --check …` | pass (81 files) |
+| `uv run mypy` | no issues (47 files) |
+| `uv run pytest -o addopts="--strict-markers" -p no:warnings` (all, slow included) | **268 passed** in 103.1 s |
+| `python3 -I scripts/check_docs.py` | PASS |
+
+### Acceptance tests
+
+| Test | Status |
+|---|---|
+| AT-CTX-03, AT-CTX-04 | **Passed** (UNIT) |
+| AT-SEC-09 | Still **partial**: the symlink is refused and injected text is returned as inert data, but "instructions ignored" by the model needs T-402/T-403 |
+
+### Open risk
+
+The grep worker is isolated by process, rlimits and timeout, not by an OS sandbox (seccomp or namespaces). It only ever receives text, and the code performs no I/O beyond stdin/stdout.
+
 ## 2026-10-18 (g): T-304 secure code context (no checkout)
 
 ### Code
