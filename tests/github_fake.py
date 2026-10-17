@@ -49,6 +49,7 @@ class FakeGitHub:
         self.minted = 0
         self.token_ttl_s = 3600.0
         self.now = 1_800_000_000.0
+        self.next_tokens: list[str] = []  # optional: tokens to hand out (e.g. a local git server's token)
 
     def route(self, method: str, pattern: str, handler: Handler | httpx.Response | list[httpx.Response]) -> None:
         if isinstance(handler, httpx.Response):
@@ -71,7 +72,7 @@ class FakeGitHub:
             return jresp(
                 201,
                 {
-                    "token": f"ghs_fake{self.minted:04d}" + "x" * 30,
+                    "token": self.next_tokens.pop(0) if self.next_tokens else f"ghs_fake{self.minted:04d}" + "x" * 30,
                     "expires_at": exp,
                     "permissions": permissions_override if permissions_override is not None else body["permissions"],
                     "repository_selection": selection,

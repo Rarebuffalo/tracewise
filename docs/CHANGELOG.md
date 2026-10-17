@@ -1,5 +1,39 @@
 # Change Log
 
+## 2026-10-18 (k): T-307 evidence collection (new task), batch verification
+
+**Why a new task:** the analysis flow's retrieval steps 2–6 were not owned by any task. T-402, the only task depending on T-305, is reasoning and also needs T-401. T-307 was added (0.75 dd); the offline core is now 30.75 dd and the pilot total ≈44.5 dd.
+
+| File | Content |
+|---|---|
+| `analysis/collect.py` | `collect_evidence(job, rc, fetcher=…)` (context manager). Lists failed jobs through the jobs API (≤5 downloaded; the rest listed), streams **only those** jobs' logs into the pre-pass, computes the trigger diff, opens the code context and builds the `ToolBox` with `get_diff`. Statuses: `ok`, `logs_unavailable` (all logs 404/410 or vanished, no pre-pass result kept), `permission_denied` (permission recorded), `no_failed_jobs`. Accepts only the analysis-scope client of the run's repository. `implicated_paths` holds pre-pass locations only; T-403 must add the diagnosis location before `relevance()`. No model calls. |
+| `tests/context/test_collect.py` (7 tests) | **Offline end to end** (fake API plus local git server; the token is minted in-test and accepted by the git server). B-02 replica: 3 siblings, step and command from the jobs API, trigger diff, git source at the exact SHA, `read_file` at `pricing.py:41`, `files_examined`; only the failed job's log was requested; no token reached the blob host; workspace removed; token not logged. Log 410, 404, blob 404 and 403 statuses; partial logs; job cap; no failed jobs; scope and repository guards. |
+| `tests/github_fake.py` | `next_tokens` hook |
+| Docs | TASKS (T-307, totals, critical path), IMPLEMENTATION-PLAN layout |
+
+### Batch verification (actually run, `~/tracewise`)
+
+| Command | Result |
+|---|---|
+| `uv run ruff check src tests scripts` | All checks passed |
+| `uv run ruff format --check src tests scripts` | 86 files already formatted |
+| `uv run mypy` (strict) | no issues in 50 source files |
+| `uv run pytest -o addopts="--strict-markers" -p no:warnings` (all, slow included) | **296 passed** in 89.9 s |
+| `python3 -I scripts/check_docs.py` | PASS |
+| Timing- and concurrency-sensitive subset (git timeout, transfer, cleanup, SIGKILL sweep, grep ReDoS, queue concurrency, worker heartbeat, lost lease, DB down, end-to-end concurrency), 5 repetitions | 10/10 each time |
+
+### Acceptance-test status after this batch
+
+| Test | Status |
+|---|---|
+| AT-CTX-01, AT-CTX-03, AT-CTX-04, AT-SEC-06 | Passed (UNIT/offline; the AT-CTX-01 LIVE half is gated) |
+| AT-LOG-01 | **Passed at REPLAY level** (offline fake API) |
+| AT-CTX-02 | Partial: needs the full pipeline |
+| AT-LOG-03 | Partial: statuses are produced; "publish OK" needs T-502/T-503 |
+| AT-SEC-09 | Partial: needs T-402/T-403 |
+| AT-ATR-01, AT-ATR-02, AT-ATR-03, AT-ATR-09 | Partial: unit level |
+| AT-PUB-09, AT-PUB-10 | Partial: association only |
+
 ## 2026-10-18 (j): T-303 review, ambiguous PR association
 
 **Reasoning:** FS-PUB-7, AT-PUB-09 and AT-PUB-10 define only "match → PR comment" and "no match → commit comment". The "lowest PR number" tie-break added in (f) had no basis in the requirements, so it was removed.

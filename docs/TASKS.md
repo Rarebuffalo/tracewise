@@ -49,6 +49,7 @@ Version 2.0, 2026-10-18. Dependency-ordered. Each task lists the SPEC requiremen
 | T-304 | Code context: shallow single-commit fetch, hardening, size caps, contents-API fallback, `finally` cleanup + startup sweep | FS-CTX-1, FS-CTX-4 | AT-CTX-01, AT-CTX-02, AT-SEC-06 | T-302 | 1.5 | done |
 | T-305 | Read-only tools (`read_file`, `grep`, `list_dir`, `get_diff`) with realpath confinement, limits, tool log | FS-CTX-2, FS-CTX-5 | AT-CTX-03, AT-CTX-04, AT-SEC-09 | T-304 | 1.0 | done |
 | T-306 | Trigger diff + `touches_implicated` (code-computed) | FS-CTX-3, FS-ATR-1, FS-SEC-2 | AT-ATR-01, AT-ATR-02, AT-ATR-03, AT-ATR-09 | T-302, T-205 | 0.75 | done |
+| T-307 | Evidence collection stage (flow steps 2–6): failed jobs → their logs → pre-pass → trigger diff → code context → tool box; `logs_unavailable` / `permission_denied` statuses (added 2026-10-18: the flow was unowned in the graph) | FS-LOG-1, FS-LOG-3, FS-CTX-1, FS-CTX-3 | AT-LOG-01, AT-LOG-03 | T-205, T-304, T-305, T-306 | 0.75 | done |
 | **Phase 4: investigation (offline with the fake provider)** | | | | | | |
 | T-401 | Provider interface; deterministic fake provider; OpenAI adapter (not exercised offline) | FS-DX-3 | AT-SEC-10 | T-103 | 1.0 | todo |
 | T-402 | Investigator loop: delimited untrusted data, ≤12 tool calls, ≤120 s, schema output, 1 repair, categories | FS-DX-3, FS-DX-5, FS-DX-6, FS-SEC-1 | AT-DX-01, AT-DX-04, AT-DX-08, AT-DX-09, AT-DX-10, AT-DX-11, AT-SEC-08 | T-401, T-305 | 1.5 | todo |
@@ -90,18 +91,18 @@ Version 2.0, 2026-10-18. Dependency-ordered. Each task lists the SPEC requiremen
 | Scope | Tasks | dd |
 |---|---|---|
 | Phase 0 | T-001, T-002 | 0.5 |
-| Offline MVP core (Phases 1–6, excluding T-605) | T-101 … T-604 | **30.0** |
+| Offline MVP core (Phases 1–6, excluding T-605) | T-101 … T-604 (incl. T-307, added 2026-10-18) | **30.75** |
 | Measured OpenAI evaluation | T-605 | 1.5 |
 | Pilot hardening | Phase 7 | 4.75 |
 | LIVE gates and tests | Phase 8 | 3.5 |
 | Pilot readiness | Phase 9 | 3.5 |
-| **Total to the first external pilot** | | **≈43.75 dd (≈9 weeks at 5 dd/week; ±25%)** |
+| **Total to the first external pilot** | | **≈44.5 dd (≈9 weeks at 5 dd/week; ±25%)** |
 | P2 differentiation | T-901…T-904 | 4.75 |
 
 **Comparison:** the S1 estimate was ≈31.5 dd for an **attribution-only** pilot. The increase comes from the parity components: code context, investigator, validator v2, renderer and the three publishers. Calendar-bound items (interviews, soak, your approvals) are not included.
 
 ## 4. Critical path
 
-T-001 → T-101 → T-103 → T-201 → T-203/T-204 → T-205 → (T-301 → T-302 → T-304 → T-305) → T-401 → T-402 → T-403 → T-501 → T-502 → T-601 → T-602 → T-603 → T-605 → [approval] T-801 → T-802 → T-803 → T-1002.
+T-001 → T-101 → T-103 → T-201 → T-203/T-204 → T-205 → (T-301 → T-302 → T-304 → T-305 → T-307) → T-401 → T-402 → T-403 → T-501 → T-502 → T-601 → T-602 → T-603 → T-605 → [approval] T-801 → T-802 → T-803 → T-1002.
 
 **Can proceed in parallel with offline work:** G-0 validation, T-202, T-206, T-306, T-104/T-105/T-106.
