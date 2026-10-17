@@ -117,7 +117,7 @@ Version 2.0, 2026-10-18. Supersedes all earlier specs (see `research/README.md` 
 | FS-PUB-4 | Re-runs: a new attempt updates the Check Run and PR comment. **No new commit comment.** | EV-P02 | AT-PUB-05 | T-502 | P0 |
 | FS-PUB-5 | Fork PRs: attempt the PR comment and Check Run. On 403, record `unpublished_permission`. No crash, no silent drop. | EV-P10 | AT-PUB-06 | T-502, T-503 | P1 |
 | FS-PUB-6 | Outcome tracking on the next run in the lane, on editable surfaces only | — | AT-PUB-07 | T-904 | P2 |
-| FS-PUB-7 | **PR association by API, never from `workflow_run.pull_requests`.** Same-repo: `GET /commits/{head_sha}/pulls`, filtered to open PRs whose `head.sha == head_sha`. Fork (`head_repository.id ≠ repository.id`): `GET /pulls?state=open&head={head_owner}:{head_branch}`, filtered the same way. No match → treat as a push (commit comment). | EV-P23, EV-P24 | AT-PUB-09, AT-PUB-10 | T-303 | P0 |
+| FS-PUB-7 | **PR association by API, never from `workflow_run.pull_requests`.** Same-repo: `GET /commits/{head_sha}/pulls`, filtered to open PRs whose `head.sha == head_sha`. Fork (`head_repository.id ≠ repository.id`): `GET /pulls?state=open&head={head_owner}:{head_branch}`, filtered the same way. No match → treat as a push (commit comment). Several matches → ambiguous: no PR comment (D-4). | EV-P23, EV-P24 | AT-PUB-09, AT-PUB-10 | T-303 | P0 |
 
 ### 1.8 Errors, quotas, security, operations
 

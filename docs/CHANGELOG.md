@@ -1,5 +1,17 @@
 # Change Log
 
+## 2026-10-18 (j): T-303 review, ambiguous PR association
+
+**Reasoning:** FS-PUB-7, AT-PUB-09 and AT-PUB-10 define only "match → PR comment" and "no match → commit comment". The "lowest PR number" tie-break added in (f) had no basis in the requirements, so it was removed.
+
+| Area | Change |
+|---|---|
+| `github/pulls.py` | Outcomes: `matched`, `none`, `ambiguous` (all candidates listed, none chosen), `error` (malformed response). Malformed items are skipped individually; duplicate entries count once; 403 and installation errors propagate to the permission paths. |
+| `tests/unit/test_github_pulls.py` (18 tests, replacing 10) | Single match; fork `head=` fallback; no match; 2 and 3 matches are ambiguous; fork-filter ambiguity; duplicates; recorded closed/merged PR (and the same data opened); mismatched head SHA; closed; other base repo; 9 malformed item shapes; 3 malformed response shapes; 403 propagates; no `head=` lookup for same-repo runs; analysis scope refused; the webhook `pull_requests` field is never used (signature, model and job payload). |
+| Docs | DECISIONS **D-4** (flagged default: ambiguous or error means no PR comment; commit comment plus Check Run instead); ADR-15; FS-PUB-7 |
+
+**Validation:** targeted `pytest tests/unit/test_github_pulls.py`: 18 passed. ruff and mypy clean. The full suite runs at the end of this batch.
+
 ## 2026-10-18 (i): T-306 trigger diff and `touches_implicated`
 
 ### Code
