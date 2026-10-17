@@ -167,7 +167,7 @@ Version 2.0, 2026-10-18. Supersedes all earlier specs (see `research/README.md` 
   "fix": {"description": "≤600 chars", "replacement": {"path": "pkg/mod.py", "line_start": 41, "line_end": 41, "new_text": "…"}, "size": "trivial|small|larger|n/a"},
   "next_steps": ["≤3, ≤160 chars each"],
   "files_examined": [{"path": "pkg/mod.py", "start": 1, "end": 43, "verdict": "≤140 chars"}],
-  "attribution": {"trigger_sha": "…", "trigger_changed_files": ["README.md"], "touches_implicated": false, "statement": "…", "basis": ["trigger_diff"]},
+  "attribution": {"trigger_sha": "…", "trigger_changed_files": ["README.md"], "touches_implicated": "true | false | null", "statement": "…", "basis": ["trigger_diff"]},
   "confidence": {"band": "high|medium|low", "basis": ["…"]},
   "limits": {"log_truncated": false, "files_skipped": [], "budget_exhausted": false, "diff_truncated": false},
   "usage": {"provider": "openai|fake", "model": "…", "input_tokens": 0, "output_tokens": 0, "tool_calls": 0, "latency_ms": 0}

@@ -48,7 +48,7 @@ Version 2.0, 2026-10-18. Dependency-ordered. Each task lists the SPEC requiremen
 | T-303 | PR association (same-repo + fork-aware) | FS-PUB-7 | AT-PUB-09, AT-PUB-10 | T-302 | 0.5 | done |
 | T-304 | Code context: shallow single-commit fetch, hardening, size caps, contents-API fallback, `finally` cleanup + startup sweep | FS-CTX-1, FS-CTX-4 | AT-CTX-01, AT-CTX-02, AT-SEC-06 | T-302 | 1.5 | done |
 | T-305 | Read-only tools (`read_file`, `grep`, `list_dir`, `get_diff`) with realpath confinement, limits, tool log | FS-CTX-2, FS-CTX-5 | AT-CTX-03, AT-CTX-04, AT-SEC-09 | T-304 | 1.0 | done |
-| T-306 | Trigger diff + `touches_implicated` (code-computed) | FS-CTX-3, FS-ATR-1, FS-SEC-2 | AT-ATR-01, AT-ATR-02, AT-ATR-03, AT-ATR-09 | T-302, T-205 | 0.75 | todo |
+| T-306 | Trigger diff + `touches_implicated` (code-computed) | FS-CTX-3, FS-ATR-1, FS-SEC-2 | AT-ATR-01, AT-ATR-02, AT-ATR-03, AT-ATR-09 | T-302, T-205 | 0.75 | done |
 | **Phase 4: investigation (offline with the fake provider)** | | | | | | |
 | T-401 | Provider interface; deterministic fake provider; OpenAI adapter (not exercised offline) | FS-DX-3 | AT-SEC-10 | T-103 | 1.0 | todo |
 | T-402 | Investigator loop: delimited untrusted data, ≤12 tool calls, ≤120 s, schema output, 1 repair, categories | FS-DX-3, FS-DX-5, FS-DX-6, FS-SEC-1 | AT-DX-01, AT-DX-04, AT-DX-08, AT-DX-09, AT-DX-10, AT-DX-11, AT-SEC-08 | T-401, T-305 | 1.5 | todo |
