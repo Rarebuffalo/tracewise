@@ -42,7 +42,7 @@ def validate_repo_path(path: str, *, allow_root: bool = False) -> str:
     """
     if not isinstance(path, str):
         raise UnsafePath("path must be a string")
-    if path in ("", ".", "/") and allow_root:
+    if path in ("", ".") and allow_root:
         return ""
     if not path or len(path.encode("utf-8", "surrogatepass")) > MAX_PATH_BYTES:
         raise UnsafePath("path empty or too long")
