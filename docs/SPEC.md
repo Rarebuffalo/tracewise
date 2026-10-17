@@ -70,11 +70,11 @@ Version 2.0, 2026-10-18. Supersedes all earlier specs (see `research/README.md` 
 
 | ID | Requirement | Evidence | Tests | Tasks | Pri. |
 |---|---|---|---|---|---|
-| FS-CTX-1 | Read-only tree at `workflow_run.head_sha`. A shallow single-commit fetch into a per-job temporary workspace, with hooks disabled, LFS smudge off, no submodule init and no execution. Contents-API fallback. Skip files >1 MB and binaries. | EV-P16, EV-P17, EV-P22 | AT-CTX-01..02 | T-304 | P0 |
+| FS-CTX-1 | Read-only tree at `workflow_run.head_sha`. A shallow single-commit **object** fetch into a per-job temporary bare repository; **no checkout**; hooks disabled, LFS smudge off, no submodule init and no execution. Contents-API fallback at the same SHA; otherwise an explicit unavailable result. Skip files >1 MB and binaries. | EV-P16, EV-P17, EV-P22 | AT-CTX-01..02 | T-304 | P0 |
 | FS-CTX-2 | `files_examined` is taken from the tool-call log: `{path, start, end}`, repo-relative, clipped to EOF. Never from model text. | EV-C12 | AT-CTX-04, AT-RPT-06 | T-305, T-403 | P0 |
 | FS-CTX-3 | Trigger diff: changed files of `head_sha` vs its parent (push) or the merge base (PR), via the compare API. Truncation flagged (≤250 commits, ≤300 files). | EV-P15 | AT-ATR-01 | T-306 | P0 |
 | FS-CTX-4 | Workspace deleted in `finally`, plus a startup sweep. Source is never persisted. | EV-C03 | AT-SEC-06 | T-304 | P0 |
-| FS-CTX-5 | Path safety: every tool path is resolved inside the workspace. Reject `..`, absolute paths, and symlinks resolving outside. Submodules are reported as "not inspected". | EV-P16 | AT-CTX-03, AT-SEC-09 | T-305 | P0 |
+| FS-CTX-5 | Path safety: every tool path is validated and resolved **inside the commit's tree** (never on a filesystem). Reject `..`, absolute paths, unsafe encodings, and symlinks resolving outside the tree. Submodules are reported as "not inspected". | EV-P16 | AT-CTX-03, AT-SEC-09 | T-305 | P0 |
 | FS-CTX-6 | For PR runs, the report states that CI tested the merge with the base branch | EV-P20, EV-P22 | AT-RPT-11 | T-501 | P1 |
 | FS-DX-3 | Bounded investigation behind a **provider interface** (OpenAI first; others pluggable). Tools: `read_file(path,start,end)`, `grep(pattern,glob)`, `list_dir(path)`, `get_diff()`. **No** write, exec or network tools. ≤12 tool calls, ≤120 s, token budget. Structured output; 1 repair attempt, then inconclusive. Offline tests use a deterministic fake provider; no API key is needed. | Q1, Q4 | AT-DX-01, AT-DX-04, AT-SEC-10 | T-401, T-402 | P0 |
 | FS-DX-4 | `problem_location` lies within an examined range. The snippet is copied by the system from the file at `head_sha`. | EV-C07 | AT-DX-05 | T-403 | P0 |

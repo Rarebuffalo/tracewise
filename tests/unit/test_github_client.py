@@ -316,3 +316,16 @@ def test_scope_is_enforced_locally_before_any_request() -> None:
     with pytest.raises(ValueError, match="outside the 'publish' token scope"):
         list(publish.job_log_lines(99))
     assert gh.minted == 0 and not gh.requests  # refused before minting or calling
+
+
+def test_regression_log_cap_crossed_inside_a_later_chunk_keeps_complete_lines() -> None:
+    """Regression (found 2026-10-18): a chunk crossing the cap was dropped whole, losing complete lines."""
+    gh, rc = setup(max_log_bytes=25)
+    gh.route("GET", LOGS, httpx.Response(302, headers={"location": BLOB}))
+
+    def chunks():  # type: ignore[no-untyped-def]
+        yield b"first line\n"  # 11 bytes
+        yield b"second\nthird line crosses the cap\n"  # cap (25) falls inside "third ..."
+
+    gh.route("GET", r"^//productionresultssa1", httpx.Response(200, content=chunks()))
+    assert list(rc.job_log_lines(99)) == ["first line", "second"]
