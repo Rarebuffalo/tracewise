@@ -50,7 +50,7 @@ flowchart LR
 | ADR-11 | **Billing** is manual for pilots | [GOAL] | — | Paddle/Stripe integration |
 | ADR-12 | **Observability:** structlog JSON with correlation IDs; per-analysis usage and cost record; Sentry at pilot | [GOAL] | — | OTel stack |
 | ADR-13 | **Attribution is a signal, not proof.** The MVP computes only trigger-diff relevance (code-computed). Lane history, flaky and dependency drift are P2, after benchmark validation. Never "caused by". | [GOAL]; EV-P26 | Old ADR-13 (full rule engine in the MVP) | — |
-| ADR-14 | **Code context:** `git init` + `git fetch --depth=1 --filter=blob:limit=1m <url> <head_sha>` with an `x-access-token` installation token. `core.hooksPath=/dev/null`, `GIT_LFS_SKIP_SMUDGE=1`, `protocol.file.allow=never`, no submodules, size cap. Contents-API fallback. | [PLAT] EV-P16, EV-P17; [HYP] fetch-by-SHA for fork heads (G-PLAT-4) | — | Tarball (heavy); API-only (grep cost) |
+| ADR-14 | **Code context without checkout** (revised 2026-10-18, T-304): `git init --bare --template=` into a private 0700 workspace; `git fetch --depth=1 --filter=blob:limit=1m origin +<head_sha>:refs/tw/head` from `https://github.com/<owner>/<repo>.git` only. The token goes in an `Authorization` header injected through `GIT_CONFIG_*` env (never argv, URL or config). Files are read with `git cat-file` under `GIT_NO_LAZY_FETCH=1` and no credentials, so nothing is ever checked out: no hooks, filters, LFS smudge, submodules or on-disk symlinks. Symlinks are resolved lexically inside the tree. Contents-API fallback at the same SHA, then an explicit unavailable result. | [PLAT] EV-P16, EV-P17; local git 2.56 + `git http-backend` tests; [HYP] fetch-by-SHA + blob filter on github.com (G-PLAT-9) | Old ADR-14 (fetch + checkout into a workspace) | Checkout with hardening; tarball; API-only |
 | ADR-15 | **PR association via API:** same-repo `GET /commits/{sha}/pulls`; fork `GET /pulls?head=owner:branch`; filter `head.sha == head_sha`. The payload `pull_requests` is a hint only. | [PLAT] EV-P23, EV-P24 | Old plan `pr_numbers` from the payload | — |
 | ADR-16 | **Credentials policy:** only project-scoped App credentials (provisioned by you for live tests). No personal, global or CLI GitHub credentials anywhere: service, tests, benchmark. The OpenAI key comes from local env, is never committed or logged, and is not required offline. | [GOAL]; user rule | Old RESOURCE R3 / T0.01 | PAT-based lab tooling |
 | ADR-17 | **Spoofing resistance:** failed step from the jobs API. Printed markers and versions never drive attribution alone. | [GOAL] | — | Log-text-only step detection |
@@ -80,7 +80,7 @@ The tenant key is `installation_id`. RLS is added at pilot hardening (T-705).
 | Untrusted input → system | HMAC; size caps; spoof-resistant step detection |
 | Untrusted content → model | Delimited data; read-only tools; schema output |
 | Model → user-visible output | Validator; escaping; code-built links |
-| Workspace → host | `realpath` confinement; no hooks, LFS or submodules; no execution |
+| Workspace → host | No checkout: objects only, read via `git cat-file`; tree-path confinement; no hooks, filters, LFS or submodules; no execution; size, time and count limits; cleanup in `finally` plus a startup sweep (§4.2) |
 | Tenant → tenant | Scoped tokens; RLS |
 | Secrets | Redaction before storage or LLM; the key comes from env |
 | Service → GitHub (T-301, T-302) | See §4.1 |
@@ -102,11 +102,24 @@ The tenant key is `installation_id`. RLS is added at pilot hardening (T-705).
 
 See [SPEC.md](SPEC.md) FS-SEC-*, and [ACCEPTANCE-TESTS.md](ACCEPTANCE-TESTS.md) §9.
 
+### 4.2 Code context (T-304)
+
+| Control | Implementation |
+|---|---|
+| Inputs | Owner/repo (GitHub name rules) and the commit (40-hex) are validated before any process starts. The host is fixed to `https://github.com`; tests can use `http://127.0.0.1` only through an explicit loopback flag that production never sets. |
+| Process | A fixed `git` binary, no shell. An env built from scratch (no inherited `GIT_TRACE*`, `GIT_CURL_VERBOSE`, proxies, HOME or global/system config). Prompts and credential helpers are off; `protocol.allow=never` except the one scheme; `http.followRedirects=false`; a new process group. |
+| Limits | Fetch ≤60 s; each read ≤10 s; workspace ≤256 MB, checked during the transfer **and once after it ends**; blob filter 1 MB; read output capped; ≤100k tree entries; per-analysis read budget (24 MB, 4000 reads). On a breach the process group is SIGKILLed. |
+| Paths | Repo-relative, NFC, no control or format characters, no `..`, `.`, empty or `.git` segments, no backslashes, ≤1024 bytes. Percent signs stay literal. |
+| Outcomes | Files that are oversized (including blobs filtered on the server), binary, symlinks escaping the tree, symlink loops or submodules are recorded in `skipped` (FS-CTX-1 `files_skipped`) and never trigger broader access. |
+| Fallback | The Contents API at `ref=<head_sha>`. Each file's blob SHA must equal the tree entry's, and its size must match. Oversized files are never requested. Symlink targets come from `git/blobs`. If both paths fail: `UnavailableSource`. |
+| **Residual risk** | While a fetch runs, the token sits in the environment of the `git`/`git-remote-http` child processes and can be read by the **same OS user** through `/proc/<pid>/environ`. Mitigation: run the worker as a dedicated user with no other workloads; the token is repo-scoped, read-only and short-lived. |
+
 ## 5. Open architectural items
 
 | ID | Item | Resolved by |
 |---|---|---|
 | G-PLAT-1…7 | Live platform behaviours (startup_failure, re-run delivery, output limits, forks, commit comment with Contents read, uninstall, declined permissions) | LIVE tests after you approve a test org |
+| G-PLAT-9 | github.com accepting `fetch --depth=1 --filter=blob:limit=1m <sha>` with an installation token in a Basic header (verified only against local `git http-backend`) | LIVE (T-801…T-803) |
 | G-PLAT-8 | **Log-redirect host allowlist** (`*.actions.githubusercontent.com`, `*.blob.core.windows.net`) is an assumption: GitHub documents the 302 but not its host. If the real host differs, logs fail closed (`UnsafeRedirect`). It also needs checking that the token grant response echoes `repositories`. | LIVE (T-801…T-803) |
 | UD-2 | Shallow fetch vs contents API in practice (size, latency) | T-304 measurement |
 | UD-3 | OpenAI model choice | T-605 measured evaluation |

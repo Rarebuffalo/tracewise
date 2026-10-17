@@ -326,6 +326,19 @@ class RepoClient:
     def _token(self) -> str:
         return str(self.tokens.token(self.installation_id, self.repo_id, self.scope).value)
 
+    @property
+    def full_name(self) -> str:
+        return f"{self._owner}/{self._repo}"
+
+    def git_fetch_token(self) -> str:
+        """The analysis-scope token for a read-only git fetch of this one repository (T-304)."""
+        if self.scope != "analysis":
+            raise ValueError("git fetch uses the analysis-scope token only")
+        return self._token()
+
+    def invalidate_token(self) -> None:
+        self.tokens.invalidate(self.installation_id, self.repo_id, self.scope)
+
     def _path(self, ep: Endpoint, **params: Any) -> str:
         if not covered(ep.permission, ep.access, SCOPES[self.scope]):
             raise ValueError(f"{ep.name} needs {ep.permission}:{ep.access}, outside the {self.scope!r} token scope")

@@ -35,7 +35,7 @@ tracewise/                       repo root (~/tracewise)
 │  ├─ db/         repositories.py  session.py  migrate.py  migrations/   (T-104, T-705)
 │  ├─ github/     endpoints.py  errors.py  auth.py  client.py  pulls.py  publish.py   (T-301…T-303, T-502)
 │  ├─ prepass/    envelope.py  sanitize.py  extractors/{python,typescript,generic}.py  primary.py  (T-201…T-206)
-│  ├─ context/    workspace.py  tools.py  trigger.py             (T-304…T-306)
+│  ├─ context/    paths.py  source.py  gitfetch.py  contents_api.py  provider.py  tools.py  trigger.py   (T-304…T-306)
 │  ├─ investigate/ provider.py  fake.py  openai_provider.py  loop.py  validate.py  confidence.py  (T-401…T-404)
 │  ├─ report/     render.py                                      (T-501)
 │  └─ bench/      harness.py  cases/  score.py  meta.py          (T-601…T-604)
@@ -54,7 +54,7 @@ tracewise/                       repo root (~/tracewise)
 3. **Logs.** Download the failed logs: stream, slice, sanitise and redact, and set the truncation flag. 404/410 → `logs_unavailable`.
 4. **Pre-pass.** Run the extractors, then primary error, siblings and fingerprint.
 5. **Trigger diff.** Compare the trigger diff with the implicated paths → `touches_implicated`.
-6. **Code context.** Shallow fetch at `head_sha` into a confined workspace (contents-API fallback).
+6. **Code context.** Object-only shallow fetch at `head_sha` into a private bare repo, read via `git cat-file` (no checkout); Contents-API fallback; otherwise explicit unavailable (ARCHITECTURE §4.2).
 7. **Investigation.** The provider interface runs ≤12 read-only tool calls and returns a structured Diagnosis.
 8. **Validation.** Rules 1–8 decide `diagnosed` or `inconclusive`.
 9. **Render.** Build the report.

@@ -57,6 +57,8 @@ ENDPOINTS: dict[str, Endpoint] = {
         Endpoint("get_commit", "GET", "/repos/{owner}/{repo}/commits/{sha}", "contents", "read"),
         Endpoint("compare", "GET", "/repos/{owner}/{repo}/compare/{basehead}", "contents", "read"),
         Endpoint("get_contents", "GET", "/repos/{owner}/{repo}/contents/{path}", "contents", "read"),
+        Endpoint("get_tree", "GET", "/repos/{owner}/{repo}/git/trees/{tree_sha}", "contents", "read"),
+        Endpoint("get_blob", "GET", "/repos/{owner}/{repo}/git/blobs/{file_sha}", "contents", "read"),
         Endpoint(
             "list_commit_pulls", "GET", "/repos/{owner}/{repo}/commits/{sha}/pulls", "pull_requests", "read", paginated=True
         ),

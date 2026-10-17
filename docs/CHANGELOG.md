@@ -1,5 +1,60 @@
 # Change Log
 
+## 2026-10-18 (g): T-304 secure code context (no checkout)
+
+### Code
+
+| File | Content |
+|---|---|
+| `context/paths.py` | Validation of owner/repo, 40-hex SHAs and repo-relative paths (NFC, no control or format characters, no `..`, `.`, empty or `.git` segments, no backslashes, length cap). Lexical in-tree symlink resolution. |
+| `context/source.py` | `CodeSource` model: tree entries (file/symlink/submodule), `read()` with statuses (`ok`, `not_found`, `too_large`, `binary`, `symlink_escapes`, `symlink_loop`, `submodule`, `is_directory`, `invalid_path`, `budget_exhausted`, `unavailable`). Symlinks ≤5 hops, inside the tree only. Per-file 1 MB cap; aggregate read budget; `skipped` map (`files_skipped`). `UnavailableSource`. |
+| `context/gitfetch.py` | `GitFetcher` with a private bare repo and **no checkout**; fetch by SHA with `--depth=1` and a blob filter; token as a Basic header via `GIT_CONFIG_*` env; from-scratch env; protocol and redirect lock-down; timeout, transfer cap (polled, plus a final check) and output caps, with a process-group SIGKILL on breach or cancellation; reads under `GIT_NO_LAZY_FETCH=1` without credentials; cleanup in `finally`; `sweep_workspaces()`. `GitObjectSource`. |
+| `context/contents_api.py` | `ContentsApiSource`: Trees API listing (truncation flagged), Contents API at `ref=<sha>` with blob-SHA and size checks, `git/blobs` for symlink targets; oversized files never requested |
+| `context/provider.py` | `open_code_context()`: Git first, then the Contents API, then `UnavailableSource`. Caller exceptions propagate and the workspace is always removed. |
+| `github/endpoints.py` | `get_tree` and `get_blob` added (GET, Contents read) |
+| `github/client.py` | `RepoClient.full_name`, `git_fetch_token()` (analysis scope only), `invalidate_token()` |
+
+### Tests (offline)
+
+- **`tests/git_server.py`:** `git http-backend` behind a WSGI shim on 127.0.0.1, with a per-run token. It records the auth headers it receives and can inject faults (status, delay).
+- **`tests/context/test_gitfetch.py` (21 tests):** exact commit; LFS pointer not smudged; submodule reported; no hooks dir and no checkout; planted hooks never run; large blob skipped **with no lazy network fetch**; binary skipped; symlink escape, loop and chain; 9 unsafe-path forms; token never in argv, on disk or in logs, and the header received on every pack request; wrong token; missing commit; missing repo; HTTP 500; timeout with no leftover process; transfer cap; cleanup on exception and on KeyboardInterrupt; input validation and fixed host; read budget; sweep; **AT-SEC-06** with a SIGKILLed child process.
+- **`tests/context/test_contents_api.py` (8 tests):** exact-SHA reads; size cap without a request; symlinks; submodules; unsafe names; blob-SHA mismatch rejected; truncated tree; failover git → API; both failing → unavailable; git preferred with no API calls; caller errors propagate with cleanup; publish scope cannot fetch code; budget.
+- **`tests/unit/test_github_client.py`:** a named regression test for the log-cap bug (the cap crossed inside a later chunk).
+
+### Bug found and fixed
+
+The transfer cap was checked only while git was running. A fast transfer finishing between two polls escaped it. A final check now runs after the process exits.
+
+### Docs
+
+- **ARCHITECTURE:** ADR-14 revised (no checkout); new §4.2; G-PLAT-9.
+- **SPEC:** FS-CTX-1 and FS-CTX-5 wording (objects and tree-path confinement).
+- **IMPLEMENTATION-PLAN:** layout and step 6.
+- **TASKS:** T-304 marked done.
+
+### Validation (actually run)
+
+| Command | Result |
+|---|---|
+| `uv run ruff check src tests scripts`, `uv run ruff format --check src tests scripts` | pass (76 files) |
+| `uv run mypy` | no issues (45 files) |
+| `uv run pytest -o addopts="--strict-markers" -p no:warnings` (all, slow included) | **210 passed** in 96.9 s |
+| `python3 -I scripts/check_docs.py` | PASS |
+| Leftover temp repos, clusters, servers or processes | none |
+
+### Acceptance tests
+
+| Test | Status |
+|---|---|
+| AT-CTX-01 | **Passed** (UNIT, local fixture repo). The LIVE half is gated (G-PLAT-9). |
+| AT-CTX-02 | **Partial:** skipping and listing pass. "The analysis still completes" needs the pipeline (T-402+). |
+| AT-SEC-06 | **Passed** (SIGKILLed process, then the sweep) |
+| AT-SEC-09 | **Partial:** symlink refusal passes. "Instructions ignored" needs the investigator (T-402/T-403). |
+
+### Open risk
+
+The token is readable by the same OS user through `/proc/<pid>/environ` while a fetch runs (ARCHITECTURE §4.2).
+
 ## 2026-10-18 (f): T-303 PR association
 
 ### Code
