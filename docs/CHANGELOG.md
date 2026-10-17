@@ -1,5 +1,39 @@
 # Change Log
 
+## 2026-10-18 (d): T-106 webhook endpoint
+
+### Code
+
+| File | Content |
+|---|---|
+| `web/webhooks.py` | `POST /webhooks/github`. Checks run in this order, and nothing is parsed before the signature passes: declared length >25 MB → 413 without reading; streamed body capped at 25 MB → 413; no secret configured → 503 (fail closed); HMAC-SHA256 constant-time → 401; delivery and event headers validated → 400; JSON and schema → 400, recorded as `rejected`; DB unavailable → 503 with nothing persisted. Responses: 202 `enqueued`, 200 for duplicates and ignored deliveries, 200 `pong`. Blocking DB work runs in the threadpool. |
+| `web/ingest.py` | One transaction holds the delivery row (deduped on `X-GitHub-Delivery`), the installation and repository upserts, the run row and the job (deduped on `(repo, run, attempt)`). Non-analysed conclusions and actions are recorded as `ignored`. |
+| `web/health.py`, `web/app.py` | `/healthz`, `/readyz` (DB ping, returns 503 when the DB is down). App factory with no docs or OpenAPI endpoints. |
+
+### Validation (actually run)
+
+| Command | Result |
+|---|---|
+| `uv run ruff check`, `ruff format --check`, `uv run mypy` (strict, 35 files) | pass |
+| `uv run pytest` (all, slow included) | **127 passed** in 79 s |
+| End-to-end concurrency test | 5 consecutive runs, all passed |
+| Disposable clusters | No leftover clusters or processes after the run |
+| `python3 -I scripts/check_docs.py` | PASS |
+
+### Acceptance-test status after T-106
+
+| Test | Status |
+|---|---|
+| AT-EVT-01, AT-EVT-02 | **Passed** (REPLAY, synthetic payloads) |
+| AT-EVT-05 | **Passed**: 100 deliveries with the worker stopped, each <1 s; delivery and job joined 1:1; a mid-transaction DB failure rolls everything back, and the redelivery succeeds |
+| AT-EVT-06 | **Passed**: same delivery ×3 (sequential and 24 concurrent requests); a new delivery for the same run; `in_progress` after `completed`; a re-run attempt enqueues a new job |
+| AT-SEC-02 | **Passed**: missing, invalid, wrong-algorithm, wrong-secret and tampered signatures → 401 with no rows; >25 MB → 413 (declared and streamed) |
+| AT-EVT-03 | **Partial**: `timed_out` enqueues a job. "The report mentions the timeout" needs T-501. |
+| AT-REL-04 | **Partial**: 50 deliveries from one installation through the webhook and 6 real workers peaked at ≤2 concurrent, and the other installation finished in less than half the backlog time. The handler is a stub until the analysis pipeline exists. |
+| AT-EVT-04 | LIVE (G-PLAT-1); gated |
+
+**Note:** Starlette warns that its test client should move from `httpx` to `httpx2`. This is a test-only dependency; it will be revisited when the dependency is bumped.
+
 ## 2026-10-18 (c): T-104 schema and repositories, T-105 job queue and worker
 
 ### Code
