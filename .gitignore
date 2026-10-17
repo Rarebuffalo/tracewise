@@ -1,0 +1,24 @@
+# Python / tooling
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+.coverage
+htmlcov/
+.tmp/
+
+# Secrets and local config (never commit)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Quarantined evidence (D-3): kept untouched on disk, never in git history.
+# See research/final-audit/PROVENANCE-QUARANTINE.md
+research/final-audit/evidence/
