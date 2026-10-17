@@ -1,5 +1,45 @@
 # Change Log
 
+## 2026-10-18 (f): T-303 PR association
+
+### Code
+
+| File | Content |
+|---|---|
+| `src/tracewise/github/pulls.py` | `associate_pr`. Calls `/commits/{sha}/pulls` first, then, for forks only, `/pulls?state=open&head=owner:branch`. Keeps open PRs into this repository whose `head.sha` equals the run's SHA; with several matches, the lowest PR number. No match means a push (commit comment). Never reads `workflow_run.pull_requests`. |
+| `src/tracewise/github/client.py`, `endpoints.py`, `auth.py` | `SCOPES` moved to `endpoints.py`. `RepoClient` now refuses endpoints outside its token scope **before** minting or sending anything. |
+
+### Tests
+
+`tests/unit/test_github_pulls.py` (10 tests):
+
+- same-repo PR;
+- fork PR via the `head=` filter;
+- fork with no match is treated as a push;
+- the **real recorded** pallets/flask response (closed, merged PR) is not associated; the same data marked open is;
+- stale head, closed and other-base PRs are ignored;
+- lowest number wins;
+- no `head=` lookup for same-repo runs;
+- the analysis scope cannot list pulls.
+
+A further test in `test_github_client.py` covers scope enforcement in both directions, with no requests made.
+
+### Validation (actually run)
+
+| Command | Result |
+|---|---|
+| `uv run ruff check src tests scripts`, `ruff format --check` | pass (66 files) |
+| `uv run mypy` | no issues in 40 files |
+| `uv run pytest -o addopts="--strict-markers" -p no:warnings` (all, slow included) | **180 passed** in 81.2 s |
+| `python3 -I scripts/check_docs.py` | PASS |
+
+### Acceptance-test status
+
+| Test | Status |
+|---|---|
+| AT-PUB-09 | REPLAY **association half passed**. "→ PR comment on #n" needs the publisher (T-502). |
+| AT-PUB-10 | REPLAY **association half passed**. The LIVE half (G-PLAT-4, real fork behaviour) is gated. |
+
 ## 2026-10-18 (e): T-301 GitHub App auth, T-302 REST client
 
 ### Code

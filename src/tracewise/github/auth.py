@@ -23,7 +23,7 @@ import jwt
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
 from cryptography.hazmat.primitives.serialization import load_pem_private_key
 
-from tracewise.github.endpoints import ANALYSIS_SCOPE, APP_PERMISSIONS, PUBLISH_SCOPE, Access
+from tracewise.github.endpoints import APP_PERMISSIONS, SCOPES, Access
 from tracewise.github.errors import InstallationUnavailable, TokenScopeError
 from tracewise.logging import secret_filter
 
@@ -33,7 +33,6 @@ if TYPE_CHECKING:
 JWT_LIFETIME_S = 9 * 60
 JWT_BACKDATE_S = 60
 REFRESH_MARGIN_S = 5 * 60
-SCOPES: dict[str, dict[str, Access]] = {"analysis": ANALYSIS_SCOPE, "publish": PUBLISH_SCOPE}
 
 
 class AppCredentials:

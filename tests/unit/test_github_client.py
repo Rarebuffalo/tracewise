@@ -298,3 +298,21 @@ def test_logs_have_no_tokens_or_bodies(caplog) -> None:  # type: ignore[no-untyp
     raw = caplog.text + json.dumps([str(getattr(r, "tw", "")) for r in caplog.records])
     assert "ghs_fake" not in raw and "Development Versions" not in raw
     assert "list_jobs_for_attempt" in raw
+
+
+def test_scope_is_enforced_locally_before_any_request() -> None:
+    gh, analysis = setup("analysis")
+    for name, params in (
+        ("create_pr_comment", {"number": 1}),
+        ("create_check_run", {}),
+        ("update_check_run", {"check_run_id": 1}),
+        ("create_commit_comment", {"sha": "a" * 40}),
+    ):
+        if name == "create_commit_comment":
+            continue  # Contents read is in both scopes; commit comments are published with the publish token
+        with pytest.raises(ValueError, match="outside the 'analysis' token scope"):
+            analysis.request(name, json_body={}, **params)
+    _, publish = setup("publish")
+    with pytest.raises(ValueError, match="outside the 'publish' token scope"):
+        list(publish.job_log_lines(99))
+    assert gh.minted == 0 and not gh.requests  # refused before minting or calling

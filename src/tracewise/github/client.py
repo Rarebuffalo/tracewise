@@ -31,7 +31,7 @@ from urllib.parse import quote, urlsplit
 import httpx
 
 from tracewise.github import errors as err
-from tracewise.github.endpoints import ENDPOINTS, Endpoint
+from tracewise.github.endpoints import ENDPOINTS, SCOPES, Endpoint, covered
 from tracewise.prepass.sanitize import redact
 
 log = logging.getLogger(__name__)
@@ -317,6 +317,8 @@ class RepoClient:
         owner, _, repo = full_name.partition("/")
         if not owner or not repo or "/" in repo:
             raise ValueError("full_name must be owner/repo")
+        if scope not in SCOPES:
+            raise ValueError(f"unknown token scope {scope!r}")
         self.http, self.tokens = http, tokens
         self.installation_id, self.repo_id, self.scope = installation_id, repo_id, scope
         self._owner, self._repo = owner, repo
@@ -325,6 +327,8 @@ class RepoClient:
         return str(self.tokens.token(self.installation_id, self.repo_id, self.scope).value)
 
     def _path(self, ep: Endpoint, **params: Any) -> str:
+        if not covered(ep.permission, ep.access, SCOPES[self.scope]):
+            raise ValueError(f"{ep.name} needs {ep.permission}:{ep.access}, outside the {self.scope!r} token scope")
         if "owner" in params or "repo" in params:
             raise ValueError("a RepoClient is bound to one repository; owner/repo cannot be overridden")
         return _fill(ep.path, {**params, "owner": self._owner, "repo": self._repo})

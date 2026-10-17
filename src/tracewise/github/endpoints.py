@@ -26,6 +26,7 @@ APP_PERMISSIONS: dict[str, Access] = {
 # Per-purpose token scopes: each token gets only what its phase needs.
 ANALYSIS_SCOPE: dict[str, Access] = {"actions": "read", "contents": "read", "metadata": "read"}
 PUBLISH_SCOPE: dict[str, Access] = {"contents": "read", "metadata": "read", "pull_requests": "write", "checks": "write"}
+SCOPES: dict[str, dict[str, Access]] = {"analysis": ANALYSIS_SCOPE, "publish": PUBLISH_SCOPE}
 
 
 @dataclass(frozen=True)
