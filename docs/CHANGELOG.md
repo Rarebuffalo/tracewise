@@ -1,5 +1,32 @@
 # Change Log
 
+## 2026-10-19 (ad): Phase 15 independent end-to-end verification
+
+The Phase 10 chain test was reviewed. It uses the real app, queue, worker, recovery and purge, but it did not prove four things:
+- the tenant role was in use;
+- evidence collection happened;
+- the PR surfaces were covered;
+- tampered signatures were rejected.
+
+**New:** `tests/db/test_full_chain.py`, parametrized for push and pull_request. It:
+- rejects a tampered body (nothing recorded);
+- retries a transient Check Run failure (2 attempts);
+- verifies a stage mark for each step: the log API and its blob redirect requested, an excerpt from the log in the validated diagnosis, provider recorded as `fake`, the code-context location in the published body;
+- shows exactly one write per surface, with no commit comment on a matched PR;
+- shows **every analysis and publisher transaction ran as `tracewise_app` with tenant 9**, audited per transaction;
+- runs recovery through its real paths (already received; sweep duplicate);
+- uninstalls and purges, then checks no write after the purge and no token for any other installation.
+
+### Repeat runs
+
+| Run | Result |
+|---|---|
+| Chain tests ×5 | all passed |
+| DB suite ×2 | 236 passed each |
+| DB suite in reverse file order | 236 passed |
+
+SIMULATED: GitHub API, model, git host.
+
 ## 2026-10-19 (ac): Phase 14 observability and retention verification
 
 ### Defects fixed (tests written first)
