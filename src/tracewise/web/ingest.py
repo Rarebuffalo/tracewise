@@ -16,7 +16,16 @@ from tracewise.db import repositories as repo
 from tracewise.db.session import Conn, transaction
 from tracewise.jobs import queue
 
-Outcome = Literal["enqueued", "duplicate_delivery", "duplicate_run", "ignored", "rejected"]
+Outcome = Literal[
+    "enqueued",
+    "duplicate_delivery",
+    "duplicate_run",
+    "ignored",
+    "rejected",
+    "repo_not_in_scope",
+    "repo_disabled",
+    "installation_inactive",
+]
 ANALYZE = "analyze"
 
 
@@ -36,6 +45,10 @@ def ingest_workflow_run(
             return IngestResult("duplicate_delivery")
         if not event.should_analyse():
             return IngestResult("ignored")  # e.g. in_progress, success, startup_failure (gated)
+        refusal = repo.ingest_scope(conn, inst, event.repository.id)  # T-701: AT-INS-04, FS-INS-3
+        if refusal is not None:
+            repo.set_delivery_outcome(conn, delivery_id, refusal, None)  # type: ignore[arg-type]
+            return IngestResult(refusal)  # type: ignore[arg-type]
         run = event.workflow_run
         repo.upsert_installation(conn, inst)
         repo.upsert_repository(conn, event.repository.id, inst, event.repository.full_name)

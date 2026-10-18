@@ -207,6 +207,24 @@ def cancel(conn: Conn, job_id: int) -> bool:
     return cur.rowcount == 1
 
 
+def cancel_pending(conn: Conn, *, installation_id: int, reason: str, repo_id: int | None = None) -> int:
+    """Cancel queued/retry_wait jobs of an installation (or one of its repositories). Running jobs are left to
+    their lease owner, which re-checks scope before any GitHub write (T-701)."""
+    if repo_id is None:
+        cur = conn.execute(
+            """UPDATE job SET status = 'cancelled', finished_at = now(), last_error = %s, updated_at = now()
+               WHERE installation_id = %s AND status IN ('queued', 'retry_wait')""",
+            (short_error(reason, 200), installation_id),
+        )
+    else:
+        cur = conn.execute(
+            """UPDATE job SET status = 'cancelled', finished_at = now(), last_error = %s, updated_at = now()
+               WHERE installation_id = %s AND status IN ('queued', 'retry_wait') AND (payload->>'repo_id')::bigint = %s""",
+            (short_error(reason, 200), installation_id, repo_id),
+        )
+    return cur.rowcount
+
+
 def cancel_running(conn: Conn, job_id: int, worker_id: str, reason: str) -> bool:
     """running → cancelled, only by the lease owner (FS-INS-3 `cancelled_uninstalled`, disabled repositories)."""
     cur = conn.execute(

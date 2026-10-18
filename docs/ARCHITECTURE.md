@@ -144,11 +144,26 @@ See [SPEC.md](SPEC.md) FS-SEC-*, and [ACCEPTANCE-TESTS.md](ACCEPTANCE-TESTS.md) 
 | Failures | Provider timeout/failure: retry ≤2, then "could not complete" (Check Run + PR comment; no commit comment). Logs 404/410, or a read 403: metadata or missing-permission notice, no retry. 403 on a surface: `unpublished_permission` plus the permission recorded; the Check Run names it; other surfaces continue. Transient GitHub/DB errors: retry with backoff (honouring `retry-after`; 10-min deadline). Unexpected exceptions: retry, then `dead`; a best-effort could-not-complete notice on the last attempt; never reported as success. Lease lost: no further writes. D-8, D-9. |
 | Connection use | A publication holds one pool connection during its GitHub call (bounded by client timeouts). Pool size must exceed the worker concurrency. |
 
+### 4.5 Installation lifecycle (T-701)
+
+| Event | Effect (one transaction with the delivery row; duplicates are no-ops) |
+|---|---|
+| `installation.created` / `unsuspend` | Installation `active` (unless `deleted`: no resurrection); payload repositories granted |
+| `installation.suspend` | `suspended`; queued/retry_wait jobs → `cancelled` (`installation_suspended`) |
+| `installation.deleted` | `deleted`, `deleted_at`, `purge_after = +7 days` (purge itself is T-704); pending jobs → `cancelled` (`cancelled_uninstalled`) |
+| `installation_repositories.added` | `removed_at` cleared (the Tracewise `enabled` toggle is kept) |
+| `installation_repositories.removed` | `removed_at` set, only for repositories owned by this installation; their pending jobs → `cancelled` (`repo_not_in_scope`) |
+| `workflow_run` failure | Refused at ingestion with `installation_inactive`, `repo_not_in_scope` or `repo_disabled` (AT-INS-04); no job |
+| Running job | Scope re-checked after investigation and before persisting or publishing → `cancelled` with the reason; a refused token mint → `cancelled_uninstalled`. No GitHub write happens for any of these. |
+
+Validation: lifecycle payloads are HMAC-verified and schema-validated (ids > 0, `owner/repo` names). Invalid payloads → 400, recorded as `rejected`, no state change. Historical analyses and publications are kept (purge is T-704).
+
 ## 5. Open architectural items
 
 | ID | Item | Resolved by |
 |---|---|---|
 | G-PLAT-1…7 | Live platform behaviours (startup_failure, re-run delivery, output limits, forks, commit comment with Contents read, uninstall, declined permissions) | LIVE tests after you approve a test org |
+| G-PLAT-11 | **Publish-token scope bundling.** The `publish` token requests Pull requests write **and** Checks write together. If an installation declined one permission, GitHub may refuse the whole mint (422), which would block the Check Run as well and contradict AT-REL-05's intent (Check Run published, naming the missing permission). Offline tests simulate a 403 on the write, not a mint refusal. A fix would mint one token per surface. | LIVE (G-PLAT-7), then a design change for review |
 | G-PLAT-10 | Publication reconciliation relies on `performed_via_github_app.id` (comments) and `app.id` / `external_id` (check runs) in GitHub's list responses, and on those lists reflecting a just-accepted write. Verified only against the fake API. | LIVE (T-801…T-803) |
 | G-PLAT-9 | github.com accepting `fetch --depth=1 --filter=blob:limit=1m <sha>` with an installation token in a Basic header (verified only against local `git http-backend`) | LIVE (T-801…T-803) |
 | G-PLAT-8 | **Log-redirect host allowlist** (`*.actions.githubusercontent.com`, `*.blob.core.windows.net`) is an assumption: GitHub documents the 302 but not its host. If the real host differs, logs fail closed (`UnsafeRedirect`). It also needs checking that the token grant response echoes `repositories`. | LIVE (T-801…T-803) |

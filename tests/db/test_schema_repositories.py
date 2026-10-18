@@ -185,3 +185,13 @@ def test_unpublished_permission_never_overwrites_published(pool) -> None:  # typ
     assert row == {"state": "published", "missing_permission": None, "source_attempt": 1}
     with pytest.raises(psycopg.errors.CheckViolation), transaction(pool) as c:
         c.execute("UPDATE publication SET content_digest = 'nothex' WHERE id = %s", (p["id"],))
+
+
+def test_migration_0003_roundtrip_and_lifecycle_outcomes(pg, owner) -> None:  # type: ignore[no-untyped-def]
+    owner.execute("INSERT INTO webhook_delivery (delivery_id, event, outcome) VALUES ('x', 'workflow_run', 'repo_not_in_scope')")
+    downgrade(pg.url(OWNER), "0002")
+    assert owner.execute("SELECT outcome FROM webhook_delivery WHERE delivery_id='x'").fetchone() == ("ignored",)
+    with pytest.raises(psycopg.errors.CheckViolation):
+        owner.execute("INSERT INTO webhook_delivery (delivery_id, event, outcome) VALUES ('y', 'e', 'processed')")
+    upgrade(pg.url(OWNER))
+    owner.execute("INSERT INTO webhook_delivery (delivery_id, event, outcome) VALUES ('z', 'e', 'installation_inactive')")
