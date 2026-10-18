@@ -123,4 +123,7 @@ def main(argv: list[str] | None = None, build: Callable[[], ConnectionPool[Conn]
 
 
 if __name__ == "__main__":  # pragma: no cover
+    from tracewise.logging import configure_cli
+
+    configure_cli()
     sys.exit(main())

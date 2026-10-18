@@ -91,3 +91,27 @@ def test_analyze_handler_cannot_be_built_on_the_system_pool(pool) -> None:  # ty
     deps = AnalyzeDeps(pool, None, None, 1, provider_factory=lambda: None, fetcher_factory=lambda: None)  # type: ignore[arg-type]
     with pytest.raises(WrongDatabaseRole):
         make_analyze_handler(deps)
+
+
+def test_every_security_definer_function_pins_pg_temp_last_and_is_not_public(owner) -> None:  # type: ignore[no-untyped-def]
+    """Phase 11 audit (SA-5): a definer function without `pg_temp` last resolves the caller's temp tables first."""
+    rows = owner.execute(
+        """SELECT p.proname, p.proconfig, has_function_privilege('public', p.oid, 'EXECUTE')
+           FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.prosecdef"""
+    ).fetchall()
+    assert rows, "expected at least the purge function"
+    for name, config, public_exec in rows:
+        paths = [c.split("=", 1)[1] for c in (config or []) if c.startswith("search_path=")]
+        assert paths and paths[0].replace(" ", "").split(",")[-1] == "pg_temp", (name, config)
+        assert public_exec is False, name
+
+
+def test_migration_0009_roundtrip(pg, owner) -> None:  # type: ignore[no-untyped-def]
+    downgrade(pg.url(OWNER), "0008")
+    assert owner.execute("SELECT proconfig FROM pg_proc WHERE proname='tracewise_purge'").fetchone() == (
+        ["search_path=pg_catalog, public"],
+    )
+    upgrade(pg.url(OWNER))
+    assert owner.execute("SELECT proconfig FROM pg_proc WHERE proname='tracewise_purge'").fetchone() == (
+        ["search_path=pg_catalog, public, pg_temp"],
+    )

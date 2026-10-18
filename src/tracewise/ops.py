@@ -25,7 +25,7 @@ from typing import Any
 
 from psycopg_pool import ConnectionPool
 
-from tracewise.db.session import Conn, transaction
+from tracewise.db.session import Conn, DatabaseUnavailable, transaction
 from tracewise.observe import event
 
 log = logging.getLogger(__name__)
@@ -41,8 +41,12 @@ class AlertRule:
     provisional operating values, not measured ones; tune them once real traffic exists.
     """
 
-    threshold: float = 0.2
+    threshold: float = 0.2  # PROVISIONAL: not a user-approved SLO (review queue)
     min_sample: int = 10
+
+    def __post_init__(self) -> None:
+        if not 0 < self.threshold <= 1 or isinstance(self.min_sample, bool) or self.min_sample < 1:
+            raise ValueError("threshold must be in (0, 1] and min_sample >= 1")
 
 
 DEFAULT_RULE = AlertRule()
@@ -161,6 +165,7 @@ def failure_rate(
         "could_not_complete": int(r["cnc"]),
         "finished": finished,
         "threshold": rule.threshold,
+        "threshold_status": "provisional" if rule == DEFAULT_RULE else "operator_supplied",
         "min_sample": rule.min_sample,
         "window_s": int(window.total_seconds()),
     }
@@ -188,16 +193,27 @@ def main(argv: list[str] | None = None, build: Callable[[], ConnectionPool[Conn]
     a = ap.parse_args(argv)
     pool = build()
     try:
-        if a.command == "report":
-            doc = report(pool, window=timedelta(hours=a.window_hours or 24))
-            print(json.dumps(doc, sort_keys=True))
-            return 0
-        res = failure_rate(pool, AlertRule(a.threshold, a.min_sample), window=timedelta(hours=a.window_hours or 1))
-        print(json.dumps(res, sort_keys=True))
-        return 2 if res["state"] == "firing" else 0
+        return _run(a, pool)
+    except DatabaseUnavailable as e:
+        event(log, "ops.failed", logging.ERROR, error_type=type(e).__name__, command=a.command)
+        print(json.dumps({"error": "database_unavailable", "command": a.command}))
+        return 1
     finally:
         pool.close()
 
 
+def _run(a: argparse.Namespace, pool: ConnectionPool[Conn]) -> int:
+    if a.command == "report":
+        doc = report(pool, window=timedelta(hours=a.window_hours or 24))
+        print(json.dumps(doc, sort_keys=True))
+        return 0
+    res = failure_rate(pool, AlertRule(a.threshold, a.min_sample), window=timedelta(hours=a.window_hours or 1))
+    print(json.dumps(res, sort_keys=True))
+    return 2 if res["state"] == "firing" else 0
+
+
 if __name__ == "__main__":  # pragma: no cover
+    from tracewise.logging import configure_cli
+
+    configure_cli()
     sys.exit(main())

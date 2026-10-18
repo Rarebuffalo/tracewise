@@ -76,3 +76,23 @@ def test_url_query_strings_are_redacted_and_request_url_loggers_quieted() -> Non
         assert all(logging.getLogger(n).getEffectiveLevel() >= logging.WARNING for n in QUIET_LOGGERS)
     finally:
         root.handlers[:], _ = saved[0], root.setLevel(saved[1])
+
+
+def test_nested_fields_are_scrubbed_at_any_depth() -> None:
+    """Phase 11 audit (SA-6): observe.sanitize allows flat dicts and lists; the filter must scrub inside them too."""
+    from tracewise.logging import SecretFilter
+
+    f = SecretFilter()
+    f.register("nested-secret-value")
+    rec = logging.LogRecord("t", logging.INFO, __file__, 1, "m", None, None)
+    rec.tw = {  # type: ignore[attr-defined]
+        "flags": ["ok", "ghs_" + "b" * 36],
+        "stage": {"x": "https://h.example/p?sig=abc", "nested-secret-value": 1},
+        "deep": [[[[[[[["too deep"]]]]]]]],
+        "n": 3,
+    }
+    f.filter(rec)
+    out = repr(rec.tw)  # type: ignore[attr-defined]
+    assert "ghs_bbbb" not in out and "sig=abc" not in out and "nested-secret-value" not in out
+    assert rec.tw["n"] == 3 and rec.tw["stage"]["x"] == "https://h.example/p?[REDACTED]"  # type: ignore[attr-defined]
+    assert "[TRUNCATED]" in out
