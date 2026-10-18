@@ -31,9 +31,9 @@ tracewise/                       repo root (~/tracewise)
 ├─ src/tracewise/
 │  ├─ config.py   logging.py   contracts.py
 │  ├─ web/        app.py  webhooks.py  health.py                 (T-106)
-│  ├─ jobs/       queue.py  worker.py  handlers/                 (T-105, T-701…T-704)
+│  ├─ jobs/       queue.py  worker.py  handlers/analyze.py       (T-105; analyze handler T-502/T-503; T-701…T-704)
 │  ├─ db/         repositories.py  session.py  migrate.py  migrations/   (T-104, T-705)
-│  ├─ github/     endpoints.py  errors.py  auth.py  client.py  pulls.py  publish.py   (T-301…T-303, T-502)
+│  ├─ github/     endpoints.py  errors.py  auth.py  client.py  pulls.py  publish.py   (T-301…T-303, T-502; migration 0002)
 │  ├─ prepass/    envelope.py  sanitize.py  extractors/{python,typescript,generic}.py  primary.py  (T-201…T-206)
 │  ├─ context/    paths.py  source.py  gitfetch.py  contents_api.py  provider.py  tools.py  trigger.py   (T-304…T-306)
 │  ├─ analysis/   collect.py (T-307: steps 2–6, retrieval)  diagnose.py (steps 7–8: investigate → validate → confidence)

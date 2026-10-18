@@ -1,0 +1,270 @@
+"""The `analyze` job handler: the connected product flow (flow steps 1-11, T-502/T-503).
+
+  validated job → collect_evidence → (PR association) → diagnose → persist analysis → render
+  → publish (PR comment | commit comment, + neutral Check Run) → result for the queue
+
+Outcome → job state (FS-ERR-1, FS-ERR-3, FS-LOG-3, FS-INS-3; DECISIONS D-4, D-8, D-9):
+  diagnosed / inconclusive          publish report; succeeded
+  provider timeout/failure          RetryableError while attempts remain (≤2 retries); on the last attempt
+                                    publish "could not complete" (Check Run + PR comment on PRs; no commit
+                                    comment); succeeded with outcome `could_not_complete`
+  logs unavailable                  publish metadata-only report (Check Run + PR comment on PRs); succeeded
+  permission denied (read)          publish "missing permission" (Check Run + PR comment on PRs); succeeded, no retry
+  403 on a publication surface      that surface → `unpublished_permission`; other surfaces still published;
+                                    the Check Run names the missing permission
+  transient GitHub/DB errors        propagate → retry with backoff (honours retry-after; 10-min deadline)
+  installation unavailable / repo disabled → JobCancelled (no-op, no GitHub write)
+  invalid payload / repo or installation mismatch → PermanentError (dead, no GitHub write)
+  unexpected exception              re-raised (retry; never reported as success). On the last attempt a
+                                    best-effort "could not complete" notice is published first.
+  lease lost                        LeaseLost propagates; nothing further is written
+"""
+
+from __future__ import annotations
+
+import dataclasses
+import logging
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from typing import Any
+
+from psycopg_pool import ConnectionPool
+from pydantic import ValidationError
+
+from tracewise.analysis.collect import collect_evidence
+from tracewise.analysis.diagnose import diagnose
+from tracewise.context.gitfetch import GitFetcher
+from tracewise.contracts import AnalysisJob, Status
+from tracewise.db import repositories as repo
+from tracewise.db.session import Conn, transaction
+from tracewise.github import errors as gh_err
+from tracewise.github.auth import TokenProvider
+from tracewise.github.client import GitHubHTTP, RepoClient
+from tracewise.github.publish import Publisher, PublishResult, PublishTarget, marker
+from tracewise.github.pulls import PRAssociation, associate_pr
+from tracewise.investigate.loop import InvestigationLimits
+from tracewise.investigate.provider import Provider
+from tracewise.investigate.validate import ValidatedDiagnosis
+from tracewise.jobs.queue import JobCancelled, PermanentError, RetryableError
+from tracewise.jobs.worker import Handler, JobContext, LeaseLost
+from tracewise.report.render import (
+    DEFAULT_MAX_CHARS,
+    CheckOutput,
+    check_output,
+    publication_notes,
+    render,
+    render_could_not_complete,
+)
+
+log = logging.getLogger(__name__)
+PROVIDER_FAILURES = frozenset({"provider_timeout", "provider_failed"})
+
+
+@dataclass
+class AnalyzeDeps:
+    pool: ConnectionPool[Conn]
+    http: GitHubHTTP
+    tokens: TokenProvider
+    app_id: int
+    provider_factory: Callable[[], Provider]
+    fetcher_factory: Callable[[], GitFetcher | None]
+    limits: InvestigationLimits = field(default_factory=InvestigationLimits)
+    report_max_chars: int = DEFAULT_MAX_CHARS
+    bot_login: str | None = None
+
+
+def _load(ctx: JobContext, deps: AnalyzeDeps) -> AnalysisJob:
+    try:
+        job = AnalysisJob.model_validate(ctx.job.payload)
+    except ValidationError:
+        raise PermanentError("invalid analysis job payload") from None
+    if job.installation_id != ctx.job.installation_id:
+        raise PermanentError("job installation does not match its payload")
+    with transaction(deps.pool) as conn:
+        scope = repo.repository_scope(conn, job.repo_id)
+    if scope is None or scope["installation_id"] != job.installation_id or scope["full_name"].lower() != job.repo.lower():
+        raise PermanentError("repository is not part of the job's installation")
+    if scope["installation_status"] != "active":
+        raise JobCancelled("installation not active")
+    if not scope["enabled"] or scope["removed_at"] is not None:
+        raise JobCancelled("repository disabled or removed")
+    return job
+
+
+def _associate(rc_p: RepoClient, job: AnalysisJob) -> tuple[PRAssociation, str | None]:
+    """PR association by API only (FS-PUB-7). A 403 here means no Pull requests access (AT-REL-05)."""
+    is_fork = job.head_repo_id is not None and job.head_repo_id != job.repo_id
+    try:
+        return associate_pr(
+            rc_p, head_sha=job.head_sha, head_branch=job.head_branch, head_repo_full_name=job.head_repo, is_fork=is_fork
+        ), None
+    except gh_err.PermissionDenied as e:
+        return PRAssociation("error", detail="permission"), e.permission or "pull_requests"
+
+
+def make_analyze_handler(deps: AnalyzeDeps) -> Handler:
+    def handle(ctx: JobContext) -> dict[str, Any]:
+        job = _load(ctx, deps)
+        rc_a = RepoClient(
+            deps.http, deps.tokens, installation_id=job.installation_id, repo_id=job.repo_id, full_name=job.repo, scope="analysis"
+        )
+        rc_p = RepoClient(
+            deps.http, deps.tokens, installation_id=job.installation_id, repo_id=job.repo_id, full_name=job.repo, scope="publish"
+        )
+        last_attempt = ctx.job.attempts >= ctx.job.max_attempts
+        target = PublishTarget(job.installation_id, job.repo_id, job.repo, job.head_sha, job.run_id, job.attempt, job.workflow_id)
+        publisher = Publisher(deps.pool, rc_p, app_id=deps.app_id, check_lease=ctx.check, bot_login=deps.bot_login)
+        try:
+            return _run(ctx, deps, job, rc_a, rc_p, target, publisher, last_attempt)
+        except gh_err.InstallationUnavailable:
+            raise JobCancelled("installation unavailable (token refused)") from None
+        except gh_err.PermissionDenied as e:
+            # Must precede PermanentError (its base class). Reading the run itself is forbidden
+            # (e.g. Actions: read missing): say so on the remaining surfaces, do not retry (FS-ERR-3).
+            res = _publish_notice(deps, job, target, publisher, rc_p, "permission_denied", e.permission)
+            return {"outcome": "permission_denied", "publications": res}
+        except (LeaseLost, JobCancelled, PermanentError, RetryableError):
+            raise
+        except Exception:
+            if last_attempt:  # FS-ERR-1: tell the user, then still fail the job (never reported as success)
+                try:
+                    _publish_notice(deps, job, target, publisher, rc_p, "could_not_complete", None)
+                except Exception:
+                    # Best effort only: the original error is what gets recorded and retried/failed.
+                    log.warning("could-not-complete notice failed", extra={"tw": {"run_id": job.run_id}})
+            raise
+
+    return handle
+
+
+def _run(
+    ctx: JobContext,
+    deps: AnalyzeDeps,
+    job: AnalysisJob,
+    rc_a: RepoClient,
+    rc_p: RepoClient,
+    target: PublishTarget,
+    publisher: Publisher,
+    last_attempt: bool,
+) -> dict[str, Any]:
+    with collect_evidence(job, rc_a, fetcher=deps.fetcher_factory()) as ev:
+        ctx.check()
+        assoc, assoc_permission = _associate(rc_p, job)
+        pr_number = assoc.number if assoc.outcome == "matched" else None
+        vd = diagnose(ev, deps.provider_factory(), limits=deps.limits, pr_number=pr_number)
+    ctx.check()
+    d = vd.diagnosis
+    if d.inconclusive_reason in PROVIDER_FAILURES and not last_attempt:
+        raise RetryableError(f"provider failure ({d.inconclusive_reason})")  # FS-ERR-1: retry ≤2
+    if d.inconclusive_reason in PROVIDER_FAILURES:
+        outcome = "could_not_complete"
+    elif d.status is Status.logs_unavailable:
+        outcome = "logs_unavailable"
+    elif d.status is Status.permission_denied:
+        outcome = "permission_denied"
+    else:
+        outcome = d.status.value  # diagnosed | inconclusive
+
+    analysis_id = _persist(deps, job, vd, outcome)
+    t = dataclasses.replace(target, pr_number=pr_number)
+    missing: dict[str, str | None] = {}
+    results: dict[str, str] = {}
+    completed = outcome in ("diagnosed", "inconclusive")
+
+    if pr_number is not None:
+        r = publisher.pr_comment(
+            t, analysis_id, render(vd, max_chars=deps.report_max_chars, marker=marker("pr_comment", job.workflow_id))
+        )
+        _note(results, missing, r)
+    elif completed:
+        # Push (or D-4: ambiguous/errored association) → the one write-once commit comment (FS-PUB-1).
+        r = publisher.commit_comment(
+            t, analysis_id, render(vd, max_chars=deps.report_max_chars, marker=marker("commit_comment", job.workflow_id))
+        )
+        _note(results, missing, r)
+    if assoc_permission:
+        missing["pr_comment"] = assoc_permission
+        results["pr_comment"] = "unpublished_permission"
+    text = publication_notes(render(vd, max_chars=deps.report_max_chars), missing)
+    r = publisher.check_run(t, analysis_id, check_output(vd, text))
+    _note(results, missing, r)
+    log.info("analysis published", extra={"tw": {"outcome": outcome, "association": assoc.outcome, **results}})
+    return {
+        "outcome": outcome,
+        "analysis_id": analysis_id,
+        "association": assoc.outcome,
+        "candidates": list(assoc.candidates),
+        "publications": results,
+    }
+
+
+def _note(results: dict[str, str], missing: dict[str, str | None], r: PublishResult) -> None:
+    results[r.surface] = r.state
+    if r.state == "unpublished_permission":
+        missing[r.surface] = r.missing_permission
+
+
+def _persist(deps: AnalyzeDeps, job: AnalysisJob, vd: ValidatedDiagnosis | None, status: str) -> int:
+    with transaction(deps.pool) as conn:
+        run_pk = repo.find_workflow_run(conn, job.repo_id, job.run_id, job.attempt) or repo.insert_workflow_run(
+            conn,
+            installation_id=job.installation_id,
+            repo_id=job.repo_id,
+            run_id=job.run_id,
+            attempt=job.attempt,
+            workflow_id=job.workflow_id,
+            head_sha=job.head_sha,
+            head_branch=job.head_branch,
+            head_repo_id=job.head_repo_id,
+            event=job.event,
+            conclusion=job.conclusion,
+        )
+        d = vd.verify() if vd else None
+        return repo.upsert_analysis(
+            conn,
+            installation_id=job.installation_id,
+            run_pk=run_pk,
+            status=status,
+            category=d.category.value if d and d.status is Status.diagnosed else None,
+            confidence_band=d.confidence.band.value if d else None,
+            diagnosis=d.model_dump(mode="json") if d else None,
+            provider=d.usage.provider if d else None,
+            model=d.usage.model if d else None,
+            tokens_in=d.usage.input_tokens if d else None,
+            tokens_out=d.usage.output_tokens if d else None,
+            latency_ms=d.usage.latency_ms if d else None,
+        )
+
+
+def _publish_notice(
+    deps: AnalyzeDeps,
+    job: AnalysisJob,
+    target: PublishTarget,
+    publisher: Publisher,
+    rc_p: RepoClient,
+    status: str,
+    permission: str | None,
+) -> dict[str, str]:
+    """could-not-complete / missing-permission notice: Check Run + PR comment on PRs; never a commit comment."""
+    analysis_id = _persist(deps, job, None, status)
+    reason = "permission_denied" if status == "permission_denied" else "internal"
+
+    def body(mark: str | None) -> str:
+        return render_could_not_complete(
+            job.repo, job.run_id, job.attempt, job.head_sha, reason, marker=mark, permission=permission
+        )
+
+    assoc, _ = _associate(rc_p, job)
+    results: dict[str, str] = {}
+    missing: dict[str, str | None] = {}
+    t = target
+    if assoc.outcome == "matched" and assoc.number is not None:
+        t = dataclasses.replace(target, pr_number=assoc.number)
+        _note(results, missing, publisher.pr_comment(t, analysis_id, body(marker("pr_comment", job.workflow_id))))
+    title = "Missing permission" if status == "permission_denied" else "Could not complete the analysis"
+    _note(
+        results,
+        missing,
+        publisher.check_run(t, analysis_id, CheckOutput(title, title + ".", publication_notes(body(None), missing))),
+    )
+    return results
