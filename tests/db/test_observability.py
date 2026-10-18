@@ -339,3 +339,71 @@ def test_ops_cli_exit_codes_and_refuses_without_config(pool, owner, capsys, monk
     with pytest.raises(SystemExit, match="DATABASE_URL_SYSTEM"):
         ops.build_from_settings()
     get_settings.cache_clear()
+
+
+def test_report_tolerates_malformed_and_incomplete_ops_records(pool, owner) -> None:  # type: ignore[no-untyped-def]
+    """Phase 14: a malformed stage map, a missing record, and missing finish times never break the report."""
+    from tracewise.db.session import transaction as tx
+
+    with tx(pool) as c:
+        repo.set_installation_status(c, 9, "active", "a")
+        for i, stage in enumerate(['{"total": "abc"}', '{"total": 120}', "{}", None, '{"total": -5}']):
+            run = repo.insert_workflow_run(
+                c,
+                installation_id=9,
+                repo_id=1,
+                run_id=900 + i,
+                attempt=1,
+                workflow_id=1,
+                head_sha="d" * 40,
+                head_branch="m",
+                head_repo_id=1,
+                event="push",
+                conclusion="failure",
+            )
+            c.execute(
+                "INSERT INTO analysis (installation_id, run_pk, status, stage_ms, tokens_in)"
+                " VALUES (9, %s, 'diagnosed', %s, NULL)",
+                (run, stage),
+            )
+    owner.execute(
+        "INSERT INTO job (kind, installation_id, dedupe_key, payload, status) VALUES ('analyze', 9, 'q', '{}', 'queued')"
+    )
+    r = ops.report(pool)
+    assert r["analyses"]["total"] == 5 and r["analyses"]["without_ops_record"] == 5  # publish_result never written
+    assert r["latency"]["processing_ms"] == {"n": 1, "p50": 120.0, "p95": 120.0}  # only the valid, non-negative total
+    assert r["latency"]["end_to_end_s"]["n"] == 0 and r["tokens"] == {"in": 0, "out": 0}
+
+
+@pytest.mark.parametrize("stage", ["collect_evidence", "diagnose", "_persist", "check_run"])
+def test_failure_in_each_stage_is_a_retry_event_without_leaking_the_error_text(
+    world: World, cap: Capture, monkeypatch, stage
+) -> None:  # type: ignore[no-untyped-def]
+    from tracewise.github.publish import Publisher
+    from tracewise.jobs.handlers import analyze as a
+
+    secret = "ghs_" + "Z" * 36
+
+    def boom(*_a: Any, **_k: Any) -> Any:
+        raise RuntimeError(f"stage {stage} failed with token {secret}")
+
+    if stage == "check_run":
+        monkeypatch.setattr(Publisher, "check_run", boom)
+    else:
+        monkeypatch.setattr(a, stage, boom)
+    jid = world.enqueue()
+    world.run()
+    (r,) = cap.events("job.retry_scheduled")
+    assert (r["job_id"], r["error_type"], r["new_status"]) == (jid, "RuntimeError", "retry_wait")
+    assert cap.events("analysis.finished") == [] and cap.events("job.succeeded") == []
+    assert secret not in "\n".join(cap.lines)
+    last_error = world.jobrow(jid)["last_error"]
+    assert "RuntimeError" in last_error and secret not in last_error  # stored error text is redacted too
+
+
+def test_ops_report_contains_no_tenant_content(world: World) -> None:
+    world.enqueue()
+    world.run()
+    text = json.dumps(ops.report(world.pool), default=str)
+    for needle in ("acme", "coffee", "pricing.py", "0.21", world.head, "Tests (Python"):
+        assert needle not in text, needle

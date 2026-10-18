@@ -26,6 +26,15 @@ _TOKEN_RE = re.compile(
 _URL_CRED_RE = re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://[^\s:/@]+:)[^\s@/]+@")
 # Query strings can carry signatures (S3/Azure SAS log redirects, `?sig=`, `X-Amz-Signature`) or tokens: never logged.
 _URL_QUERY_RE = re.compile(r"(?i)\b(https?://[^\s?#\"'<>]+)\?[^\s#\"'<>]*")
+# Phase 14 (SA-8): shapes that bypassed the URL rule.
+_ENC_URL_QUERY_RE = re.compile(r"(?i)\b(https?%3A%2F%2F[^\s\"'<>]*?)%3F[^\s\"'<>]*")
+_AUTH_HEADER_RE = re.compile(r"(?i)\b((?:proxy-)?authorization)(['\"]?\s*[:=]\s*['\"]?)(?:(bearer|token|basic)\s+)?[^\s'\",;}]+")
+_BEARER_RE = re.compile(r"(?i)\b(bearer)\s+[A-Za-z0-9._~+/=-]{8,}")
+_COOKIE_RE = re.compile(r"(?i)\b(set-cookie|cookie)(\s*:\s*)[^\r\n]*")
+_SECRET_PARAM_RE = re.compile(
+    r"(?i)\b(x-amz-signature|x-amz-credential|x-amz-security-token|sig|signature|token|access_token|client_secret|jwt)"
+    r"=[^&\s\"'<>]+"
+)
 # Third-party loggers that print full request URLs at INFO (httpx: "HTTP Request: GET <url>").
 QUIET_LOGGERS = ("httpx", "httpcore", "urllib3")
 
@@ -54,6 +63,11 @@ class SecretFilter(logging.Filter):
             text = text.replace(s, "[REDACTED]")
         text = _TOKEN_RE.sub("[REDACTED]", text)
         text = _URL_QUERY_RE.sub(r"\1?[REDACTED]", text)
+        text = _ENC_URL_QUERY_RE.sub(r"\1%3F[REDACTED]", text)
+        text = _COOKIE_RE.sub(r"\1\2[REDACTED]", text)
+        text = _AUTH_HEADER_RE.sub(lambda m: f"{m.group(1)}{m.group(2)}{(m.group(3) or '') and m.group(3) + ' '}[REDACTED]", text)
+        text = _BEARER_RE.sub(r"\1 [REDACTED]", text)
+        text = _SECRET_PARAM_RE.sub(r"\1=[REDACTED]", text)
         return _URL_CRED_RE.sub(r"\1[REDACTED]@", text)
 
     def filter(self, record: logging.LogRecord) -> bool:
