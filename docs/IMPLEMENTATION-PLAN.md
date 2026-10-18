@@ -30,7 +30,8 @@ tracewise/                       repo root (~/tracewise)
 ├─ pyproject.toml  uv.lock  Makefile  .gitignore  .env.example
 ├─ src/tracewise/
 │  ├─ config.py   logging.py   contracts.py
-│  ├─ web/        app.py  webhooks.py  health.py                 (T-106)
+│  ├─ web/        app.py  webhooks.py  ingest.py  lifecycle.py  health.py   (T-106, T-701)
+│  ├─ recovery.py                                                 (T-702: redelivery + failed-run sweep; CLI entry point)
 │  ├─ jobs/       queue.py  worker.py  handlers/analyze.py       (T-105; analyze handler T-502/T-503; T-701…T-704)
 │  ├─ db/         repositories.py  session.py  migrate.py  migrations/   (T-104, T-705)
 │  ├─ github/     endpoints.py  errors.py  auth.py  client.py  pulls.py  publish.py   (T-301…T-303, T-502; migration 0002)

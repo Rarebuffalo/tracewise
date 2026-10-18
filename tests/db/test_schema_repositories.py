@@ -195,3 +195,15 @@ def test_migration_0003_roundtrip_and_lifecycle_outcomes(pg, owner) -> None:  # 
         owner.execute("INSERT INTO webhook_delivery (delivery_id, event, outcome) VALUES ('y', 'e', 'processed')")
     upgrade(pg.url(OWNER))
     owner.execute("INSERT INTO webhook_delivery (delivery_id, event, outcome) VALUES ('z', 'e', 'installation_inactive')")
+
+
+def test_migration_0004_roundtrip_and_runtime_grants(pg, owner, pool) -> None:  # type: ignore[no-untyped-def]
+    with transaction(pool) as c:  # the runtime role may use the recovery tables
+        c.execute("INSERT INTO recovery_checkpoint (key, value) VALUES ('k', 'v')")
+        c.execute("INSERT INTO redelivery_request (guid, github_delivery_id, event) VALUES ('g', 1, 'workflow_run')")
+    with pytest.raises(psycopg.errors.InsufficientPrivilege), transaction(pool) as c:
+        c.execute("DELETE FROM recovery_checkpoint")
+    downgrade(pg.url(OWNER), "0003")
+    assert owner.execute("SELECT to_regclass('public.recovery_checkpoint')").fetchone() == (None,)
+    upgrade(pg.url(OWNER))
+    assert owner.execute("SELECT to_regclass('public.redelivery_request')::text").fetchone() == ("redelivery_request",)

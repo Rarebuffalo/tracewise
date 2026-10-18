@@ -44,7 +44,11 @@ ENDPOINTS: dict[str, Endpoint] = {
     e.name: e
     for e in (
         Endpoint("create_installation_token", "POST", "/app/installations/{installation_id}/access_tokens", None, None, "app"),
+        # T-702 recovery (App JWT; the App's own webhook, no installation permission involved).
+        Endpoint("list_app_hook_deliveries", "GET", "/app/hook/deliveries", None, None, "app", paginated=True),
+        Endpoint("redeliver_app_hook_delivery", "POST", "/app/hook/deliveries/{delivery_id}/attempts", None, None, "app"),
         Endpoint("get_run", "GET", "/repos/{owner}/{repo}/actions/runs/{run_id}", "actions", "read"),
+        Endpoint("list_workflow_runs", "GET", "/repos/{owner}/{repo}/actions/runs", "actions", "read", paginated=True),
         Endpoint(
             "list_jobs_for_attempt",
             "GET",

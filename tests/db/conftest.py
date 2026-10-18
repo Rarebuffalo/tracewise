@@ -15,7 +15,7 @@ from tracewise.db.session import Conn, make_pool
 
 TABLES = (
     "audit_event, usage_event, failure_signature, publication, analysis, job, workflow_run, "
-    "webhook_delivery, repository, installation"
+    "webhook_delivery, repository, installation, recovery_checkpoint, redelivery_request"
 )
 
 if shutil.which("initdb") is None:  # pragma: no cover

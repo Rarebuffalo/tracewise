@@ -104,6 +104,22 @@ class GitHubHTTP:
             raise err.GitHubPermanent(f"{name}: unexpected response shape")
         return doc
 
+    def app_paginate(
+        self, name: str, app_jwt: str, key: str | None, query: dict[str, Any] | None = None
+    ) -> Iterator[dict[str, Any]]:
+        """Paginated App-JWT GET (T-702). Normal error mapping; no installation semantics."""
+        ep = ENDPOINTS[name]
+        if ep.auth != "app" or not ep.paginated:
+            raise ValueError(f"{name} is not a paginated App-JWT endpoint")
+        return self.paginate(ep, _fill(ep.path, {}), app_jwt, key, query)
+
+    def app_post(self, name: str, app_jwt: str, params: dict[str, Any]) -> int:
+        """App-JWT POST without a body (T-702 redelivery). Returns the HTTP status (2xx)."""
+        ep = ENDPOINTS[name]
+        if ep.auth != "app" or ep.method != "POST" or name == "create_installation_token":
+            raise ValueError(f"{name} is not an App-JWT action endpoint")
+        return self._send(ep, _fill(ep.path, params), app_jwt).status_code
+
     def call(
         self, ep: Endpoint, path: str, token: str, *, query: dict[str, Any] | None = None, json_body: dict[str, Any] | None = None
     ) -> httpx.Response:
