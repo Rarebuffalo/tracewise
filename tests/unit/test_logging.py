@@ -57,3 +57,22 @@ def test_openai_requires_key() -> None:
 
     with pytest.raises(ValueError, match="OPENAI_API_KEY"):
         Settings(llm_provider="openai")
+
+
+def test_url_query_strings_are_redacted_and_request_url_loggers_quieted() -> None:
+    """T-706 audit: httpx logs full request URLs at INFO, including signed log-redirect URLs."""
+    from tracewise.logging import QUIET_LOGGERS, SecretFilter, configure
+
+    f = SecretFilter()
+    signed = "GET https://productionresultssa1.blob.core.windows.net/logs/1.txt?sv=2020&sig=AbC%2Fdef&se=2026 done"
+    s3 = 'see "https://bucket.s3.amazonaws.com/k.png?X-Amz-Credential=AKIAEXAMPLE&X-Amz-Signature=ff00"'
+    assert f.scrub(signed) == "GET https://productionresultssa1.blob.core.windows.net/logs/1.txt?[REDACTED] done"
+    assert "AKIAEXAMPLE" not in f.scrub(s3) and "ff00" not in f.scrub(s3)
+    assert f.scrub("https://api.github.com/repos/a/b/check-runs") == "https://api.github.com/repos/a/b/check-runs"
+    root = logging.getLogger()
+    saved = (root.handlers[:], root.level)
+    try:
+        configure()
+        assert all(logging.getLogger(n).getEffectiveLevel() >= logging.WARNING for n in QUIET_LOGGERS)
+    finally:
+        root.handlers[:], _ = saved[0], root.setLevel(saved[1])

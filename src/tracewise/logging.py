@@ -14,6 +14,8 @@ import threading
 from datetime import UTC, datetime
 from typing import Any
 
+from tracewise.observe import current_ids
+
 correlation_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("correlation_id", default=None)
 
 # Token shapes that must never reach a log line, whether registered or not.
@@ -22,6 +24,10 @@ _TOKEN_RE = re.compile(
     r"|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})"
 )
 _URL_CRED_RE = re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://[^\s:/@]+:)[^\s@/]+@")
+# Query strings can carry signatures (S3/Azure SAS log redirects, `?sig=`, `X-Amz-Signature`) or tokens: never logged.
+_URL_QUERY_RE = re.compile(r"(?i)\b(https?://[^\s?#\"'<>]+)\?[^\s#\"'<>]*")
+# Third-party loggers that print full request URLs at INFO (httpx: "HTTP Request: GET <url>").
+QUIET_LOGGERS = ("httpx", "httpcore", "urllib3")
 
 
 class SecretFilter(logging.Filter):
@@ -47,6 +53,7 @@ class SecretFilter(logging.Filter):
         for s in secrets:
             text = text.replace(s, "[REDACTED]")
         text = _TOKEN_RE.sub("[REDACTED]", text)
+        text = _URL_QUERY_RE.sub(r"\1?[REDACTED]", text)
         return _URL_CRED_RE.sub(r"\1[REDACTED]@", text)
 
     def filter(self, record: logging.LogRecord) -> bool:
@@ -70,6 +77,7 @@ class JsonFormatter(logging.Formatter):
             "msg": record.getMessage(),
             "correlation_id": correlation_id.get(),
         }
+        doc.update(current_ids())  # T-706: delivery/job/installation/repo/run ids bound with observe.bind()
         extra = getattr(record, "tw", None)
         if isinstance(extra, dict):
             doc.update(extra)
@@ -90,3 +98,10 @@ def configure(level: int = logging.INFO, secrets: list[str] | None = None) -> No
     root = logging.getLogger()
     root.handlers[:] = [handler]
     root.setLevel(level)
+    quiet_libraries()
+
+
+def quiet_libraries() -> None:
+    """Request-URL loggers only at WARNING and above (their INFO lines include signed log URLs)."""
+    for name in QUIET_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)

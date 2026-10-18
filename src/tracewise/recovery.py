@@ -36,6 +36,7 @@ from tracewise.db.session import Conn, transaction
 from tracewise.github import errors as gh_err
 from tracewise.github.auth import AppCredentials, TokenProvider
 from tracewise.github.client import GitHubHTTP, RepoClient
+from tracewise.observe import event
 from tracewise.web.ingest import ingest_workflow_run
 
 log = logging.getLogger(__name__)
@@ -182,6 +183,15 @@ def redeliver_failed_deliveries(
                        github_delivery_id = EXCLUDED.github_delivery_id, last_status = EXCLUDED.last_status""",
                 (guid, latest["id"], inst if isinstance(inst, int) else None, str(latest.get("event")), t_now, status),
             )
+            event(
+                log,
+                "recovery.redelivery_requested",
+                logging.INFO if status == "requested" else logging.WARNING,
+                delivery_id=guid,
+                installation_id=inst if isinstance(inst, int) else None,
+                gh_event=str(latest.get("event"))[:64],
+                status=status,
+            )
             if status == "requested":
                 s.redelivered += 1
     if s.stopped is None and newest is not None:  # only a complete pass may advance the high-water mark
@@ -266,6 +276,15 @@ def _ingest_run(pool: ConnectionPool[Conn], r: dict[str, Any], run: dict[str, An
         return
     delivery = f"sweep-{r['id']}-{ev.workflow_run.id}-{ev.workflow_run.run_attempt}"
     out = ingest_workflow_run(pool, delivery, ev).outcome
+    event(
+        log,
+        "recovery.run_ingested",
+        delivery_id=delivery,
+        installation_id=r["installation_id"],
+        repo_id=r["id"],
+        run_id=ev.workflow_run.id,
+        outcome=out,
+    )
     if out == "enqueued":
         s.enqueued += 1
     elif out in ("duplicate_run", "duplicate_delivery"):
@@ -276,7 +295,13 @@ def _ingest_run(pool: ConnectionPool[Conn], r: dict[str, Any], run: dict[str, An
 
 def _done(s: RecoverySummary, *, completed: bool) -> RecoverySummary:
     s.completed = completed
-    log.info("recovery pass finished", extra={"tw": {k: v for k, v in s.as_dict().items() if k != "kind"} | {"pass": s.kind}})
+    event(
+        log,
+        "recovery.pass_finished",
+        logging.INFO if completed else logging.WARNING,
+        **{k: v for k, v in s.as_dict().items() if k != "kind"},
+        recovery_pass=s.kind,
+    )
     return s
 
 

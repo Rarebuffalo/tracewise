@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -19,6 +20,7 @@ from tracewise.db.session import Conn, DatabaseUnavailable, transaction
 from tracewise.jobs import queue
 from tracewise.jobs.queue import Job, JobCancelled, PermanentError
 from tracewise.logging import correlation_id
+from tracewise.observe import bind, event
 
 log = logging.getLogger(__name__)
 
@@ -70,13 +72,17 @@ class Worker:
         token = correlation_id.set(f"job-{job.id}-a{job.attempts}")
         ctx = JobContext(job)
         beat = threading.Thread(target=self._heartbeat, args=(ctx,), daemon=True, name=f"hb-{job.id}")
-        beat.start()
-        try:
-            self._execute(ctx)
-        finally:
-            ctx.finished.set()
-            beat.join(timeout=5)
-            correlation_id.reset(token)
+        with bind(job_id=job.id, installation_id=job.installation_id, attempt=job.attempts):
+            event(log, "job.claimed", kind=job.kind, max_attempts=job.max_attempts, worker=self.worker_id)
+            beat.start()
+            t0 = time.monotonic()
+            try:
+                self._execute(ctx)
+            finally:
+                ctx.finished.set()
+                beat.join(timeout=5)
+                correlation_id.reset(token)
+                event(log, "job.processed", duration_ms=int((time.monotonic() - t0) * 1000))
         return True
 
     def _execute(self, ctx: JobContext) -> None:
@@ -87,16 +93,15 @@ class Worker:
                 raise PermanentError(f"no handler for job kind {job.kind!r}")
             result = handler(ctx)
         except LeaseLost:
-            log.warning("job abandoned: lease lost", extra={"tw": {"job_id": job.id}})
+            event(log, "job.lease_lost", logging.WARNING)
             return
         except JobCancelled as e:
             try:
                 with transaction(self.pool) as conn:
                     queue.cancel_running(conn, job.id, self.worker_id, str(e))
+                event(log, "job.cancelled", reason=str(e)[:64])
             except DatabaseUnavailable:
-                log.error(
-                    "could not record cancellation; job will be retried after lease expiry", extra={"tw": {"job_id": job.id}}
-                )
+                event(log, "job.record_failed", logging.ERROR, transition="cancelled")
             return
         except Exception as e:  # every handler failure is classified (retry/dead) and recorded, never swallowed
             self._record_failure(job, e)
@@ -104,19 +109,27 @@ class Worker:
         try:
             with transaction(self.pool) as conn:
                 ok = queue.complete(conn, job.id, self.worker_id, result)
-            if not ok:
-                log.warning("completion ignored: job no longer owned", extra={"tw": {"job_id": job.id}})
+            if ok:
+                event(log, "job.succeeded", outcome=(result or {}).get("outcome"))
+            else:
+                event(log, "job.completion_ignored", logging.WARNING)
         except DatabaseUnavailable:
             # The job stays `running` until its lease expires, then it is retried. Safe because handlers are idempotent.
-            log.error("could not record completion; job will be retried after lease expiry", extra={"tw": {"job_id": job.id}})
+            event(log, "job.record_failed", logging.ERROR, transition="succeeded")
 
     def _record_failure(self, job: Job, err: Exception) -> None:
         try:
             with transaction(self.pool) as conn:
                 status = queue.fail(conn, job.id, self.worker_id, err)
-            log.warning("job failed", extra={"tw": {"job_id": job.id, "error_type": type(err).__name__, "new_status": status}})
+            event(
+                log,
+                "job.retry_scheduled" if status == "retry_wait" else "job.failed",
+                logging.WARNING if status == "retry_wait" else logging.ERROR,
+                error_type=type(err).__name__,
+                new_status=status,
+            )
         except DatabaseUnavailable:
-            log.error("could not record failure; job will be retried after lease expiry", extra={"tw": {"job_id": job.id}})
+            event(log, "job.record_failed", logging.ERROR, transition="failed")
 
     def _heartbeat(self, ctx: JobContext) -> None:
         """Extend the lease every `heartbeat_s` until the job finishes; flag a lost lease."""
@@ -137,6 +150,6 @@ class Worker:
                     self._stop.wait(idle_sleep_s)
                 backoff = idle_sleep_s
             except DatabaseUnavailable:
-                log.error("database unavailable; backing off", extra={"tw": {"sleep_s": backoff}})
+                event(log, "worker.db_unavailable", logging.ERROR, sleep_s=backoff)
                 self._stop.wait(backoff)
                 backoff = min(max_db_backoff_s, backoff * 2)

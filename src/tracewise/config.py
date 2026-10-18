@@ -6,6 +6,7 @@ No personal, global or CLI GitHub credentials are read (FS-SEC-5, ADR-16).
 
 from __future__ import annotations
 
+from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -30,6 +31,9 @@ class Settings(BaseSettings):
     llm_provider: Literal["fake", "openai"] = "fake"
     openai_api_key: SecretStr | None = None
     llm_model: str | None = None
+    # T-706: USD per million tokens. Unset → cost_usd stays NULL ("unpriced"); never guessed (prices are T-605).
+    llm_price_input_per_mtok: Decimal | None = Field(None, ge=0)
+    llm_price_output_per_mtok: Decimal | None = Field(None, ge=0)
 
     investigation_max_tool_calls: int = Field(12, ge=1, le=12)
     investigation_timeout_s: int = Field(120, ge=1, le=120)
