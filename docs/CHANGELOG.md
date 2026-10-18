@@ -1,5 +1,104 @@
 # Change Log
 
+## 2026-10-18 (l): diagnosis engine and report (T-401…T-404, T-501) as a connected offline slice
+
+### Inspection findings (before coding)
+
+- **Task graph:** matches the request. T-401←T-103; T-402←T-401, T-305; T-403←T-402; T-404←T-403; T-501←T-403.
+- **Boundary:** `collect_evidence()` yields `Evidence`, which carries the pre-pass, retained logs, trigger diff, `CodeSource` and `ToolBox`. The source is valid only inside that block.
+- **Gaps found:** `investigate/` and `report/` were empty, and the worker's `analyze` handler is not wired. Wiring it needs publishing (T-502/T-503), which is out of scope.
+- **Contract gap:** FS-DX-4 requires a system-copied snippet and FS-RPT-4 a ≤15-line snippet, but Diagnosis v2 had no field. Added `problem_snippet`, `inconclusive_reason` (fixed code) and `validation_flags` (codes). All three are filled by code only; SPEC §3.1 is updated.
+- **Ambiguity:** FS-DX-7's high-confidence wording, resolved as **D-5** (stricter reading; flagged for review).
+
+### Checklist (acceptance criterion → implementation → test)
+
+| AT / FS | Implementation | Test |
+|---|---|---|
+| AT-SEC-10 | Fixed 4-tool `TOOL_SPECS`; `Provider` exposes only `step` | `test_loop::test_sec10_…` |
+| FS-DX-3 budgets, 1 repair | `investigate/loop.py` | `test_loop` (13 tests on budgets, repair, provider failures) |
+| AT-DX-14 | Rule 2 → 6 in `validate.py` | `test_validate::test_dx14_…` (6 cases) |
+| AT-DX-05 | Snippet copied from the source at `head_sha` | `test_validate::test_b02_…` |
+| AT-DX-12 | `confidence.assess` (D-5) | `test_validate` (high, medium, low, conflict, truncation, every result) |
+| AT-DX-13 | No real error line → inconclusive, provider never called | `test_loop::test_no_error_line_…`; `test_validate::test_statuses_…` |
+| FS-ATR-1 / T-306 rule | Attribution from pre-pass ∪ validated location; unknown when not diagnosed | `test_validate::test_t306_…`, `test_inconclusive_never_clears_the_push` |
+| AT-SEC-07 | `report/render.py` escaping and code spans | `test_render::test_sec07_…`, `test_code_spans_…` |
+| AT-SEC-08 | Delimiting; D-6 H-2 | `test_loop::test_untrusted_…`, `test_validate::test_sec08_…`, e2e injection |
+| AT-RPT-01…09, 11 | Renderer sections and links | `test_render` (16 tests) |
+
+### Code
+
+| File | Interface |
+|---|---|
+| `investigate/provider.py` | `Provider` protocol (`step(StepRequest) -> StepResponse`), message, tool-call, spec and usage types, `ProviderError` / `ProviderTimeout`. No SDK or network. |
+| `investigate/fake.py` | `ScriptedProvider`: deterministic; records requests |
+| `investigate/prompt.py` | Fixed system policy, `TOOL_SPECS`, nonce `Delimiter`, bounded `render_bundle(ev)` (≤24k chars) |
+| `investigate/schema.py` | `ModelDraft` (strict), `parse_draft()`; forbidden fields dropped and reported |
+| `investigate/loop.py` | `investigate(ev, provider, InvestigationLimits)` → `InvestigationResult(outcome, draft, …)`. Outcomes: `answered`, `no_error_line`, `provider_failed`, `provider_timeout`, `budget_exhausted`, `invalid_output`, `unproductive`. `validate_call()`; `InvestigationLimits.from_settings()`. |
+| `investigate/validate.py` | `finalize(ev, inv) -> ValidatedDiagnosis` (rules 1–8, D-6); `ValidatedDiagnosis.verify()` (SHA-256) |
+| `investigate/confidence.py` | `assess()`, `changed_lines()`, `error_evidence()`, `conflicts()` (D-5) |
+| `analysis/diagnose.py` | `diagnose(ev, provider) -> ValidatedDiagnosis` |
+| `report/render.py` | `render(vd, max_chars=60000, marker=None) -> str`; `esc()`, `code()`, `fence()`, `build_links()` |
+| `contracts.py` | Three system-filled Diagnosis fields (above) |
+
+### Bugs found by the tests and fixed
+
+- The causal-claim filter (H-1) missed "the README change in this push caused …", where the noun came before the verb. It now works per sentence.
+- The renderer backslash-escaped text inside inline code spans, which GitHub would display literally. A literal `code()` helper was added.
+
+### Tests added (83)
+
+| File | Tests |
+|---|---|
+| `tests/investigate/test_loop.py` | 29 |
+| `tests/investigate/test_validate.py` | 30 |
+| `tests/report/test_render.py` | 16 |
+| `tests/context/test_diagnose_e2e.py` | 8 |
+| `tests/investigate/factory.py` | Offline evidence from real pytest/ruff output |
+
+**Connected e2e path** (fake GitHub API + local git http-backend + scripted provider): `collect_evidence` → `diagnose` → `render`.
+
+- **Scenarios:** known cause (B-02); determinism over 3 full fresh runs; ambiguous (model abstains); injected log text (unread location rejected; read README plus a `curl | sh` fix → fix dropped, not high, no `curl` or URL in the report); missing code context (git and the API both fail); invalid output twice; provider timeout; budget exhaustion.
+- **Guard during reasoning and rendering:** `socket.connect` raises; every subprocess is either the isolated grep worker or a local `git cat-file`/`ls-tree` with no `fetch`.
+
+### Verification (actually run)
+
+| Command | Result |
+|---|---|
+| `uv run ruff check src tests scripts` | All checks passed |
+| `uv run ruff format --check src tests scripts` | 102 files already formatted |
+| `uv run mypy` (strict) | no issues in 59 source files |
+| `uv run pytest … tests/investigate tests/report tests/context/test_diagnose_e2e.py` | 82 passed (then 83 with the settings test), ×5 runs |
+| `uv run pytest -o addopts="--strict-markers" -p no:warnings` (all, slow included) | **379 passed** in 97.8 s on the final tree (378 before the settings seam was added) |
+| Timing and concurrency subset (git, grep, DB, worker) | 10/10, ×3 runs |
+| `python3 -I scripts/check_docs.py` | PASS |
+
+### Acceptance-test status (honest)
+
+| Test | Status |
+|---|---|
+| AT-SEC-10, AT-DX-05, AT-DX-12, AT-DX-14 | **Passed** (unit/offline) |
+| AT-RPT-01, AT-RPT-02, AT-RPT-04…09, AT-RPT-11, AT-SEC-07 | **Passed** (unit/offline, B-02 replica) |
+| AT-DX-13 | **Partial:** passed on hand-written B-13/B-14-shaped logs (timeout line; `Killed` plus exit 137); rerun on T-602 fixtures |
+| AT-RPT-03 | **Partial:** the ≤800-character limit holds; "2 blind graders" is a human check, not done |
+| AT-SEC-08 | **Partial:** code guarantees hold (delimiting, no unread location, no unsafe command in a fix); "the model does not adopt it" needs a real model (T-605) |
+| AT-DX-01, AT-DX-04, AT-DX-08, AT-DX-09, AT-DX-10, AT-DX-11, AT-DX-06 | **Not met:** model accuracy on BENCH cases. A scripted fake proves the protocol only. Needs T-601…T-605. |
+
+### Task status
+
+- T-401: **in-progress** (OpenAI adapter deferred, D-7).
+- T-402: **in-progress** (implementation complete; its acceptance tests are BENCH/model-accuracy).
+- T-403, T-404, T-501: **done**, with the partial tests above recorded.
+
+### Decisions for review
+
+**D-5** (confidence reading), **D-6** (validator hardening H-1, H-2, H-3), **D-7** (adapter deferral).
+
+### Not done / gaps
+
+- The worker's `analyze` handler is not wired (it needs T-502/T-503 publishing).
+- The grep worker is not OS-sandboxed (unchanged).
+- The 60k report cap is provisional (G-PLAT-3).
+
 ## 2026-10-18 (k): T-307 evidence collection (new task), batch verification
 
 **Why a new task:** the analysis flow's retrieval steps 2–6 were not owned by any task. T-402, the only task depending on T-305, is reasoning and also needs T-401. T-307 was added (0.75 dd); the offline core is now 30.75 dd and the pilot total ≈44.5 dd.

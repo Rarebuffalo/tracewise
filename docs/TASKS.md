@@ -51,12 +51,12 @@ Version 2.0, 2026-10-18. Dependency-ordered. Each task lists the SPEC requiremen
 | T-306 | Trigger diff + `touches_implicated` (code-computed) | FS-CTX-3, FS-ATR-1, FS-SEC-2 | AT-ATR-01, AT-ATR-02, AT-ATR-03, AT-ATR-09 | T-302, T-205 | 0.75 | done |
 | T-307 | Evidence collection stage (flow steps 2–6): failed jobs → their logs → pre-pass → trigger diff → code context → tool box; `logs_unavailable` / `permission_denied` statuses (added 2026-10-18: the flow was unowned in the graph) | FS-LOG-1, FS-LOG-3, FS-CTX-1, FS-CTX-3 | AT-LOG-01, AT-LOG-03 | T-205, T-304, T-305, T-306 | 0.75 | done |
 | **Phase 4: investigation (offline with the fake provider)** | | | | | | |
-| T-401 | Provider interface; deterministic fake provider; OpenAI adapter (not exercised offline) | FS-DX-3 | AT-SEC-10 | T-103 | 1.0 | todo |
-| T-402 | Investigator loop: delimited untrusted data, ≤12 tool calls, ≤120 s, schema output, 1 repair, categories | FS-DX-3, FS-DX-5, FS-DX-6, FS-SEC-1 | AT-DX-01, AT-DX-04, AT-DX-08, AT-DX-09, AT-DX-10, AT-DX-11, AT-SEC-08 | T-401, T-305 | 1.5 | todo |
-| T-403 | Validator rules 1–8; inconclusive fallback | FS-DX-4, FS-DX-5, FS-DX-8, FS-CTX-2, FS-SEC-1 | AT-DX-05, AT-DX-13, AT-DX-14 | T-402 | 1.25 | todo |
-| T-404 | Confidence band + basis (deterministic corroboration) | FS-DX-7 | AT-DX-12 | T-403 | 0.25 | todo |
+| T-401 | Provider interface; deterministic fake provider; OpenAI adapter (not exercised offline) | FS-DX-3 | AT-SEC-10 | T-103 | 1.0 | in-progress |
+| T-402 | Investigator loop: delimited untrusted data, ≤12 tool calls, ≤120 s, schema output, 1 repair, categories | FS-DX-3, FS-DX-5, FS-DX-6, FS-SEC-1 | AT-DX-01, AT-DX-04, AT-DX-08, AT-DX-09, AT-DX-10, AT-DX-11, AT-SEC-08 | T-401, T-305 | 1.5 | in-progress |
+| T-403 | Validator rules 1–8; inconclusive fallback | FS-DX-4, FS-DX-5, FS-DX-8, FS-CTX-2, FS-SEC-1 | AT-DX-05, AT-DX-13, AT-DX-14 | T-402 | 1.25 | done |
+| T-404 | Confidence band + basis (deterministic corroboration) | FS-DX-7 | AT-DX-12 | T-403 | 0.25 | done |
 | **Phase 5: report and publishing (offline with REPLAY)** | | | | | | |
-| T-501 | Renderer: all report sections, escaping, cap, code-built links, AI-agent block, PR merge caveat | FS-RPT-1, FS-RPT-2, FS-RPT-3, FS-RPT-4, FS-RPT-5, FS-RPT-6, FS-RPT-7, FS-RPT-8, FS-RPT-9, FS-RPT-10, FS-CTX-6, FS-SEC-1 | AT-RPT-01, AT-RPT-02, AT-RPT-03, AT-RPT-04, AT-RPT-05, AT-RPT-06, AT-RPT-07, AT-RPT-08, AT-RPT-09, AT-RPT-11, AT-SEC-07 | T-403 | 1.25 | todo |
+| T-501 | Renderer: all report sections, escaping, cap, code-built links, AI-agent block, PR merge caveat | FS-RPT-1, FS-RPT-2, FS-RPT-3, FS-RPT-4, FS-RPT-5, FS-RPT-6, FS-RPT-7, FS-RPT-8, FS-RPT-9, FS-RPT-10, FS-CTX-6, FS-SEC-1 | AT-RPT-01, AT-RPT-02, AT-RPT-03, AT-RPT-04, AT-RPT-05, AT-RPT-06, AT-RPT-07, AT-RPT-08, AT-RPT-09, AT-RPT-11, AT-SEC-07 | T-403 | 1.25 | done |
 | T-502 | Publishers: commit comment (write-once), PR comment (upsert by marker + author), Check Run (neutral, `external_id`, lookup by name); `publication` table idempotency | FS-PUB-1, FS-PUB-2, FS-PUB-3, FS-PUB-4, FS-PUB-5 | AT-PUB-01, AT-PUB-02, AT-PUB-03, AT-PUB-04, AT-PUB-05, AT-PUB-06 | T-501, T-303, T-104 | 1.5 | todo |
 | T-503 | Failure and permission paths: could-not-complete, `logs_unavailable`, `permission_denied`, `unpublished_permission` | FS-ERR-1, FS-ERR-3, FS-LOG-3, FS-PUB-5 | AT-REL-01, AT-REL-05 | T-502 | 0.75 | todo |
 | **Phase 6: offline benchmark** | | | | | | |

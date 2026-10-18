@@ -117,6 +117,21 @@ See [SPEC.md](SPEC.md) FS-SEC-*, and [ACCEPTANCE-TESTS.md](ACCEPTANCE-TESTS.md) 
 | Trigger diff (T-306) | The compare API with validated SHAs: `parent...head` for a push, `base...head` (merge base) for a PR. Truncated at ≥300 files or >250 commits. Filenames from the API pass the same path rules. `touches_implicated` is code-only and three-valued. An unknown diff, a truncated diff with no overlap, or **no implicated paths** gives `null`, never `false`. Callers must pass the pre-pass paths **and** the validated diagnosis location. No statement uses causal wording. |
 | **Residual risk** | While a fetch runs, the token sits in the environment of the `git`/`git-remote-http` child processes and can be read by the **same OS user** through `/proc/<pid>/environ`. Mitigation: run the worker as a dedicated user with no other workloads; the token is repo-scoped, read-only and short-lived. |
 
+### 4.3 Investigation, validation and report (T-401…T-404, T-501)
+
+| Control | Implementation |
+|---|---|
+| Boundary | `collect_evidence()` ends retrieval. `diagnose()` runs inside that block and reasons only over the bundle plus the read-only `ToolBox`. The provider never touches tools, files, network or credentials; the loop dispatches every call. |
+| Provider seam | `investigate/provider.py`: `Provider.step(StepRequest) → StepResponse` (tool calls or final text). Offline: `ScriptedProvider`. No SDK or network dependency (OpenAI adapter: D-7). |
+| Budgets (code-enforced) | ≤12 tool calls (a batch that would exceed is refused whole), ≤120 s wall clock, 200k tokens, 16 iterations, 1 KB of arguments per call, 3 consecutive unproductive steps, 16k-char final answer. Duplicate calls are not re-executed but still count. One repair turn without tools; then `invalid_output`. |
+| Untrusted data | System policy is fixed code. Logs, commands and tool output sit in `<<UNTRUSTED nonce …>>` blocks; delimiter-like sequences inside are neutralised. |
+| Model output | Strict schema (`investigate/schema.py`): category, root cause, why, location, text-only fix, ≤3 next steps, verdicts. Attribution, confidence, files_examined, primary_errors and status are dropped if present (rule 5, ADR-18). |
+| Validation | SPEC §3.2 rules 1–8 plus D-6 hardening; fail closed to `inconclusive` with a fixed reason code. The snippet is copied by code (FS-DX-4). Attribution uses pre-pass paths **plus** the validated location; with no validated diagnosis it is "unknown", never "not implicated". |
+| Confidence | D-5, code-only (`investigate/confidence.py`). |
+| Immutability | `ValidatedDiagnosis` = frozen model + SHA-256 of its canonical JSON. `render()` refuses on mismatch, including in-place list mutation. |
+| Report | `report/render.py`: deterministic; observed facts are labelled separately from the assessment. Prose escaped (HTML, Markdown, @mentions, #refs); code spans literal; fences longer than any inner backtick run. Links only from IDs. Fix shown as text, never applied. Whole low-priority sections dropped to fit the 60k cap; a final redaction pass. |
+| **Open** | AT-SEC-08 depends on model behaviour: the code guarantees no injected command reaches a fix and no unread location is accepted, but a steered model can still name a file it read. That is measured with a real model in T-605. |
+
 ## 5. Open architectural items
 
 | ID | Item | Resolved by |
