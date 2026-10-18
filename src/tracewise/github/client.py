@@ -6,7 +6,9 @@
   → wait until `x-ratelimit-reset`; other secondary limits → wait ≥60 s. Waits up to
   `inline_wait_max_s` happen in-process; longer ones raise `GitHubRetryable(retry_after_s=…)` so
   the job queue reschedules (FS-ERR-2).
-* 5xx and transport errors: ≤`max_retries` inline retries with exponential backoff, then retryable.
+* 5xx and transport errors: ≤`max_retries` inline retries with exponential backoff for GET/PATCH, then
+  retryable. **POST is never retried inline** (it may have been applied without a response); the job is
+  retried instead and the publisher reconciles before creating again.
 * 401: token dropped and re-minted once. 403 (not rate limit) → `PermissionDenied` (no retry loop).
   404 → `NotFound`, 410 → `Gone`, 422 → permanent.
 * Log download: the API answers 302 with a short-lived signed URL. It is followed only when it
@@ -180,7 +182,9 @@ class GitHubHTTP:
                 req = self._client.build_request(ep.method, url, params=query, json=json_body, headers=headers)
                 resp = self._client.send(req, follow_redirects=False, stream=True)
             except httpx.TransportError as e:
-                if attempt > self.limits.max_retries:
+                if ep.method == "POST" or attempt > self.limits.max_retries:
+                    # A POST may have been applied even though no response arrived: never repeat it inline.
+                    # The job retries later and the publisher reconciles before creating (T-502).
                     raise err.GitHubRetryable(f"{ep.name}: transport error ({type(e).__name__})") from None
                 self._sleep(self._backoff(attempt))
                 continue
@@ -201,7 +205,7 @@ class GitHubHTTP:
                 self._sleep(wait)
                 continue
             if status >= 500:
-                if attempt > self.limits.max_retries:
+                if ep.method == "POST" or attempt > self.limits.max_retries:  # same reasoning as above
                     raise err.GitHubRetryable(f"{ep.name}: server error {status}")
                 self._sleep(self._backoff(attempt))
                 continue

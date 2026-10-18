@@ -159,3 +159,29 @@ def test_short_error_redacts_and_caps() -> None:
     e = RuntimeError("401 for token ghs_" + "A" * 36 + " " + "x" * 1000)
     s = repo.short_error(e)
     assert "ghs_" not in s and len(s) == 500
+
+
+def test_migration_0002_roundtrip_and_new_state(pg, owner) -> None:  # type: ignore[no-untyped-def]
+    downgrade(pg.url(OWNER), "0001")
+    cols = {r[0] for r in owner.execute("SELECT column_name FROM information_schema.columns WHERE table_name='publication'")}
+    assert "source_attempt" not in cols
+    upgrade(pg.url(OWNER))
+    cols = {r[0] for r in owner.execute("SELECT column_name FROM information_schema.columns WHERE table_name='publication'")}
+    assert {"source_run_id", "source_attempt", "content_digest", "missing_permission"} <= cols
+
+
+def test_unpublished_permission_never_overwrites_published(pool) -> None:  # type: ignore[no-untyped-def]
+    with transaction(pool) as c:
+        a = repo.upsert_analysis(
+            c, installation_id=9, run_pk=_run(c), status="diagnosed", category=None, confidence_band=None, diagnosis=None
+        )
+        p = repo.reserve_publication(c, installation_id=9, analysis_id=a, surface="pr_comment", target_key="k")
+        repo.mark_unpublished_permission(c, p["id"], "pull_requests=write")
+        row = c.execute("SELECT state, missing_permission FROM publication WHERE id=%s", (p["id"],)).fetchone()
+        assert row == {"state": "unpublished_permission", "missing_permission": "pull_requests=write"}
+        repo.mark_published(c, p["id"], a, 9, source_run_id=55, source_attempt=1, content_digest="a" * 64)
+        repo.mark_unpublished_permission(c, p["id"], "x")
+        row = c.execute("SELECT state, missing_permission, source_attempt FROM publication WHERE id=%s", (p["id"],)).fetchone()
+    assert row == {"state": "published", "missing_permission": None, "source_attempt": 1}
+    with pytest.raises(psycopg.errors.CheckViolation), transaction(pool) as c:
+        c.execute("UPDATE publication SET content_digest = 'nothex' WHERE id = %s", (p["id"],))

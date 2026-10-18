@@ -65,6 +65,9 @@ ENDPOINTS: dict[str, Endpoint] = {
         Endpoint("list_pulls", "GET", "/repos/{owner}/{repo}/pulls", "pull_requests", "read", paginated=True),
         Endpoint("create_commit_comment", "POST", "/repos/{owner}/{repo}/commits/{sha}/comments", "contents", "read"),
         Endpoint(
+            "list_commit_comments", "GET", "/repos/{owner}/{repo}/commits/{sha}/comments", "contents", "read", paginated=True
+        ),
+        Endpoint(
             "list_pr_comments", "GET", "/repos/{owner}/{repo}/issues/{number}/comments", "pull_requests", "read", paginated=True
         ),
         Endpoint("create_pr_comment", "POST", "/repos/{owner}/{repo}/issues/{number}/comments", "pull_requests", "write"),
