@@ -1,5 +1,84 @@
 # Change Log
 
+## 2026-10-18 (m): publication (T-502), failure outcomes (T-503) and the wired `analyze` worker
+
+### Inspection
+
+- **State:** clean tree on `main` at `803913d`; one migration (0001); no remote.
+- **Gaps found:**
+  - No `analyze` handler was registered, so enqueued jobs were never processed.
+  - The `publication` table could not represent `unpublished_permission` (FS-PUB-5), which attempt last wrote a surface, or a content digest.
+  - **Bug in T-302:** `GitHubHTTP` retried POST inline on transport errors and 5xx, which could duplicate a comment or check run when GitHub had applied the write but the response was lost. POST is no longer retried inline.
+
+**Decision review:**
+
+| Decision | Outcome |
+|---|---|
+| D-4 | Kept; scope tightened by D-8 (the fallback applies to completed analyses only) |
+| D-5, D-6 | Kept (stricter than the spec) |
+| D-7 | Kept (provider stays injectable) |
+| D-8, D-9 | New (flagged) |
+
+### Acceptance criterion → implementation → test
+
+| AT | Implementation | Test (`tests/db/test_analyze_worker.py` unless noted) |
+|---|---|---|
+| AT-PUB-01 | Commit comment (write-once) + neutral Check Run | `test_01` |
+| AT-PUB-02 | PR comment via API association; no commit comment | `test_02` |
+| AT-PUB-03 | `Tracewise`, `neutral`, `external_id=run_id`, report in `output.text`, ≤1 annotation | `test_01`, `assert_neutral` (every test) |
+| AT-PUB-04 | Keys per workflow | `test_pub04_…` |
+| AT-PUB-05 | Re-runs: PR comment and Check Run updated in place; commit comment unchanged | `test_17_…`, `test_pub05_…` |
+| AT-PUB-06 | Fork association + 403 → `unpublished_permission` | `test_pub06_…` ×2 |
+| AT-REL-01 | Provider failure: retry ≤2, then could-not-complete (Check Run + PR comment; no commit comment) | `test_11_…` ×2 |
+| AT-REL-02 | Rate limit / 5xx: job-level backoff; no duplicate publish | `test_05`, `test_14`, `test_06` |
+| AT-REL-05 | No Pull requests write: Check Run published, naming it | `test_10b_…`, `test_pub06_…[False]` |
+| FS-LOG-3 / AT-LOG-03 | Logs 410/403: controlled notices, no retry | `test_09`, `test_10`, `test_jobs_api_forbidden_…` |
+
+### Code
+
+| File | Change |
+|---|---|
+| `db/migrations/versions/0002_publication_state.py` | `source_run_id`, `source_attempt`, `content_digest` (64-hex CHECK), `missing_permission`; adds the `unpublished_permission` state; reversible |
+| `db/repositories.py` | `mark_published(…, source_run_id, source_attempt, content_digest)`; `mark_unpublished_permission` (never overwrites `published`); `find_workflow_run`; `repository_scope` |
+| `github/endpoints.py` | `list_commit_comments` (GET, Contents read, already inside the publish scope); no new permission |
+| `github/client.py` | POST never retried inline |
+| `github/publish.py` | `Publisher.commit_comment / pr_comment / check_run`, `PublishTarget.check()` (installation, repository, SHA, IDs, publish scope); row lock, stale guard, unchanged skip, lease check before each write, reconcile before create, `unpublished_permission` |
+| `report/render.py` | `check_output()`, `render_could_not_complete()` (no exception text), `publication_notes()` |
+| `jobs/queue.py`, `jobs/worker.py` | `JobCancelled` → `cancel_running` (owner only) |
+| `jobs/handlers/analyze.py` | `AnalyzeDeps`, `make_analyze_handler()`: the connected flow and the outcome → job-state mapping |
+| `tests/github_state.py` | Stateful fake publication API with write counting and fault injection |
+
+### Tests (32 new; 411 total)
+
+- `tests/db/test_analyze_worker.py`: 28 tests through the **real `Worker` and the registered handler**, against a disposable Postgres, the local git http-backend, the stateful fake API and the scripted provider. They cover all 18 requested scenarios, plus AT-PUB-04/05/06, a spoofed marker comment, an unexpected bug (never success; notice on the last attempt), the jobs-API 403 notice, and no personal token in requests.
+- **Guards:** only loopback connections are allowed; `GITHUB_TOKEN` and `GH_TOKEN` are set to sentinels and asserted absent from every request.
+- **Assertions:** fake GitHub objects, POST and PATCH counts, publication rows and states, `analysis.status`, and job status, attempts and result.
+- `tests/unit/test_github_client.py`: POST timeout or 502 → exactly one request; PATCH still retried.
+- `tests/db/test_schema_repositories.py`: 0002 down/up; `unpublished_permission` never overwrites `published`; digest CHECK.
+
+### Verification (actually run)
+
+| Command | Result |
+|---|---|
+| `uv run ruff check src tests scripts` | All checks passed |
+| `uv run ruff format --check src tests scripts` | 108 files already formatted |
+| `uv run mypy` (strict) | no issues in 63 source files |
+| Targeted: `pytest tests/db/test_analyze_worker.py tests/db/test_schema_repositories.py tests/unit/test_github_client.py tests/db/test_queue.py tests/db/test_worker.py` | 95 passed (before the last 2 tests were added) |
+| Concurrency, retry, idempotency and crash subset (12 tests), ×5 | 12/12 each time |
+| Full suite `uv run pytest -o addopts="--strict-markers" -p no:warnings` (slow included) | **411 passed** in 121.4 s on the final tree |
+| `python3 -I scripts/check_docs.py` | PASS |
+
+### Status
+
+- T-502 and T-503: **done at REPLAY level**.
+- **LIVE halves stay open** as gates: AT-PUB-01 (G-PLAT-5: commit comment with Contents read), AT-PUB-02/03/05 (LIVE), AT-PUB-06 (G-PLAT-4), AT-PUB-08 (G-PLAT-3: size limits), G-PLAT-10 (attribution fields and list consistency used by reconciliation).
+
+### Not done / honest limits
+
+- **Not exactly-once:** see ARCHITECTURE §4.4 for the remaining window.
+- **Not yet implemented:** the installation lifecycle (T-701), deliveries redelivery and the failed-run sweep (T-702), quotas (T-703), RLS (T-705).
+- **No production entry point:** the worker process that builds `AnalyzeDeps` from settings and an App key does not exist yet, because building it needs real App credentials.
+
 ## 2026-10-18 (l): diagnosis engine and report (T-401…T-404, T-501) as a connected offline slice
 
 ### Inspection findings (before coding)

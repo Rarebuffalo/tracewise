@@ -57,8 +57,8 @@ Version 2.0, 2026-10-18. Dependency-ordered. Each task lists the SPEC requiremen
 | T-404 | Confidence band + basis (deterministic corroboration) | FS-DX-7 | AT-DX-12 | T-403 | 0.25 | done |
 | **Phase 5: report and publishing (offline with REPLAY)** | | | | | | |
 | T-501 | Renderer: all report sections, escaping, cap, code-built links, AI-agent block, PR merge caveat | FS-RPT-1, FS-RPT-2, FS-RPT-3, FS-RPT-4, FS-RPT-5, FS-RPT-6, FS-RPT-7, FS-RPT-8, FS-RPT-9, FS-RPT-10, FS-CTX-6, FS-SEC-1 | AT-RPT-01, AT-RPT-02, AT-RPT-03, AT-RPT-04, AT-RPT-05, AT-RPT-06, AT-RPT-07, AT-RPT-08, AT-RPT-09, AT-RPT-11, AT-SEC-07 | T-403 | 1.25 | done |
-| T-502 | Publishers: commit comment (write-once), PR comment (upsert by marker + author), Check Run (neutral, `external_id`, lookup by name); `publication` table idempotency | FS-PUB-1, FS-PUB-2, FS-PUB-3, FS-PUB-4, FS-PUB-5 | AT-PUB-01, AT-PUB-02, AT-PUB-03, AT-PUB-04, AT-PUB-05, AT-PUB-06 | T-501, T-303, T-104 | 1.5 | todo |
-| T-503 | Failure and permission paths: could-not-complete, `logs_unavailable`, `permission_denied`, `unpublished_permission` | FS-ERR-1, FS-ERR-3, FS-LOG-3, FS-PUB-5 | AT-REL-01, AT-REL-05 | T-502 | 0.75 | todo |
+| T-502 | Publishers: commit comment (write-once), PR comment (upsert by marker + author), Check Run (neutral, `external_id`, lookup by name); `publication` table idempotency | FS-PUB-1, FS-PUB-2, FS-PUB-3, FS-PUB-4, FS-PUB-5 | AT-PUB-01, AT-PUB-02, AT-PUB-03, AT-PUB-04, AT-PUB-05, AT-PUB-06 | T-501, T-303, T-104 | 1.5 | done |
+| T-503 | Failure and permission paths: could-not-complete, `logs_unavailable`, `permission_denied`, `unpublished_permission` | FS-ERR-1, FS-ERR-3, FS-LOG-3, FS-PUB-5 | AT-REL-01, AT-REL-05 | T-502 | 0.75 | done |
 | **Phase 6: offline benchmark** | | | | | | |
 | T-601 | Synthetic harness: fixture-repo builder (C0/C1/C2), local tool runs, GitHub-like log envelope, jobs-API fixtures | — | AT-DX-15 | T-201 | 2.0 | todo |
 | T-602 | Cases B-01…B-17, A-04…A-06, E-01…E-06 with committed `truth.yaml` | — | AT-DX-15 | T-601 | 2.0 | todo |

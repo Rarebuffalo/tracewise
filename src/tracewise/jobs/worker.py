@@ -17,7 +17,7 @@ from psycopg_pool import ConnectionPool
 
 from tracewise.db.session import Conn, DatabaseUnavailable, transaction
 from tracewise.jobs import queue
-from tracewise.jobs.queue import Job, PermanentError
+from tracewise.jobs.queue import Job, JobCancelled, PermanentError
 from tracewise.logging import correlation_id
 
 log = logging.getLogger(__name__)
@@ -88,6 +88,15 @@ class Worker:
             result = handler(ctx)
         except LeaseLost:
             log.warning("job abandoned: lease lost", extra={"tw": {"job_id": job.id}})
+            return
+        except JobCancelled as e:
+            try:
+                with transaction(self.pool) as conn:
+                    queue.cancel_running(conn, job.id, self.worker_id, str(e))
+            except DatabaseUnavailable:
+                log.error(
+                    "could not record cancellation; job will be retried after lease expiry", extra={"tw": {"job_id": job.id}}
+                )
             return
         except Exception as e:
             self._record_failure(job, e)

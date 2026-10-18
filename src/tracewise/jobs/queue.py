@@ -7,6 +7,7 @@ State machine (enforced by guarded UPDATEs and table CHECKs):
                         │ └──fail(permanent | attempts/deadline exhausted)──────▶ dead
                         └──lease expired──▶ retry_wait | dead   (reaped at the next claim)
     queued | retry_wait ──cancel──▶ cancelled
+    running ──cancel_running (owner only; JobCancelled no-op)──▶ cancelled
 
 Every transition out of `running` is guarded by `locked_by = <worker>`, so a worker that
 lost its lease can never overwrite the outcome of the worker that reclaimed the job.
@@ -46,6 +47,10 @@ class RetryableError(Exception):
 
 class PermanentError(Exception):
     """Failure that retrying cannot fix (e.g. 403 missing permission, invalid payload)."""
+
+
+class JobCancelled(Exception):
+    """Controlled no-op: the job must not run (e.g. app uninstalled, repository disabled). Not a failure."""
 
 
 @dataclass(frozen=True)
@@ -198,6 +203,17 @@ def cancel(conn: Conn, job_id: int) -> bool:
         """UPDATE job SET status = 'cancelled', finished_at = now(), updated_at = now()
            WHERE id = %s AND status IN ('queued', 'retry_wait')""",
         (job_id,),
+    )
+    return cur.rowcount == 1
+
+
+def cancel_running(conn: Conn, job_id: int, worker_id: str, reason: str) -> bool:
+    """running → cancelled, only by the lease owner (FS-INS-3 `cancelled_uninstalled`, disabled repositories)."""
+    cur = conn.execute(
+        """UPDATE job SET status = 'cancelled', finished_at = now(), locked_by = NULL, locked_until = NULL,
+               last_error = %s, updated_at = now()
+           WHERE id = %s AND status = 'running' AND locked_by = %s""",
+        (short_error(reason, 200), job_id, worker_id),
     )
     return cur.rowcount == 1
 

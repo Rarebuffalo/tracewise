@@ -132,11 +132,24 @@ See [SPEC.md](SPEC.md) FS-SEC-*, and [ACCEPTANCE-TESTS.md](ACCEPTANCE-TESTS.md) 
 | Report | `report/render.py`: deterministic; observed facts are labelled separately from the assessment. Prose escaped (HTML, Markdown, @mentions, #refs); code spans literal; fences longer than any inner backtick run. Links only from IDs. Fix shown as text, never applied. Whole low-priority sections dropped to fit the 60k cap; a final redaction pass. |
 | **Open** | AT-SEC-08 depends on model behaviour: the code guarantees no injected command reaches a fix and no unread location is accepted, but a steered model can still name a file it read. That is measured with a real model in T-605. |
 
+### 4.4 Publication and the worker (T-502, T-503)
+
+| Topic | Implementation |
+|---|---|
+| Flow | `jobs/handlers/analyze.py`, registered as `analyze`: validate payload, then installation/repository scope in the DB → `collect_evidence` → PR association → `diagnose` → persist `analysis` → `render` → publish → result. No GitHub write happens before the scope check. |
+| Identity | Commit comment `repo:sha:workflow` (write-once; DB trigger); PR comment `repo:pr<N>:workflow`, hidden marker `<!-- tracewise:pr:wf<id> -->` plus our App as author; Check Run `repo:run_id` with `external_id=run_id`, name `Tracewise`, **always `neutral`**. |
+| Idempotency | The publication row is locked (`FOR UPDATE`) for the whole external call, so concurrent publishers serialise. Unchanged content is skipped; an older `(run_id, attempt)` never overwrites a newer one (`stale`). **Reconcile before create**: list commit comments, PR comments or check runs and adopt our own object (marker + App id, or `external_id`). |
+| Client rule | **POST is never retried inline** (it may have been applied without a response). The job retries instead, and reconciliation runs first. GET and PATCH keep inline retries. |
+| Remaining window (not exactly-once) | Within one database, duplicates are prevented by the row lock plus reconciliation. A duplicate is still possible if something outside this database creates our marker or `external_id` object between reconciliation and our POST, or if GitHub's list endpoints lag behind a just-accepted write (read-after-write consistency is not documented). |
+| Failures | Provider timeout/failure: retry ≤2, then "could not complete" (Check Run + PR comment; no commit comment). Logs 404/410, or a read 403: metadata or missing-permission notice, no retry. 403 on a surface: `unpublished_permission` plus the permission recorded; the Check Run names it; other surfaces continue. Transient GitHub/DB errors: retry with backoff (honouring `retry-after`; 10-min deadline). Unexpected exceptions: retry, then `dead`; a best-effort could-not-complete notice on the last attempt; never reported as success. Lease lost: no further writes. D-8, D-9. |
+| Connection use | A publication holds one pool connection during its GitHub call (bounded by client timeouts). Pool size must exceed the worker concurrency. |
+
 ## 5. Open architectural items
 
 | ID | Item | Resolved by |
 |---|---|---|
 | G-PLAT-1…7 | Live platform behaviours (startup_failure, re-run delivery, output limits, forks, commit comment with Contents read, uninstall, declined permissions) | LIVE tests after you approve a test org |
+| G-PLAT-10 | Publication reconciliation relies on `performed_via_github_app.id` (comments) and `app.id` / `external_id` (check runs) in GitHub's list responses, and on those lists reflecting a just-accepted write. Verified only against the fake API. | LIVE (T-801…T-803) |
 | G-PLAT-9 | github.com accepting `fetch --depth=1 --filter=blob:limit=1m <sha>` with an installation token in a Basic header (verified only against local `git http-backend`) | LIVE (T-801…T-803) |
 | G-PLAT-8 | **Log-redirect host allowlist** (`*.actions.githubusercontent.com`, `*.blob.core.windows.net`) is an assumption: GitHub documents the 302 but not its host. If the real host differs, logs fail closed (`UnsafeRedirect`). It also needs checking that the token grant response echoes `repositories`. | LIVE (T-801…T-803) |
 | UD-2 | Shallow fetch vs contents API in practice (size, latency) | T-304 measurement |
