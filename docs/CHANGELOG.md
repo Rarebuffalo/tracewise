@@ -1,5 +1,20 @@
 # Change Log
 
+## 2026-10-19 (w): GitHub integration contract audit (Phase 8)
+
+Record: `docs/GITHUB-CONTRACT-AUDIT.md`. Every gate (G-PLAT-1 to G-PLAT-12) is mapped to its recorded documentation, recorded responses and local tests. All of them remain live gates.
+
+### Tests
+
+`tests/db/test_github_contracts.py` (5):
+
+- **F-1:** a simulated refusal of the bundled publish-token mint blocks all three surfaces (pinned; the fix awaits review);
+- a suspension or repository removal mid-job cancels with zero writes;
+- **F-2:** a suspension between surfaces does not stop the remaining writes;
+- **F-3:** a run cancelled while suspended stays `duplicate_run` after `unsuspend`.
+
+No product behaviour changed.
+
 ## 2026-10-19 (v): T-704 retention and tenant purge
 
 **Scope:** FS-SEC-3, FS-INS-3, AT-SEC-12, AT-INS-03 (the "purge" half). Design: ARCHITECTURE §4.9; interpretations D-12 (for review).
