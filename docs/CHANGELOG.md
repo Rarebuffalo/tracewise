@@ -1,5 +1,13 @@
 # Change Log
 
+## 2026-10-19 (y): Final integration and acceptance audit (Phase 10)
+
+- `tests/db/test_cross_phase.py::test_full_chain_webhook_to_retention_purge` covers the full chain. GitHub, the model and the git host are simulated.
+- Full suite: 544 passed. That includes 11 slow tests; there are 0 live tests.
+- `make check`: 533 passed, 11 slow deselected.
+- The slow-inclusive benchmark is identical to Phase 0 (`docs/benchmark-runs/2026-10-19-phase10-final-rerun.md`).
+- Secret, quarantine and leftover scans are clean.
+
 ## 2026-10-19 (x): Benchmark integrity and review queue (Phase 9)
 
 - Truth lock verified; no case file changed since d4745aa.
