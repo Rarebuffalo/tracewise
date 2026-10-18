@@ -1,0 +1,9 @@
+// Jest Snapshot v1
+
+exports[`Button renders label 1`] = `
+<div>
+  <button>
+    Buy now
+  </button>
+</div>
+`;

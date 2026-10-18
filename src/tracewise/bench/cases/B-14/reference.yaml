@@ -1,0 +1,22 @@
+case: B-14
+runs:
+  C1:
+  - answer:
+      category: unknown
+      root_cause: Not determinable.
+      why: The process was killed without a stack.
+      problem_location: null
+      fix: null
+      next_steps:
+      - Check memory usage of tests/test_big.py.
+      file_verdicts: []
+  C2:
+  - answer:
+      category: unknown
+      root_cause: Not determinable.
+      why: The process was killed without a stack.
+      problem_location: null
+      fix: null
+      next_steps:
+      - Check memory usage.
+      file_verdicts: []

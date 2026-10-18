@@ -1,0 +1,33 @@
+case: B-06
+version: 1
+source_type: synthetic-handwritten
+phase: mvp
+runs:
+  C1:
+    category:
+    - dependency
+    location:
+    - path: requirements.txt
+      line: 2
+      tolerance: 1
+    touches_implicated: true
+    fix_expected: false
+    next_step_contains:
+    - foo
+    evidence:
+    - log: 101
+      contains: ResolutionImpossible
+    - file: requirements.txt
+      line: 2
+      contains: bar==2.0
+    rationale: C1 bumped bar to 2.0, which needs foo>=2.0 while foo is pinned to 1.0 (requirements.txt:2).
+  C2:
+    category:
+    - dependency
+    location:
+    - path: requirements.txt
+      line: 2
+      tolerance: 1
+    touches_implicated: false
+    fix_expected: false
+    rationale: C2 only edits README.md.

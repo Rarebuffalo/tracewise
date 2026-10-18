@@ -1,0 +1,28 @@
+id: B-17
+version: 1
+title: 'trap: upstream foo 2.0 breaks parse(); C2 edits a docstring in the traceback module'
+track: B
+source_type: synthetic
+language: python
+repo: bench/b-17
+commits:
+  C1:
+    message: 'ci: refresh the package index'
+    delete: []
+    allow_empty: true
+  C2:
+    message: 'docs: clarify parse() docstring'
+jobs:
+- id: 101
+  name: Tests
+  step: Run pytest
+  command: pytest --tb=short -v
+  exec:
+  - - pytest
+    - --tb=short
+    - -v
+    - -p
+    - no:cacheprovider
+    - tests
+  pythonpath:
+  - env/foo2

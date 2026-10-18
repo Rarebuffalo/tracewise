@@ -1,0 +1,54 @@
+case: B-01
+runs:
+  C1:
+  - tool: read_file
+    args:
+      path: src/lib.ts
+      start: 1
+  - tool: read_file
+    args:
+      path: src/app.ts
+      start: 1
+  - answer:
+      category: code_regression
+      root_cause: src/lib.ts renamed formatPrice to formatAmount, but src/app.ts still imports formatPrice.
+      why: TS2305 reports that ./lib has no exported member formatPrice; src/lib.ts:1 now exports formatAmount.
+      problem_location:
+        path: src/lib.ts
+        line_start: 1
+        line_end: 1
+      fix:
+        description: Export formatPrice again (or update the import in src/app.ts to formatAmount).
+        size: trivial
+        replacement:
+          path: src/lib.ts
+          line_start: 1
+          line_end: 1
+          new_text: 'export function formatPrice(cents: number): string {'
+      next_steps: []
+      file_verdicts:
+      - path: src/lib.ts
+        verdict: export renamed
+      - path: src/app.ts
+        verdict: imports the old name
+  C2:
+  - tool: read_file
+    args:
+      path: src/lib.ts
+      start: 1
+  - tool: read_file
+    args:
+      path: src/app.ts
+      start: 1
+  - answer:
+      category: code_regression
+      root_cause: src/lib.ts exports formatAmount, but src/app.ts imports formatPrice.
+      why: 'TS2305: ./lib has no exported member formatPrice; the export at src/lib.ts:1 is named formatAmount.'
+      problem_location:
+        path: src/lib.ts
+        line_start: 1
+        line_end: 1
+      fix: null
+      next_steps:
+      - Rename the import or restore the export.
+      file_verdicts: []

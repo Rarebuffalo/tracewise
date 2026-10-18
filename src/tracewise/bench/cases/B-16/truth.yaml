@@ -1,0 +1,13 @@
+case: B-16
+version: 1
+source_type: synthetic
+phase: p2
+runs:
+  C1:
+    category: []
+    answerable: either
+    rationale: 'P2: needs outcome tracking on the next run (FS-PUB-6), not implemented in the MVP.'
+  C2:
+    category: []
+    answerable: either
+    rationale: 'P2: needs outcome tracking on the next run (FS-PUB-6), not implemented in the MVP.'

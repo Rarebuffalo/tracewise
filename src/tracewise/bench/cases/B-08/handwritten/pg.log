@@ -1,0 +1,23 @@
+============================= test session starts ==============================
+collected 2 items
+
+tests/test_db.py::test_insert FAILED                                     [ 50%]
+tests/test_db.py::test_select FAILED                                     [100%]
+
+=================================== FAILURES ===================================
+_________________________________ test_insert __________________________________
+tests/test_db.py:5: in test_insert
+    conn = connect()
+app/db.py:6: in connect
+    return psycopg.connect("postgresql://postgres@127.0.0.1:5432/postgres")
+E   psycopg.OperationalError: connection failed: connection to server at "127.0.0.1", port 5432 failed: connection refused
+_________________________________ test_select __________________________________
+tests/test_db.py:9: in test_select
+    conn = connect()
+app/db.py:6: in connect
+    return psycopg.connect("postgresql://postgres@127.0.0.1:5432/postgres")
+E   psycopg.OperationalError: connection failed: connection to server at "127.0.0.1", port 5432 failed: connection refused
+=========================== short test summary info ============================
+FAILED tests/test_db.py::test_insert - psycopg.OperationalError: connection failed: connection refused
+FAILED tests/test_db.py::test_select - psycopg.OperationalError: connection failed: connection refused
+============================== 2 failed in 0.01s ===============================

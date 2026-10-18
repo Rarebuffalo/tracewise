@@ -1,0 +1,10 @@
+case: A-06
+version: 1
+source_type: synthetic-handwritten
+phase: mvp
+runs:
+  C1:
+    first_error_contains: E   assert 1 == 2
+    primaries: 1
+    failed_step: Install and test
+    rationale: Control sequences are stripped and the error line is extracted cleanly.

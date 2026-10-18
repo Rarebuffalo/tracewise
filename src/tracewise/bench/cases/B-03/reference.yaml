@@ -1,0 +1,36 @@
+case: B-03
+runs:
+  C1:
+  - tool: read_file
+    args:
+      path: src/Button.test.tsx
+      start: 1
+  - answer:
+      category: test_defect
+      root_cause: The stored snapshot still expects 'Buy now' after the label changed to 'Purchase'.
+      why: src/Button.test.tsx:10 renders 'Purchase' but the snapshot holds 'Buy now'.
+      problem_location:
+        path: src/Button.test.tsx
+        line_start: 10
+        line_end: 11
+      fix: null
+      next_steps:
+      - If the new label is intended, update the snapshot (npx jest -u).
+      file_verdicts: []
+  C2:
+  - tool: read_file
+    args:
+      path: src/Button.test.tsx
+      start: 1
+  - answer:
+      category: test_defect
+      root_cause: The stored snapshot still expects 'Buy now' after the label changed to 'Purchase'.
+      why: The snapshot is outdated.
+      problem_location:
+        path: src/Button.test.tsx
+        line_start: 11
+        line_end: 11
+      fix: null
+      next_steps:
+      - If intended, update the snapshot (npx jest -u).
+      file_verdicts: []

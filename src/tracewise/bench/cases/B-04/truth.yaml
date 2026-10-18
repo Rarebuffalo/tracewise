@@ -1,0 +1,32 @@
+case: B-04
+version: 1
+source_type: synthetic
+phase: mvp
+runs:
+  C1:
+    category:
+    - flaky_suspect
+    - test_defect
+    answerable: either
+    max_band: medium
+    location:
+    - path: tests/test_flaky.py
+      line: 6
+    touches_implicated: true
+    evidence:
+    - log: 101
+      contains: cache not warm yet
+    must_not:
+    - high_confidence_wrong
+    rationale: Without attempt-2 metadata the flakiness is not provable; inconclusive or <=medium is accepted (AT-DX-11).
+  C2:
+    category:
+    - flaky_suspect
+    - test_defect
+    answerable: either
+    max_band: medium
+    location:
+    - path: tests/test_flaky.py
+      line: 6
+    touches_implicated: false
+    rationale: Same flaky test; C2 only edits README.md.

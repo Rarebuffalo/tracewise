@@ -1,0 +1,41 @@
+case: B-02
+version: 1
+source_type: synthetic
+phase: mvp
+runs:
+  C1:
+    category:
+    - code_regression
+    location:
+    - path: coffee_shop/pricing.py
+      line: 41
+    location_required: true
+    touches_implicated: true
+    siblings_count: 3
+    primaries: 1
+    cascades: 0
+    failed_step: Run pytest
+    first_error_contains: assert 0.21 == 1.21
+    fix_expected: true
+    evidence:
+    - log: 101
+      contains: assert 0.21 == 1.21
+    - file: coffee_shop/pricing.py
+      line: 41
+      contains: subtotal_ * TAX_RATE
+    must_not:
+    - high_confidence_wrong
+    rationale: C1 changed coffee_shop/pricing.py:41 to multiply by TAX_RATE only; four tests expect subtotal plus tax.
+  C2:
+    category:
+    - code_regression
+    location:
+    - path: coffee_shop/pricing.py
+      line: 41
+    location_required: true
+    touches_implicated: false
+    statement_contains:
+    - changed only README.md; not implicated; likely pre-dates this push
+    must_not:
+    - trigger_caused
+    rationale: C2 only edits README.md; the C1 defect persists.

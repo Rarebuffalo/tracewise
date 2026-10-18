@@ -1,0 +1,36 @@
+case: B-08
+runs:
+  C1:
+  - tool: read_file
+    args:
+      path: .github/workflows/ci.yml
+      start: 1
+  - answer:
+      category: config_secret
+      root_cause: The postgres service has no POSTGRES_PASSWORD, so it never starts.
+      why: .github/workflows/ci.yml:10 sets POSTGRES_PASS instead of POSTGRES_PASSWORD; connections are refused.
+      problem_location:
+        path: .github/workflows/ci.yml
+        line_start: 10
+        line_end: 10
+      fix: null
+      next_steps:
+      - Rename POSTGRES_PASS back to POSTGRES_PASSWORD in the service env.
+      file_verdicts: []
+  C2:
+  - tool: read_file
+    args:
+      path: .github/workflows/ci.yml
+      start: 1
+  - answer:
+      category: config_secret
+      root_cause: The postgres service has no POSTGRES_PASSWORD, so it never starts.
+      why: ci.yml:10 uses the wrong variable name.
+      problem_location:
+        path: .github/workflows/ci.yml
+        line_start: 10
+        line_end: 10
+      fix: null
+      next_steps:
+      - Use POSTGRES_PASSWORD.
+      file_verdicts: []

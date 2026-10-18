@@ -1,0 +1,21 @@
+id: A-05
+version: 1
+title: 200 MB log with the only error at line 3,000,000
+track: A
+source_type: synthetic
+language: none
+repo: bench/a-05
+commits:
+  C1:
+    message: 'feat: change'
+    delete: []
+  C2:
+    message: 'docs: update README'
+jobs:
+- id: 101
+  name: big
+  step: Run tests
+  command: pytest
+runs:
+- C1
+synthetic_log: a05_200mb

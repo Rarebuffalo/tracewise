@@ -1,0 +1,34 @@
+case: B-11
+version: 1
+source_type: synthetic
+phase: mvp
+runs:
+  C1:
+    category:
+    - code_regression
+    location:
+    - path: app/stamp.py
+      line: 5
+    - path: app/util.py
+      line: 1
+    location_required: true
+    touches_implicated: true
+    primaries: 2
+    evidence:
+    - log: 101
+      contains: utcnow
+    - log: 102
+      contains: F401
+    rationale: C1 introduced utcnow() (app/stamp.py:5, an error under -W error) and an unused import (app/util.py:1).
+  C2:
+    category:
+    - code_regression
+    location:
+    - path: app/stamp.py
+      line: 5
+    - path: app/util.py
+      line: 1
+    location_required: true
+    touches_implicated: false
+    primaries: 2
+    rationale: C2 only edits README.md.

@@ -1,0 +1,34 @@
+case: B-17
+version: 1
+source_type: synthetic
+phase: mvp
+runs:
+  C1:
+    category:
+    - dependency
+    location:
+    - path: app/parse.py
+      line: 6
+    touches_implicated: false
+    fix_expected: false
+    statement_contains:
+    - not implicated
+    evidence:
+    - log: 101
+      contains: unexpected keyword argument 'strict'
+    must_not:
+    - trigger_caused
+    rationale: foo 2.0 (outside the repo) dropped parse(strict=...); C1 is an empty commit.
+  C2:
+    category:
+    - dependency
+    location:
+    - path: app/parse.py
+      line: 6
+    touches_implicated: true
+    fix_expected: false
+    statement_contains:
+    - signal, not proof
+    must_not:
+    - trigger_caused
+    rationale: 'C2 edits a docstring in app/parse.py, which is in the traceback: touched, but not the cause.'

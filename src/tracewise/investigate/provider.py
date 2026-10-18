@@ -70,7 +70,10 @@ class ProviderTimeout(ProviderError):
 
 
 class Provider(Protocol):
-    name: Literal["openai", "fake"]
-    model: str
+    @property
+    def name(self) -> Literal["openai", "fake"]: ...
+
+    @property
+    def model(self) -> str: ...
 
     def step(self, request: StepRequest) -> StepResponse: ...

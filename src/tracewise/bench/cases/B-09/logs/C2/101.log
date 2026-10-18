@@ -1,0 +1,23 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.7, pytest-8.3.3, pluggy-1.5.0
+rootdir: /home/runner/work/b-09/b-09
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collecting ... collected 1 item
+
+tests/test_rates.py::test_rates FAILED                                   [100%]
+
+=================================== FAILURES ===================================
+__________________________________ test_rates __________________________________
+tests/test_rates.py:5: in test_rates
+    assert fetch_rates()
+           ^^^^^^^^^^^^^
+app/rates.py:5: in fetch_rates
+    return netlib.get("https://rates.example.invalid/v1")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/hostedtoolcache/Python/3.12.7/x64/lib/python3.12/site-packages/netlib/__init__.py:9: in get
+    raise ReadTimeout("HTTPSConnectionPool(host='rates.example.invalid', port=443): Read timed out. (read timeout=5)")
+E   netlib.ReadTimeout: HTTPSConnectionPool(host='rates.example.invalid', port=443): Read timed out. (read timeout=5)
+=========================== short test summary info ============================
+FAILED tests/test_rates.py::test_rates - netlib.ReadTimeout: HTTPSConnectionP...
+============================== 1 failed in 0.01s ===============================

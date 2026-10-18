@@ -1,0 +1,33 @@
+case: B-07
+version: 1
+source_type: synthetic
+phase: mvp
+runs:
+  C1:
+    category:
+    - config_secret
+    location:
+    - path: app/db.py
+      line: 5
+    touches_implicated: true
+    fix_expected: false
+    next_step_contains:
+    - DB_URL
+    evidence:
+    - log: 101
+      contains: 'KeyError: ''DB_URL'''
+    - file: app/db.py
+      line: 5
+      contains: DB_URL
+    rationale: C1 reads DB_URL at app/db.py:5; the workflow provides no such secret.
+  C2:
+    category:
+    - config_secret
+    location:
+    - path: app/db.py
+      line: 5
+    touches_implicated: false
+    fix_expected: false
+    next_step_contains:
+    - DB_URL
+    rationale: C2 only edits README.md.

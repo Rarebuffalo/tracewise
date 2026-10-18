@@ -1,0 +1,22 @@
+id: B-01
+version: 1
+title: 'tsc TS2305: an export renamed in lib.ts breaks its importer'
+track: B
+source_type: synthetic
+language: typescript
+repo: bench/b-01
+commits:
+  C1:
+    message: 'refactor: rename formatPrice to formatAmount'
+    delete: []
+  C2:
+    message: 'docs: update README'
+jobs:
+- id: 101
+  name: typecheck
+  step: Run tsc
+  command: npx tsc -p .
+  exec:
+  - - tsc
+    - -p
+    - .

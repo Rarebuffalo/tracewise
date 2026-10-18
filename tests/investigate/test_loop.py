@@ -34,7 +34,9 @@ def test_sec10_tool_registry_is_read_only_and_provider_has_no_tools() -> None:
     assert tuple(t.name for t in TOOL_SPECS) == TOOL_NAMES == ("read_file", "grep", "list_dir", "get_diff")
     for t in TOOL_SPECS:
         assert not any(w in (t.name + t.description).lower() for w in ("write", "exec", "shell", "http", "fetch", "patch"))
-    assert [n for n, _ in inspect.getmembers(prov.Provider) if not n.startswith("_")] == ["step"]
+    members = {n: v for n, v in inspect.getmembers(prov.Provider) if not n.startswith("_")}
+    assert [n for n, v in members.items() if not isinstance(v, property)] == ["step"]  # the only operation
+    assert sorted(n for n, v in members.items() if isinstance(v, property)) == ["model", "name"]  # read-only data
     src = inspect.getsource(prov)
     assert "import openai" not in src and "httpx" not in src and "subprocess" not in src
 

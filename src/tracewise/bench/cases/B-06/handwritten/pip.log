@@ -1,0 +1,16 @@
+Collecting foo==1.0 (from -r requirements.txt (line 1))
+  Downloading foo-1.0-py3-none-any.whl (4.1 kB)
+Collecting bar==2.0 (from -r requirements.txt (line 2))
+  Downloading bar-2.0-py3-none-any.whl (3.9 kB)
+INFO: pip is looking at multiple versions of bar to determine which version is compatible with other requirements.
+ERROR: Cannot install -r requirements.txt (line 1) and bar==2.0 because these package versions have conflicting dependencies.
+
+The conflict is caused by:
+    The user requested foo==1.0
+    bar 2.0 depends on foo>=2.0
+
+To fix this you could try to:
+1. loosen the range of package versions you've specified
+2. remove package versions to allow pip to attempt to solve the dependency conflict
+
+ERROR: ResolutionImpossible: for help visit the pip documentation on dependency resolution

@@ -1,0 +1,31 @@
+case: B-12
+version: 1
+source_type: mixed
+phase: mvp
+runs:
+  C1:
+    category:
+    - code_regression
+    location:
+    - path: src/index.ts
+      line: 1
+    location_required: true
+    touches_implicated: true
+    primaries: 1
+    cascades: 40
+    first_error_contains: TS2307
+    evidence:
+    - log: 101
+      contains: Cannot find module './util'
+    rationale: C1 deleted src/util.ts; src/index.ts:1 still imports it (TS2307); the 40 jest failures are cascades.
+  C2:
+    category:
+    - code_regression
+    location:
+    - path: src/index.ts
+      line: 1
+    location_required: true
+    touches_implicated: false
+    primaries: 1
+    cascades: 40
+    rationale: C2 only edits README.md.

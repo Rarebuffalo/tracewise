@@ -1,0 +1,16 @@
+id: B-15
+version: 1
+title: recurrence of B-04 one week later (history-based flaky detection)
+track: B
+source_type: synthetic
+language: python
+repo: bench/b-15
+commits:
+  C1:
+    message: 'feat: change'
+    delete: []
+  C2:
+    message: 'docs: update README'
+jobs: []
+phase: p2
+p2_reason: 'P2: needs failure history (FS-ATR-3), not implemented in the MVP'

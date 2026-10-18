@@ -1,0 +1,27 @@
+id: B-04
+version: 1
+title: 'flaky test: fails on run attempt 1 only'
+track: B
+source_type: synthetic
+language: python
+repo: bench/b-04
+commits:
+  C1:
+    message: 'test: add consistency check'
+    delete: []
+  C2:
+    message: 'docs: update README'
+jobs:
+- id: 101
+  name: Tests
+  step: Run pytest
+  command: pytest --tb=short -v
+  exec:
+  - - pytest
+    - --tb=short
+    - -v
+    - -p
+    - no:cacheprovider
+    - tests
+  env:
+    GITHUB_RUN_ATTEMPT: '1'

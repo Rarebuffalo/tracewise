@@ -1,0 +1,8 @@
+[1m============================= test session starts ==============================[0m
+collecting ... collected 1 item
+see ]8;;https://docs.example.invalid/x\docs]8;;\ for help
+[31m[1m________________________________ test_math _________________________________[0m
+tests/test_math.py:2: in test_math
+    assert 1 == 2
+[1m[31mE   assert 1 == 2[0m
+[31mFAILED[0m tests/test_math.py::[1mtest_math[0m - assert 1 == 2

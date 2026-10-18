@@ -1,0 +1,23 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.7, pytest-8.3.3, pluggy-1.5.0
+rootdir: /home/runner/work/b-07/b-07
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collecting ... collected 1 item
+
+tests/test_db.py::test_connect FAILED                                    [100%]
+
+=================================== FAILURES ===================================
+_________________________________ test_connect _________________________________
+tests/test_db.py:5: in test_connect
+    assert connect()
+           ^^^^^^^^^
+app/db.py:5: in connect
+    url = os.environ["DB_URL"]
+          ^^^^^^^^^^^^^^^^^^^^
+<frozen os>:709: in __getitem__
+    ???
+E   KeyError: 'DB_URL'
+=========================== short test summary info ============================
+FAILED tests/test_db.py::test_connect - KeyError: 'DB_URL'
+============================== 1 failed in 0.01s ===============================

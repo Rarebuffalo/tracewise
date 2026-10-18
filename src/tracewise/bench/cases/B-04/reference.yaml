@@ -1,0 +1,29 @@
+case: B-04
+runs:
+  C1:
+  - tool: read_file
+    args:
+      path: tests/test_flaky.py
+      start: 1
+  - answer:
+      category: flaky_suspect
+      root_cause: The test depends on the run attempt and fails on the first attempt.
+      why: tests/test_flaky.py:6 asserts GITHUB_RUN_ATTEMPT is not 1.
+      problem_location:
+        path: tests/test_flaky.py
+        line_start: 6
+        line_end: 6
+      fix: null
+      next_steps:
+      - Re-run the job; if it passes, remove the attempt dependence.
+      file_verdicts: []
+  C2:
+  - answer:
+      category: unknown
+      root_cause: Not determinable.
+      why: Only one attempt is available.
+      problem_location: null
+      fix: null
+      next_steps:
+      - Re-run the job to check for flakiness.
+      file_verdicts: []
