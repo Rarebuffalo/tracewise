@@ -199,7 +199,7 @@ class Publisher:
 
     @contextmanager
     def _row(self, t: PublishTarget, surface: Surface, key: str, analysis_id: int) -> Iterator[tuple[Conn, dict[str, Any]]]:
-        with transaction(self.pool) as conn:
+        with transaction(self.pool, tenant=t.installation_id) as conn:  # T-705: tenant plane
             row = repo.reserve_publication(
                 conn, installation_id=t.installation_id, analysis_id=analysis_id, surface=surface, target_key=key
             )

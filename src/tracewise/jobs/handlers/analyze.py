@@ -62,7 +62,7 @@ PROVIDER_FAILURES = frozenset({"provider_timeout", "provider_failed"})
 
 @dataclass
 class AnalyzeDeps:
-    pool: ConnectionPool[Conn]
+    pool: ConnectionPool[Conn]  # TENANT role (tracewise_app): every transaction runs with the job's installation
     http: GitHubHTTP
     tokens: TokenProvider
     app_id: int
@@ -80,7 +80,7 @@ def _load(ctx: JobContext, deps: AnalyzeDeps) -> AnalysisJob:
         raise PermanentError("invalid analysis job payload") from None
     if job.installation_id != ctx.job.installation_id:
         raise PermanentError("job installation does not match its payload")
-    with transaction(deps.pool) as conn:
+    with transaction(deps.pool, tenant=job.installation_id) as conn:  # T-705: tenant plane
         scope = repo.repository_scope(conn, job.repo_id)
     if scope is None or scope["installation_id"] != job.installation_id or scope["full_name"].lower() != job.repo.lower():
         raise PermanentError("repository is not part of the job's installation")
@@ -101,7 +101,7 @@ def _check_scope(scope: dict[str, Any]) -> None:
 
 def _recheck(deps: AnalyzeDeps, job: AnalysisJob) -> None:
     """T-701: authorisation may change while a job runs; re-read it right before any persistence or GitHub write."""
-    with transaction(deps.pool) as conn:
+    with transaction(deps.pool, tenant=job.installation_id) as conn:  # T-705: tenant plane
         scope = repo.repository_scope(conn, job.repo_id)
     if scope is None or scope["installation_id"] != job.installation_id:
         raise JobCancelled("repo_not_in_scope")
@@ -223,7 +223,7 @@ def _note(results: dict[str, str], missing: dict[str, str | None], r: PublishRes
 
 
 def _persist(deps: AnalyzeDeps, job: AnalysisJob, vd: ValidatedDiagnosis | None, status: str) -> int:
-    with transaction(deps.pool) as conn:
+    with transaction(deps.pool, tenant=job.installation_id) as conn:  # T-705: tenant plane
         run_pk = repo.find_workflow_run(conn, job.repo_id, job.run_id, job.attempt) or repo.insert_workflow_run(
             conn,
             installation_id=job.installation_id,

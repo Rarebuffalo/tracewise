@@ -94,7 +94,11 @@ def known() -> list[Any]:
 
 
 class World:
-    """One installation (9), one repository (7, acme/coffee), one failed run (55)."""
+    """One installation (9), one repository (7, acme/coffee), one failed run (55).
+
+    `pool` is the system plane (queue, ingress); the analyze handler runs on `tenant_pool` (RLS, T-705)."""
+
+    tenant_pool: Any = None
 
     def __init__(
         self,
@@ -208,7 +212,7 @@ class World:
 
     def worker(self, name: str = "w1", **kw: Any) -> Worker:
         deps = AnalyzeDeps(
-            self.pool,
+            self.tenant_pool or self.pool,
             self.http,
             self.tokens,
             APP_ID,
@@ -729,3 +733,21 @@ def test_jobs_api_forbidden_publishes_missing_permission_notice_without_retry(wo
     assert cr["output"]["title"] == "Missing permission" and "Actions: read" in cr["output"]["text"]
     assert len(world.state.pr_comments[12]) == 1 and world.all_ccs() == [] and world.provider_calls == 0
     assert world.owner.execute("SELECT status FROM analysis").fetchone()[0] == "permission_denied"
+
+
+def test_t705_background_job_runs_as_the_tenant_role_and_cannot_reach_another_tenant(world: World) -> None:
+    """AT-SEC-03 under RLS: the handler's pool is `tracewise_app`; a job of installation 9 naming installation 77's
+    repository cannot even see that repository, is refused permanently, and no token is minted for 77."""
+    with world.tenant_pool.connection() as c:
+        assert c.execute("SELECT current_user AS u").fetchone() == {"u": "tracewise_app"}
+    with transaction(world.pool) as c:
+        repo.upsert_installation(c, 77, "other")
+        repo.upsert_repository(c, 8, 77, "other/repo")
+    ok, foreign = world.enqueue(), world.enqueue(repo_id=8, repo="other/repo")
+    world.run(2)
+    assert world.jobrow(ok)["status"] == "succeeded"
+    j = world.jobrow(foreign)
+    assert j["status"] == "dead" and j["last_error"].startswith("permanent")
+    assert [r.url.path for r in world.gh.requests if r.url.path.startswith("/app/installations/77")] == []
+    rows = world.owner.execute("SELECT DISTINCT installation_id FROM analysis UNION SELECT installation_id FROM publication")
+    assert {r[0] for r in rows} == {9}

@@ -18,7 +18,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=None, extra="ignore", frozen=True)
 
     tw_env: Literal["local", "test", "staging", "prod"] = "local"
-    database_url: SecretStr | None = None
+    database_url: SecretStr | None = None  # tenant plane (tracewise_app; RLS-restricted)
+    database_url_system: SecretStr | None = None  # system plane (tracewise_system; BYPASSRLS): ingress, queue, recovery
     database_url_migrations: SecretStr | None = None
 
     # LIVE only: the project-scoped dev App in the approved test org.
@@ -44,7 +45,13 @@ class Settings(BaseSettings):
     def secret_values(self) -> list[str]:
         """Configured secret values, for the log redaction filter."""
         out = []
-        for s in (self.database_url, self.database_url_migrations, self.github_webhook_secret, self.openai_api_key):
+        for s in (
+            self.database_url,
+            self.database_url_system,
+            self.database_url_migrations,
+            self.github_webhook_secret,
+            self.openai_api_key,
+        ):
             if s is not None and s.get_secret_value():
                 out.append(s.get_secret_value())
         return out

@@ -58,7 +58,7 @@ flowchart LR
 
 ## 3. Data model (MVP)
 
-The tenant key is `installation_id`. RLS is added at pilot hardening (T-705).
+The tenant key is `installation_id`. Every tenant table has a row-level security policy on it (T-705, §4.7).
 
 | Table | Key columns | Notes |
 |---|---|---|
@@ -167,6 +167,19 @@ Validation: lifecycle payloads are HMAC-verified and schema-validated (ids > 0, 
 | Already covered elsewhere | Delivery without a job: impossible, since delivery, run and job are one transaction (T-106). Vanished worker, expired lease, retry not executed: queue reaper and `run_after` (T-105). Failed GitHub calls: job retries (T-302/T-503). Disabled or removed scope: T-701. |
 | Stops | A rate limit stops the pass with `completed=false`; checkpoints keep progress. A refused token for one repository is counted and the sweep moves on. |
 | Entry point | `python -m tracewise.recovery {deliveries|runs|both}`: one bounded pass, JSON summary, non-zero exit if incomplete. Needs the project App and database configuration; **no schedule is configured**. |
+
+### 4.7 Row-level security and database roles (T-705)
+
+| Item | Behaviour |
+|---|---|
+| Policies | Migration 0005 enables RLS on the 10 tables that carry an installation: `installation` (by `id`), `repository`, `workflow_run`, `job`, `analysis`, `publication`, `failure_signature`, `usage_event`, `audit_event`, `webhook_delivery`. Each has one policy, `tenant_isolation`, applied to reads and writes: `installation_id = tracewise_tenant()`. |
+| Context | `tracewise_tenant()` reads `current_setting('tracewise.installation_id', true)`. `transaction(pool, tenant=id)` sets it with `set_config(..., true)`, so it is **transaction-local**: it is gone after COMMIT or ROLLBACK, and a pooled connection never carries it into the next transaction. If it is missing or empty, nothing is visible and every insert fails. A malformed value is an error. Non-positive or non-integer ids are rejected in Python. |
+| Tenant plane: `tracewise_app` (`DATABASE_URL`) | The analyze handler (`_load`, `_recheck`, `_persist`) and the `Publisher` use it, always with the job's installation. It is not the table owner, has no BYPASSRLS, and keeps the privileges from 0001 (no DELETE on content, no UPDATE or DELETE on `audit_event`). 0005 revokes its access to `recovery_checkpoint` and `redelivery_request`. |
+| System plane: `tracewise_system` (`DATABASE_URL_SYSTEM`) | Webhook ingress, lifecycle handling, the queue and worker bookkeeping, and recovery. These run before a tenant is known, or act across tenants. The role has BYPASSRLS and the same table privileges as the app role had before 0005 (no DELETE on content; `audit_event` is append-only). It is not a superuser and not the owner. |
+| Owner `tracewise_owner` | Runs migrations only. It owns the tables, so RLS does not apply to it. No `FORCE ROW LEVEL SECURITY` is set, because no runtime path uses the owner. |
+| What RLS protects | A tenant-plane query that forgets its `installation_id` filter, or uses a payload id belonging to another tenant, sees and writes nothing outside the job's installation (AT-SEC-03). This is defence in depth beneath the application checks (D-9) and the token scoping. |
+| What it does not protect | Code running as `tracewise_app` can set any tenant id itself; RLS is not a barrier against arbitrary SQL execution in the service. Unique constraints still reveal that a key exists in another tenant (for example, an INSERT conflict); all such keys include tenant-specific GitHub ids. The system plane bypasses RLS by design. |
+| Provisioning (review item) | `tracewise_system` must exist (LOGIN BYPASSRLS, created by an administrator) **before** migration 0005 runs, or 0005 grants it nothing. Tables added after 0005 must grant the system role explicitly. Deployment provisioning is not done (no deployment in this phase). |
 
 ## 5. Open architectural items
 
