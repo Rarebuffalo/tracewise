@@ -47,10 +47,16 @@ def test_sec01_every_endpoint_is_permitted_and_none_writes_forbidden_resources()
     assert all(covered(e.permission, e.access, PUBLISH_SCOPE) for e in publish)
 
 
+# Offline benchmark plumbing (T-601): it SERVES replayed GitHub responses through an in-process
+# httpx.MockTransport and never opens a connection. Exempt by exact file, and checked below.
+BENCH_OFFLINE = {SRC / "bench" / "replay.py", SRC / "bench" / "harness.py"}
+
+
 def test_sec01_no_http_or_github_urls_outside_the_client() -> None:
-    allowed = {SRC / "github" / "client.py"}
+    allowed = {SRC / "github" / "client.py", *BENCH_OFFLINE}
+    fixtures = SRC / "bench" / "cases"  # benchmark fixture repositories: data, not product code
     for f in SRC.rglob("*.py"):
-        if f in allowed:
+        if f in allowed or fixtures in f.parents:
             continue
         text = f.read_text()
         tree = ast.parse(text)
@@ -62,6 +68,21 @@ def test_sec01_no_http_or_github_urls_outside_the_client() -> None:
         }
         assert not imported & {"httpx", "requests", "urllib3", "aiohttp", "http"}, f
         assert "api.github.com" not in text, f
+
+
+def test_sec01_bench_exemptions_only_use_in_process_transports() -> None:
+    for f in BENCH_OFFLINE:
+        tree = ast.parse(f.read_text())
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "httpx"
+            ):
+                assert node.func.attr in {"Client", "MockTransport", "Response"}, (f, node.func.attr)
+                if node.func.attr == "Client":  # never a bare client: it must carry the replay transport
+                    assert any(k.arg == "transport" for k in node.keywords), f
 
 
 # ---------------------------------------------------------------- jobs, pagination (recorded fixture)

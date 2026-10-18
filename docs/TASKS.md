@@ -60,9 +60,9 @@ Version 2.0, 2026-10-18. Dependency-ordered. Each task lists the SPEC requiremen
 | T-502 | Publishers: commit comment (write-once), PR comment (upsert by marker + author), Check Run (neutral, `external_id`, lookup by name); `publication` table idempotency | FS-PUB-1, FS-PUB-2, FS-PUB-3, FS-PUB-4, FS-PUB-5 | AT-PUB-01, AT-PUB-02, AT-PUB-03, AT-PUB-04, AT-PUB-05, AT-PUB-06 | T-501, T-303, T-104 | 1.5 | done |
 | T-503 | Failure and permission paths: could-not-complete, `logs_unavailable`, `permission_denied`, `unpublished_permission` | FS-ERR-1, FS-ERR-3, FS-LOG-3, FS-PUB-5 | AT-REL-01, AT-REL-05 | T-502 | 0.75 | done |
 | **Phase 6: offline benchmark** | | | | | | |
-| T-601 | Synthetic harness: fixture-repo builder (C0/C1/C2), local tool runs, GitHub-like log envelope, jobs-API fixtures | — | AT-DX-15 | T-201 | 2.0 | todo |
-| T-602 | Cases B-01…B-17, A-04…A-06, E-01…E-06 with committed `truth.yaml` | — | AT-DX-15 | T-601 | 2.0 | todo |
-| T-603 | Scorer (BENCHMARK §4) + per-track report | — | AT-DX-15 | T-602 | 1.0 | todo |
+| T-601 | Synthetic harness: fixture-repo builder (C0/C1/C2), local tool runs, GitHub-like log envelope, jobs-API fixtures | — | AT-DX-15 | T-201 | 2.0 | done |
+| T-602 | Cases B-01…B-17, A-04…A-06, E-01…E-06 with committed `truth.yaml` | — | AT-DX-15 | T-601 | 2.0 | done |
+| T-603 | Scorer (BENCHMARK §4) + per-track report | — | AT-DX-15 | T-602 | 1.0 | done |
 | T-604 | META runner P-01…P-03 (anonymous REST, provenance recorded) | FS-ATR-2 | AT-ATR-05, AT-SEC-14 | T-603 | 0.5 | todo |
 | T-605 | Measured evaluation with OpenAI (**needs a key you provide locally**); model choice (UD-3); cost and latency measured | FS-DX-3, FS-OPS-2 | AT-DX-15, AT-OPS-02 | T-603, T-402 | 1.5 | todo |
 | **Phase 7: pilot hardening** | | | | | | |

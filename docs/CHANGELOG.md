@@ -1,5 +1,90 @@
 # Change Log
 
+## 2026-10-18 (n): synthetic benchmark: harness (T-601), cases and truth (T-602), scorer and report (T-603)
+
+### Inspection
+
+- **State:** clean `main` at `e46f088`; no remote.
+- **Canonical scope** (TASKS / BENCHMARK), which is wider than the request:
+  - T-602 covers **B-01…B-17 plus A-04…A-06 and E-01…E-06**.
+  - BENCHMARK §1: every case runs on **C1 and C2**.
+  - BENCHMARK §4: **3 repetitions**, `truth.yaml` hashed and committed **before** the first run, and the exact point table.
+  - B-15 and B-16 need P2 features.
+- **Tools available offline:** pytest, ruff, mypy, tsc. Not available: jest, vitest, eslint (a network install would be needed).
+
+**Checklist:**
+
+| Requirement | Implementation | Verification |
+|---|---|---|
+| Per-track report with §4 metrics | `score.py` / `report.py` | `test_score.py` (hand-calculated), sample report |
+| Real tool runs and reproducible logs | `generate.py` | `test_logs_regenerate_identically…` (slow) |
+| Truth committed and locked before runs | `TRUTH.lock` in d4745aa; the harness refuses on mismatch | `test_truth_lock_detects_changes`, `test_refuses_to_run…` |
+| Every case present, valid, evidence resolvable | `integrity.py` | `test_no_integrity_problems`, `test_integrity_catches…` |
+| P2 cases explicit | `not_applicable` with reason | `test_p2_cases_are_explicit…` |
+| Synthetic kept separate from META | `data_kind` guard in the scorer | `test_serialisation_report_and_separation` |
+
+### Code (`src/tracewise/bench/`)
+
+| File | Content |
+|---|---|
+| `model.py` | Strict schemas for `case.yaml`, `truth.yaml` (§5 plus the documented §5.1 extensions) and `reference.yaml`; `REQUIRED_CASES` (26) |
+| `fixture.py` | Pure-Python commit snapshots, deterministic git builder (fixed identity and dates, so fixed SHAs), compare-API files from the real `git diff` |
+| `envelope.py` | GitHub log envelope and jobs-API documents with fixed timestamps |
+| `generate.py` | Real local tool runs with path, timing and banner normalisation; `--check` |
+| `gitserve.py`, `replay.py` | Local `git http-backend` server (now shared with tests) and an offline GitHub REST replay |
+| `harness.py` | Runs the **real** `collect_evidence` → `diagnose` → `render` per case × commit × repetition; Track A uses the real pre-pass. Per-run isolation (errors recorded by type); P2 → `not_applicable`; slow → `not_executed`; planted secrets generated at run time; checks for secrets reaching the provider or output and for symlink content; deterministic run id; truth-lock enforcement. |
+| `providers.py` | Scripted providers: `oracle` (from `reference.yaml`), `wrong_cause`, `wrong_location`, `fabricated`, `abstain`, `timeout`, `malformed`, `adversarial`. None reads truth. |
+| `integrity.py` | Schema, ids, runs, logs, evidence resolution, location bounds, external-state and lock checks |
+| `score.py`, `report.py`, `__main__.py` | §4 scoring (rules in BENCHMARK §4.1), Tracks A/B/C/D/E/R, MVP targets labelled as targets, safety failures, per-case table, limitations; CLI `verify`, `generate`, `run`, `score` |
+| `cases/` | 26 cases, logs and `TRUTH.lock` |
+
+### Other changes
+
+- `investigate/provider.py`: `Provider.name` / `model` are read-only properties (type variance). The AT-SEC-10 introspection test still asserts `step` is the only operation.
+- `tests/git_server.py` now reuses `bench.gitserve`.
+- `pyproject.toml`: the fixtures are excluded from ruff and mypy, so tooling can never rewrite ground-truth data (this had happened once during authoring and was caught by the integrity check). PyYAML added.
+- `.gitattributes`: fixture whitespace is preserved verbatim.
+- `tests/unit/test_github_client.py`: the AT-SEC-01 source scan exempts exactly `bench/replay.py` and `bench/harness.py`, with a new check that they only build `httpx` clients with an in-process transport.
+- `jobs/worker.py`: restored a justification comment that an earlier auto-fix had stripped.
+
+### Tests (37 new; 448 total)
+
+| File | Tests |
+|---|---|
+| `tests/bench/test_integrity.py` | 6, including the slow regeneration check |
+| `tests/bench/test_score.py` | 17, hand-calculated |
+| `tests/bench/test_harness.py` | 13, known-behaviour providers |
+| `tests/unit/test_github_client.py` | 1 new |
+
+### Benchmark runs (scripted, protocol validation only)
+
+- **Oracle, full suite, 3 repetitions:**
+  - 115 required runs: 110 executed, 0 errors, 4 P2 not applicable, 1 slow not executed.
+  - Two full runs are identical apart from wall-clock fields.
+  - Sample report: `docs/benchmark-runs/2026-10-18-oracle-protocol-validation.md`.
+- **A-05** run separately with `--include-slow`: a 200 MB log in about 59 s. It fails its truth (see BENCHMARK §8).
+- **Product, truth and reference findings** are listed in BENCHMARK §8, and **none were tuned away**.
+
+### Verification (actually run)
+
+| Command | Result |
+|---|---|
+| `uv run ruff check src tests scripts` | All checks passed |
+| `uv run ruff format --check src tests scripts` | 124 files already formatted |
+| `uv run mypy` (strict) | no issues in 75 source files |
+| `uv run pytest -o addopts="--strict-markers" -p no:warnings` (all, slow included) | **448 passed** in 172.6 s |
+| `uv run pytest tests/bench -m "not slow"`, ×3 | 35 passed each time |
+| `python -m tracewise.bench verify` | OK: 26 cases, truth lock matches |
+| `python -m tracewise.bench generate --check` (via the slow test) | logs reproduce exactly |
+| `python3 -I scripts/check_docs.py` | PASS |
+
+### Status
+
+| Item | Status |
+|---|---|
+| T-601, T-602, T-603 | done |
+| AT-DX-15 | **Not met yet.** It requires the measured OpenAI run (T-605). Scripted results are protocol validation, not accuracy. |
+
 ## 2026-10-18 (m): publication (T-502), failure outcomes (T-503) and the wired `analyze` worker
 
 ### Inspection
