@@ -164,13 +164,16 @@ Version 2.0, 2026-10-18. Supersedes all earlier specs (see `research/README.md` 
   "root_cause": "≤300 chars",
   "why": "≤800 chars",
   "problem_location": {"path": "pkg/mod.py", "line_start": 41, "line_end": 41},
+  "problem_snippet": "≤15 lines copied by the system from the file at head_sha (FS-DX-4); never model text",
   "fix": {"description": "≤600 chars", "replacement": {"path": "pkg/mod.py", "line_start": 41, "line_end": 41, "new_text": "…"}, "size": "trivial|small|larger|n/a"},
   "next_steps": ["≤3, ≤160 chars each"],
   "files_examined": [{"path": "pkg/mod.py", "start": 1, "end": 43, "verdict": "≤140 chars"}],
   "attribution": {"trigger_sha": "…", "trigger_changed_files": ["README.md"], "touches_implicated": "true | false | null", "statement": "…", "basis": ["trigger_diff"]},
   "confidence": {"band": "high|medium|low", "basis": ["…"]},
   "limits": {"log_truncated": false, "files_skipped": [], "budget_exhausted": false, "diff_truncated": false},
-  "usage": {"provider": "openai|fake", "model": "…", "input_tokens": 0, "output_tokens": 0, "tool_calls": 0, "latency_ms": 0}
+  "usage": {"provider": "openai|fake", "model": "…", "input_tokens": 0, "output_tokens": 0, "tool_calls": 0, "latency_ms": 0},
+  "inconclusive_reason": "fixed code, e.g. location_not_examined | provider_timeout | budget_exhausted | null",
+  "validation_flags": ["fixed codes for what the validator stripped or downgraded"]
 }
 ```
 

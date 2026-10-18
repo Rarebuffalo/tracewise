@@ -272,6 +272,7 @@ class Diagnosis(_Strict):
     root_cause: str | None = Field(default=None, max_length=300)
     why: str | None = Field(default=None, max_length=800)
     problem_location: Location | None = None
+    problem_snippet: str | None = Field(default=None, max_length=4000)  # FS-DX-4: copied by the system, never the model
     fix: Fix | None = None
     next_steps: list[Annotated[str, StringConstraints(max_length=160)]] = Field(default_factory=list, max_length=3)
     files_examined: list[FileExamined] = Field(default_factory=list)
@@ -279,6 +280,10 @@ class Diagnosis(_Strict):
     confidence: Confidence
     limits: Limits = Limits()
     usage: Usage = Usage()
+    inconclusive_reason: str | None = Field(default=None, max_length=64, pattern=r"^[a-z_:]+$")  # fixed code, not prose
+    validation_flags: list[Annotated[str, StringConstraints(max_length=64, pattern=r"^[a-z_:0-9.]+$")]] = Field(
+        default_factory=list, max_length=40
+    )
 
     @model_validator(mode="after")
     def _status_shape(self) -> Diagnosis:
