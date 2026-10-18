@@ -130,7 +130,8 @@ def test_suspend_between_surfaces_does_not_stop_remaining_writes_today(pool, own
 
 
 def test_run_cancelled_by_suspension_is_not_reanalysed_after_unsuspend(pool, owner, server, tmp_path, head) -> None:  # type: ignore[no-untyped-def]  # noqa: F811
-    """Documents a consequence of D-9/D-10 for review: run deduplication (repo, run, attempt) also blocks a
+    """PENDING D-10 (documents current behaviour; not a decision).
+    A consequence of D-9/D-10 for review: run deduplication (repo, run, attempt) also blocks a
     re-analysis of a run whose job was cancelled while the installation was suspended."""
     from tests.db.test_lifecycle import failure
     from tracewise.contracts import WorkflowRunEvent
