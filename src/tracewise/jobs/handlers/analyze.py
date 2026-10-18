@@ -84,11 +84,28 @@ def _load(ctx: JobContext, deps: AnalyzeDeps) -> AnalysisJob:
         scope = repo.repository_scope(conn, job.repo_id)
     if scope is None or scope["installation_id"] != job.installation_id or scope["full_name"].lower() != job.repo.lower():
         raise PermanentError("repository is not part of the job's installation")
-    if scope["installation_status"] != "active":
-        raise JobCancelled("installation not active")
-    if not scope["enabled"] or scope["removed_at"] is not None:
-        raise JobCancelled("repository disabled or removed")
+    _check_scope(scope)
     return job
+
+
+def _check_scope(scope: dict[str, Any]) -> None:
+    if scope["installation_status"] == "deleted":
+        raise JobCancelled("cancelled_uninstalled")  # FS-INS-3
+    if scope["installation_status"] != "active":
+        raise JobCancelled("installation_suspended")
+    if scope["removed_at"] is not None:
+        raise JobCancelled("repo_not_in_scope")  # FS-INS-4
+    if not scope["enabled"]:
+        raise JobCancelled("repo_disabled")
+
+
+def _recheck(deps: AnalyzeDeps, job: AnalysisJob) -> None:
+    """T-701: authorisation may change while a job runs; re-read it right before any persistence or GitHub write."""
+    with transaction(deps.pool) as conn:
+        scope = repo.repository_scope(conn, job.repo_id)
+    if scope is None or scope["installation_id"] != job.installation_id:
+        raise JobCancelled("repo_not_in_scope")
+    _check_scope(scope)
 
 
 def _associate(rc_p: RepoClient, job: AnalysisJob) -> tuple[PRAssociation, str | None]:
@@ -117,7 +134,7 @@ def make_analyze_handler(deps: AnalyzeDeps) -> Handler:
         try:
             return _run(ctx, deps, job, rc_a, rc_p, target, publisher, last_attempt)
         except gh_err.InstallationUnavailable:
-            raise JobCancelled("installation unavailable (token refused)") from None
+            raise JobCancelled("cancelled_uninstalled") from None  # FS-INS-3: token mint refused
         except gh_err.PermissionDenied as e:
             # Must precede PermanentError (its base class). Reading the run itself is forbidden
             # (e.g. Actions: read missing): say so on the remaining surfaces, do not retry (FS-ERR-3).
@@ -153,6 +170,7 @@ def _run(
         pr_number = assoc.number if assoc.outcome == "matched" else None
         vd = diagnose(ev, deps.provider_factory(), limits=deps.limits, pr_number=pr_number)
     ctx.check()
+    _recheck(deps, job)  # before persisting or publishing anything
     d = vd.diagnosis
     if d.inconclusive_reason in PROVIDER_FAILURES and not last_attempt:
         raise RetryableError(f"provider failure ({d.inconclusive_reason})")  # FS-ERR-1: retry ≤2
@@ -246,6 +264,7 @@ def _publish_notice(
     permission: str | None,
 ) -> dict[str, str]:
     """could-not-complete / missing-permission notice: Check Run + PR comment on PRs; never a commit comment."""
+    _recheck(deps, job)
     analysis_id = _persist(deps, job, None, status)
     reason = "permission_denied" if status == "permission_denied" else "internal"
 

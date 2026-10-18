@@ -308,9 +308,9 @@ def test_bad_headers_400(client, secret, owner, headers) -> None:  # type: ignor
 
 def test_ping_and_other_events(client, secret, owner) -> None:  # type: ignore[no-untyped-def]
     assert post(client, secret, {"zen": "x", "hook_id": 1}, event="ping").json() == {"outcome": "pong"}
-    r = post(client, secret, {"action": "created", "installation": {"id": 4242}}, event="installation", delivery="i-1")
+    r = post(client, secret, {"action": "created", "installation": {"id": 4242}}, event="check_suite", delivery="i-1")
     assert (r.status_code, r.json()["outcome"]) == (202, "ignored")
-    r = post(client, secret, {"action": "created", "installation": {"id": 4242}}, event="installation", delivery="i-1")
+    r = post(client, secret, {"action": "created", "installation": {"id": 4242}}, event="check_suite", delivery="i-1")
     assert r.json()["outcome"] == "duplicate_delivery"
     assert rows(owner, "job") == 0
 

@@ -10,7 +10,17 @@ from psycopg.types.json import Jsonb
 from tracewise.db.session import Conn
 from tracewise.prepass.sanitize import redact
 
-DeliveryOutcome = Literal["enqueued", "duplicate_run", "ignored", "rejected"]
+DeliveryOutcome = Literal[
+    "enqueued",
+    "duplicate_run",
+    "ignored",
+    "rejected",
+    "processed",
+    "repo_not_in_scope",
+    "repo_disabled",
+    "installation_inactive",
+]
+PURGE_GRACE_DAYS = 7  # FS-INS-3
 Surface = Literal["commit_comment", "pr_comment", "check_run"]
 
 
@@ -59,6 +69,81 @@ def upsert_repository(conn: Conn, repo_id: int, installation_id: int, full_name:
            ON CONFLICT (id) DO UPDATE SET full_name = EXCLUDED.full_name, installation_id = EXCLUDED.installation_id""",
         (repo_id, installation_id, full_name),
     )
+
+
+# ------------------------------------------------------------------ lifecycle (T-701; FS-INS-3, FS-INS-4)
+#
+# `deleted` is terminal: GitHub never reuses an installation id, so a late `created`/`unsuspend`
+# delivery for a deleted installation must not resurrect it. Every write is guarded so replays are no-ops.
+
+
+def installation_status(conn: Conn, installation_id: int) -> str | None:
+    row = conn.execute("SELECT status FROM installation WHERE id = %s", (installation_id,)).fetchone()
+    return str(row["status"]) if row else None
+
+
+def set_installation_status(
+    conn: Conn, installation_id: int, status: Literal["active", "suspended"], account_login: str | None = None
+) -> bool:
+    """Create or update a non-deleted installation. Returns False when it is deleted (no resurrection)."""
+    row = conn.execute(
+        """INSERT INTO installation (id, account_login, status) VALUES (%s, %s, %s)
+           ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status,
+               account_login = COALESCE(EXCLUDED.account_login, installation.account_login)
+           WHERE installation.status <> 'deleted'
+           RETURNING id""",
+        (installation_id, account_login, status),
+    ).fetchone()
+    return row is not None
+
+
+def mark_installation_deleted(conn: Conn, installation_id: int, grace_days: int = PURGE_GRACE_DAYS) -> bool:
+    """FS-INS-3: deleted + purge scheduled. Idempotent: the first deletion time and purge date are kept."""
+    row = conn.execute(
+        """INSERT INTO installation (id, status, deleted_at, purge_after)
+           VALUES (%s, 'deleted', now(), now() + make_interval(days => %s))
+           ON CONFLICT (id) DO UPDATE SET status = 'deleted',
+               deleted_at = COALESCE(installation.deleted_at, now()),
+               purge_after = COALESCE(installation.purge_after, now() + make_interval(days => %s))
+           RETURNING id""",
+        (installation_id, grace_days, grace_days),
+    ).fetchone()
+    return row is not None
+
+
+def repository_added(conn: Conn, repo_id: int, installation_id: int, full_name: str) -> None:
+    """FS-INS-4: (re)grant access. Clears `removed_at`; the Tracewise-side `enabled` toggle is left alone."""
+    conn.execute(
+        """INSERT INTO repository (id, installation_id, full_name) VALUES (%s, %s, %s)
+           ON CONFLICT (id) DO UPDATE SET installation_id = EXCLUDED.installation_id, full_name = EXCLUDED.full_name,
+               removed_at = NULL""",
+        (repo_id, installation_id, full_name),
+    )
+
+
+def repository_removed(conn: Conn, repo_id: int, installation_id: int) -> bool:
+    """FS-INS-4: access withdrawn. Only a repository owned by this installation is touched."""
+    cur = conn.execute(
+        """UPDATE repository SET removed_at = COALESCE(removed_at, now())
+           WHERE id = %s AND installation_id = %s""",
+        (repo_id, installation_id),
+    )
+    return cur.rowcount == 1
+
+
+def ingest_scope(conn: Conn, installation_id: int, repo_id: int) -> str | None:
+    """Why a failure event must not be analysed, or None if it may be. Unknown rows are allowed (created later)."""
+    status = installation_status(conn, installation_id)
+    if status in ("deleted", "suspended"):
+        return "installation_inactive"
+    row = conn.execute("SELECT installation_id, enabled, removed_at FROM repository WHERE id = %s", (repo_id,)).fetchone()
+    if row is None:
+        return None
+    if row["removed_at"] is not None or row["installation_id"] != installation_id:
+        return "repo_not_in_scope"
+    if not row["enabled"]:
+        return "repo_disabled"
+    return None
 
 
 def repository_enabled(conn: Conn, repo_id: int) -> bool:

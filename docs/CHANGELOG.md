@@ -1,5 +1,60 @@
 # Change Log
 
+## 2026-10-18 (p): T-701 installation lifecycle
+
+**Phase 0 (`3e2ceed`):** complete slow-inclusive oracle benchmark run (115 required, 111 executed, 4 P2 not applicable, 0 errors). A-05 fails its over-specified truth (decision pending). An unexecuted required run now makes the suite incomplete. Truth and lock unchanged.
+
+**Gaps found before coding:**
+
+- Lifecycle webhooks were recorded but never applied.
+- Workflow-run ingestion enqueued jobs for suspended or uninstalled installations and removed repositories.
+- The handler checked scope only at job start.
+
+### Code
+
+| File | Change |
+|---|---|
+| `db/migrations/versions/0003_lifecycle_outcomes.py` | Delivery outcomes `processed`, `repo_not_in_scope`, `repo_disabled`, `installation_inactive`; partial index on pending jobs per installation; reversible |
+| `db/repositories.py` | `installation_status`, `set_installation_status` (never resurrects `deleted`), `mark_installation_deleted` (purge +7 days, idempotent), `repository_added`, `repository_removed` (owner-checked), `ingest_scope` |
+| `jobs/queue.py` | `cancel_pending(installation_id, repo_id?)`: queued/retry_wait → cancelled, with a reason |
+| `web/lifecycle.py` | Validated `installation` and `installation_repositories` processing, in the same transaction as the delivery record; audit events |
+| `web/webhooks.py` | Dispatches lifecycle events; invalid payloads → 400 `rejected` |
+| `web/ingest.py` | Failure events refused with explicit outcomes (AT-INS-04) |
+| `jobs/handlers/analyze.py` | Reasons `cancelled_uninstalled`, `installation_suspended`, `repo_not_in_scope`, `repo_disabled`; scope re-checked before persisting or publishing, including notices |
+
+### Tests
+
+- **`tests/db/test_lifecycle.py` (14 tests):**
+  - created (idempotent); suspend/unsuspend (pending jobs cancelled, running left to its lease owner, no resurrection);
+  - deleted (purge scheduled, terminal against late `created`/`unsuspend`);
+  - AT-INS-04; owner-checked removal; disabled flag preserved;
+  - 4 invalid payloads; an unhandled action;
+  - a stale queued job; **AT-INS-03 mid-job uninstall through the real worker with zero GitHub writes, no analysis and no publication**;
+  - a refused token mint mid-job; deletion racing ingestion (no publication).
+- **`test_schema_repositories.py`:** 0003 round trip.
+- **`test_webhook.py`:** the "other events" test now uses `check_suite` (`installation` is handled since T-701).
+
+### Verification (actually run)
+
+| Command | Result |
+|---|---|
+| ruff check / format check | pass (127 files) |
+| `uv run mypy` | no issues in 77 files |
+| `uv run pytest -o addopts="--strict-markers" -p no:warnings` (slow included) | **464 passed** in 176.6 s |
+| Lifecycle, worker, webhook and queue suites, ×3 | 92 passed each time |
+| `check_docs.py` | PASS |
+
+### Status
+
+| Item | Status |
+|---|---|
+| T-701 | done at REPLAY level |
+| AT-INS-03, AT-INS-04 | **REPLAY passed** |
+| Purge execution | T-704 |
+| Live lifecycle behaviour | G-PLAT-6 |
+
+New finding: **G-PLAT-11** (publish-token scope bundling). New decision for review: **D-10** (lifecycle ordering).
+
 ## 2026-10-18 (n): synthetic benchmark: harness (T-601), cases and truth (T-602), scorer and report (T-603)
 
 ### Inspection

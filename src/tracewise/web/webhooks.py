@@ -26,6 +26,12 @@ from pydantic import ValidationError
 from tracewise.contracts import WorkflowRunEvent
 from tracewise.db.session import DatabaseUnavailable
 from tracewise.web.ingest import ingest_workflow_run, record_other
+from tracewise.web.lifecycle import (
+    InstallationEvent,
+    InstallationRepositoriesEvent,
+    process_installation,
+    process_installation_repositories,
+)
 
 MAX_BODY = 25 * 1024 * 1024
 _DELIVERY_ID = re.compile(r"^[A-Za-z0-9-]{1,200}$")
@@ -92,8 +98,17 @@ async def github_webhook(request: Request) -> JSONResponse:
     inst = inst_raw if isinstance(inst_raw, int) else None
 
     try:
+        if event in ("installation", "installation_repositories"):  # T-701
+            model = InstallationEvent if event == "installation" else InstallationRepositoriesEvent
+            try:
+                lev = model.model_validate(doc)
+            except ValidationError:
+                return await _reject(request, delivery_id, event, log_ctx, "invalid_payload", action, inst)
+            fn = process_installation if event == "installation" else process_installation_repositories
+            lres = await _run_sync(request, fn, delivery_id, lev)
+            log.info("lifecycle event", extra={"tw": {**log_ctx, "outcome": lres.outcome, "cancelled": lres.cancelled_jobs}})
+            return _resp(200, lres.outcome, cancelled_jobs=lres.cancelled_jobs)
         if event != "workflow_run":
-            # Lifecycle events (installation, installation_repositories) are handled by T-701; recorded only.
             new = await _run_sync(request, record_other, delivery_id, event, action, inst, "ignored")
             return _resp(202, "ignored" if new else "duplicate_delivery")
         try:
