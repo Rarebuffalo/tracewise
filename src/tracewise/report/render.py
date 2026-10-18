@@ -280,3 +280,91 @@ def render(vd: ValidatedDiagnosis, *, max_chars: int = DEFAULT_MAX_CHARS, marker
             return out[: max_chars - 45] + "\n\n… (report truncated to the size limit)\n"
         del kept[max(droppable, key=lambda i: (kept[i][0], i))]  # lowest priority, latest first
         omitted = True
+
+
+# ---------------------------------------------------------------- publication helpers (T-502/T-503)
+
+CHECK_TEXT_MAX = 65_535  # GitHub check-run output.text limit
+_PERMISSION_TEXT = {
+    "pull_requests": "Pull requests: write",
+    "checks": "Checks: write",
+    "contents": "Contents: read",
+    "actions": "Actions: read",
+}
+
+
+@dataclass(frozen=True)
+class CheckOutput:
+    title: str
+    summary: str
+    text: str
+    annotations: tuple[dict[str, object], ...] = ()
+
+
+def check_output(vd: ValidatedDiagnosis, text: str) -> CheckOutput:
+    """Check Run fields (FS-PUB-3). `text` is the rendered report; title/summary state the uncertainty."""
+    d = vd.verify()
+    if d.status is Status.diagnosed:
+        title = f"{CATEGORY_LABEL[d.category]} ({d.confidence.band.value} confidence)"
+        summary = f"**Likely root cause (assessment):** {esc(d.root_cause)}"
+    else:
+        title = {Status.logs_unavailable: "Logs unavailable", Status.permission_denied: "Missing permission"}.get(
+            d.status, "Root cause not determined"
+        )
+        summary = (
+            "Tracewise did not name a root cause: " + REASON_TEXT.get(d.inconclusive_reason or "", "insufficient evidence") + "."
+        )
+    annotations: list[dict[str, object]] = []
+    if d.status is Status.diagnosed and d.problem_location is not None:
+        loc = d.problem_location
+        annotations.append(
+            {
+                "path": loc.path,
+                "start_line": loc.line_start,
+                "end_line": loc.line_end,
+                "annotation_level": "notice",
+                "title": "Tracewise",
+                "message": redact(_CTRL.sub("", d.root_cause or ""))[:1000] or "See the Tracewise report.",
+            }
+        )
+    return CheckOutput(title[:120], summary[:2000], text[:CHECK_TEXT_MAX], tuple(annotations[:10]))
+
+
+def render_could_not_complete(
+    repo: str, run_id: int, attempt: int, head_sha: str, reason: str, *, marker: str | None = None, permission: str | None = None
+) -> str:
+    """FS-ERR-1 / FS-ERR-3: a short, safe notice. Never includes exception text, paths or provider errors."""
+    owner, name = validate_owner_repo(repo)
+    base = f"{GITHUB}/{quote(owner)}/{quote(name)}"
+    head = f"<!-- tracewise:{marker} -->\n" if marker and _MARKER.match(marker) else ""
+    if reason == "permission_denied":
+        need = _PERMISSION_TEXT.get((permission or "").split("=")[0].split(":")[0], "a required permission")
+        body = (
+            f"Tracewise could not read this run because the app lacks **{esc(need)}** on this repository. "
+            "No analysis was performed; grant the permission and re-run the job."
+        )
+        title = "missing permission"
+    else:
+        body = (
+            "Tracewise could not complete the analysis of this run after several attempts. "
+            "No root cause is claimed and no fix is suggested. Re-running the job will trigger a new analysis."
+        )
+        title = "could not complete the analysis"
+    links = (
+        f"[Run]({base}/actions/runs/{int(run_id)}/attempts/{int(attempt)}) · [Commit `{head_sha[:12]}`]({base}/commit/{head_sha})"
+    )
+    return redact(f"{head}## Tracewise: {title}\n\n{body}\n\n{links}\n")
+
+
+def publication_notes(text: str, missing: dict[str, str | None]) -> str:
+    """Append which surfaces could not be written and why (AT-REL-05), within the Check Run limit."""
+    if not missing:
+        return text
+    label = {"pr_comment": "pull request comment", "commit_comment": "commit comment"}
+    rows = [
+        f"- The {label.get(s, s)} could not be posted: the app lacks "
+        f"**{esc(_PERMISSION_TEXT.get((p or '').split('=')[0].split(':')[0], p or 'a required permission'))}**."
+        for s, p in sorted(missing.items())
+    ]
+    note = "\n\n### Publication\n\n" + "\n".join(rows) + "\n"
+    return (text[: CHECK_TEXT_MAX - len(note) - 1] + note) if len(text) + len(note) > CHECK_TEXT_MAX else text + note
