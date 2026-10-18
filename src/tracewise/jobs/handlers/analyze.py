@@ -36,7 +36,7 @@ from tracewise.analysis.diagnose import diagnose
 from tracewise.context.gitfetch import GitFetcher
 from tracewise.contracts import AnalysisJob, Status
 from tracewise.db import repositories as repo
-from tracewise.db.session import Conn, transaction
+from tracewise.db.session import Conn, require_tenant_plane, transaction
 from tracewise.github import errors as gh_err
 from tracewise.github.auth import TokenProvider
 from tracewise.github.client import GitHubHTTP, RepoClient
@@ -120,6 +120,8 @@ def _associate(rc_p: RepoClient, job: AnalysisJob) -> tuple[PRAssociation, str |
 
 
 def make_analyze_handler(deps: AnalyzeDeps) -> Handler:
+    require_tenant_plane(deps.pool)  # T-705: a misconfigured DATABASE_URL must not silently bypass RLS
+
     def handle(ctx: JobContext) -> dict[str, Any]:
         job = _load(ctx, deps)
         rc_a = RepoClient(

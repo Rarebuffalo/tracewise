@@ -51,3 +51,25 @@ def transaction(pool: ConnectionPool[Conn], timeout_s: float | None = None, *, t
         raise DatabaseUnavailable("database pool timeout") from e
     except psycopg.OperationalError as e:
         raise DatabaseUnavailable(f"database operational error ({type(e).__name__})") from e
+
+
+class WrongDatabaseRole(RuntimeError):
+    """A pool is connected as a role that does not belong to the plane it is used for (T-705)."""
+
+
+def require_tenant_plane(pool: ConnectionPool[Conn]) -> None:
+    """Fail closed if a tenant-plane pool could bypass row-level security.
+
+    Guards against configuring `DATABASE_URL` with the system, owner or a superuser role: queries would still
+    work, but RLS would silently not apply. Raises `WrongDatabaseRole` (role name only; never the URL).
+    """
+    with transaction(pool) as conn:
+        row = conn.execute(
+            """SELECT r.rolname, r.rolsuper, r.rolbypassrls,
+                      EXISTS (SELECT 1 FROM pg_class c WHERE c.relnamespace = 'public'::regnamespace
+                              AND c.relkind = 'r' AND c.relowner = r.oid) AS owns_tables
+               FROM pg_roles r WHERE r.rolname = current_user"""
+        ).fetchone()
+    if row is None or row["rolsuper"] or row["rolbypassrls"] or row["owns_tables"]:
+        role = row["rolname"] if row else "unknown"
+        raise WrongDatabaseRole(f"tenant-plane pool uses role {role!r}, which is not subject to row-level security")
