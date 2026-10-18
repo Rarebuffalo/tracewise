@@ -1,5 +1,31 @@
 # Change Log
 
+## 2026-10-18 (s): Cross-phase integration audit (T-701, T-702, T-705)
+
+### Tests
+
+`tests/db/test_cross_phase.py` (2 tests): signed webhooks through the real app, recovery against the fake API, and the real worker on the RLS tenant pool.
+
+- **Uninstall:**
+  - queued and retry_wait jobs are cancelled;
+  - the orphaned running job (expired lease) is reclaimed by the reaper and cancelled by the handler's scope check;
+  - redelivery skips the inactive installation;
+  - the sweep skips it;
+  - a redelivered webhook is refused;
+  - late `created`, `unsuspend`, `new_permissions_accepted` and `added` events do not resurrect it;
+  - zero GitHub writes, provider calls, token mints, analyses or publications.
+- **Sweep across two installations:**
+  - the system plane enqueues both;
+  - the tenant plane sees only its own swept rows;
+  - suspending one installation cancels its job;
+  - the other publishes once under RLS;
+  - unsuspend does not revive the cancelled job;
+  - a repeated sweep adds nothing.
+
+### Benchmark
+
+The full slow-inclusive rerun is identical to Phase 0 (`docs/benchmark-runs/2026-10-18-phase4-rerun-after-t701-t702-t705.md`). Truth files are unchanged since d4745aa.
+
 ## 2026-10-18 (r): T-705 Postgres row-level security and tenant isolation
 
 **Scope:** FS-SEC-6, AT-SEC-03. Two database roles: a tenant plane under RLS and a system plane (D-11, ARCHITECTURE §4.7).
