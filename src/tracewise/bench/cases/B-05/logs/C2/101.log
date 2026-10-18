@@ -1,0 +1,21 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.7, pytest-8.3.3, pluggy-1.5.0
+rootdir: /home/runner/work/b-05/b-05
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collecting ... collected 1 item
+
+tests/test_main.py::test_compute FAILED                                  [100%]
+
+=================================== FAILURES ===================================
+_________________________________ test_compute _________________________________
+tests/test_main.py:5: in test_compute
+    assert compute(2) == 4
+           ^^^^^^^^^^
+app/main.py:5: in compute
+    return foo.bar(x)
+           ^^^^^^^
+E   AttributeError: module 'foo' has no attribute 'bar'. Did you mean: 'baz'?
+=========================== short test summary info ============================
+FAILED tests/test_main.py::test_compute - AttributeError: module 'foo' has no...
+============================== 1 failed in 0.01s ===============================

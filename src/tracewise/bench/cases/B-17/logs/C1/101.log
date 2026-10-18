@@ -1,0 +1,21 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.7, pytest-8.3.3, pluggy-1.5.0
+rootdir: /home/runner/work/b-17/b-17
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collecting ... collected 1 item
+
+tests/test_parse.py::test_read FAILED                                    [100%]
+
+=================================== FAILURES ===================================
+__________________________________ test_read ___________________________________
+tests/test_parse.py:5: in test_read
+    assert read('a=1') == {'a': '1'}
+           ^^^^^^^^^^^
+app/parse.py:6: in read
+    return foo.parse(text, strict=True)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: parse() got an unexpected keyword argument 'strict'
+=========================== short test summary info ============================
+FAILED tests/test_parse.py::test_read - TypeError: parse() got an unexpected ...
+============================== 1 failed in 0.01s ===============================

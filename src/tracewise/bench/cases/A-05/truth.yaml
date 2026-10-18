@@ -1,0 +1,9 @@
+case: A-05
+version: 1
+source_type: synthetic
+phase: mvp
+runs:
+  C1:
+    first_error_contains: needle at line 3000000
+    log_truncated: true
+    rationale: Streaming retention keeps the error window from a 200 MB log and flags truncation (AT-LOG-04).

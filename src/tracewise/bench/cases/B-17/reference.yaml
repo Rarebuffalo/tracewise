@@ -1,0 +1,44 @@
+case: B-17
+runs:
+  C1:
+  - tool: read_file
+    args:
+      path: app/parse.py
+      start: 1
+  - tool: read_file
+    args:
+      path: requirements.txt
+      start: 1
+  - answer:
+      category: dependency
+      root_cause: foo 2.0 removed the strict keyword from parse().
+      why: 'TypeError: parse() got an unexpected keyword argument ''strict'' at app/parse.py:6.'
+      problem_location:
+        path: app/parse.py
+        line_start: 6
+        line_end: 6
+      fix: null
+      next_steps:
+      - Pin foo<2 or drop strict=True.
+      file_verdicts: []
+  C2:
+  - tool: read_file
+    args:
+      path: app/parse.py
+      start: 1
+  - tool: read_file
+    args:
+      path: requirements.txt
+      start: 1
+  - answer:
+      category: dependency
+      root_cause: foo 2.0 removed the strict keyword from parse().
+      why: The docstring edit is unrelated to the TypeError at app/parse.py:6.
+      problem_location:
+        path: app/parse.py
+        line_start: 6
+        line_end: 6
+      fix: null
+      next_steps:
+      - Pin foo<2 or drop strict=True.
+      file_verdicts: []

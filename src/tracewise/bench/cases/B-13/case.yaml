@@ -1,0 +1,20 @@
+id: B-13
+version: 1
+title: hanging test → job timeout with a truncated log
+track: B
+source_type: synthetic-handwritten
+language: python
+repo: bench/b-13
+commits:
+  C1:
+    message: 'test: add polling test'
+    delete: []
+  C2:
+    message: 'docs: update README'
+jobs:
+- id: 101
+  name: Tests
+  step: Run pytest
+  command: pytest
+  handwritten: handwritten/hang.log
+  timed_out: true

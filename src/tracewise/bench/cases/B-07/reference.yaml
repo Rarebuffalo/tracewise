@@ -1,0 +1,36 @@
+case: B-07
+runs:
+  C1:
+  - tool: read_file
+    args:
+      path: app/db.py
+      start: 1
+  - answer:
+      category: config_secret
+      root_cause: The DB_URL secret is not set in the workflow environment.
+      why: app/db.py:5 reads os.environ['DB_URL'].
+      problem_location:
+        path: app/db.py
+        line_start: 5
+        line_end: 5
+      fix: null
+      next_steps:
+      - Add DB_URL as a repository secret and pass it to the job env.
+      file_verdicts: []
+  C2:
+  - tool: read_file
+    args:
+      path: app/db.py
+      start: 1
+  - answer:
+      category: config_secret
+      root_cause: The DB_URL secret is not set in the workflow environment.
+      why: app/db.py:5 reads DB_URL.
+      problem_location:
+        path: app/db.py
+        line_start: 5
+        line_end: 5
+      fix: null
+      next_steps:
+      - Provide DB_URL to the job.
+      file_verdicts: []

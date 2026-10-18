@@ -1,0 +1,28 @@
+id: B-12
+version: 1
+title: 'deleted file: one tsc error and 40 jest ''Cannot find module'' cascades'
+track: B
+source_type: mixed
+language: typescript
+repo: bench/b-12
+commits:
+  C1:
+    message: 'chore: remove unused util'
+    delete:
+    - src/util.ts
+  C2:
+    message: 'docs: update README'
+jobs:
+- id: 101
+  name: typecheck
+  step: Run tsc
+  command: npx tsc -p .
+  exec:
+  - - tsc
+    - -p
+    - .
+- id: 102
+  name: test
+  step: Run jest
+  command: npx jest
+  handwritten: handwritten/jest.log

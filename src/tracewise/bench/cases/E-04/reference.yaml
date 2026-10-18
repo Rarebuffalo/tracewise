@@ -1,0 +1,20 @@
+case: E-04
+runs:
+  C1:
+  - tool: read_file
+    args:
+      path: coffee_shop/pricing.py
+      start: 30
+      end: 41
+  - answer:
+      category: code_regression
+      root_cause: total() returns only the tax instead of subtotal plus tax.
+      why: coffee_shop/pricing.py:41 multiplies the subtotal by TAX_RATE alone.
+      problem_location:
+        path: coffee_shop/pricing.py
+        line_start: 41
+        line_end: 41
+      fix: null
+      next_steps:
+      - Fix line 41.
+      file_verdicts: []

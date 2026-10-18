@@ -1,0 +1,27 @@
+id: B-05
+version: 1
+title: upstream foo 2.0 removes bar(); no repository change
+track: B
+source_type: synthetic
+language: python
+repo: bench/b-05
+commits:
+  C1:
+    message: 'docs: draft release notes'
+    delete: []
+  C2:
+    message: 'docs: update README'
+jobs:
+- id: 101
+  name: Tests
+  step: Run pytest
+  command: pytest --tb=short -v
+  exec:
+  - - pytest
+    - --tb=short
+    - -v
+    - -p
+    - no:cacheprovider
+    - tests
+  pythonpath:
+  - env/foo2

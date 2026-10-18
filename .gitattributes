@@ -1,0 +1,2 @@
+# Benchmark fixtures reproduce real tool output byte for byte (including trailing spaces).
+src/tracewise/bench/cases/** -whitespace

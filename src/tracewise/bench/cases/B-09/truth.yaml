@@ -1,0 +1,32 @@
+case: B-09
+version: 1
+source_type: synthetic
+phase: mvp
+runs:
+  C1:
+    category:
+    - infra_runner
+    - flaky_suspect
+    touches_implicated: false
+    fix_expected: false
+    next_step_contains:
+    - re-run
+    evidence:
+    - log: 101
+      contains: Read timed out
+    must_not:
+    - trigger_caused
+    - fix_present
+    rationale: The external endpoint timed out; C1 only adds docs/notes.md. First step should be a re-run.
+  C2:
+    category:
+    - infra_runner
+    - flaky_suspect
+    touches_implicated: false
+    fix_expected: false
+    next_step_contains:
+    - re-run
+    must_not:
+    - trigger_caused
+    - fix_present
+    rationale: Same external cause.

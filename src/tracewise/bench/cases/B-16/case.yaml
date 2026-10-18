@@ -1,0 +1,16 @@
+id: B-16
+version: 1
+title: outcome tracking after a partial and a full fix
+track: B
+source_type: synthetic
+language: python
+repo: bench/b-16
+commits:
+  C1:
+    message: 'feat: change'
+    delete: []
+  C2:
+    message: 'docs: update README'
+jobs: []
+phase: p2
+p2_reason: 'P2: needs outcome tracking on the next run (FS-PUB-6), not implemented in the MVP'

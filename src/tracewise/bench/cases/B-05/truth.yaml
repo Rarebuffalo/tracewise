@@ -1,0 +1,40 @@
+case: B-05
+version: 1
+source_type: synthetic
+phase: mvp
+runs:
+  C1:
+    category:
+    - dependency
+    location:
+    - path: app/main.py
+      line: 5
+    touches_implicated: false
+    fix_expected: false
+    next_step_contains:
+    - foo<2
+    statement_contains:
+    - not implicated
+    evidence:
+    - log: 101
+      contains: has no attribute 'bar'
+    - file: requirements.txt
+      contains: foo>=1.9
+    must_not:
+    - trigger_caused
+    - fix_present
+    rationale: foo 2.0 (outside the repo) removed bar(); C1 only adds docs/notes.md.
+  C2:
+    category:
+    - dependency
+    location:
+    - path: app/main.py
+      line: 5
+    touches_implicated: false
+    fix_expected: false
+    next_step_contains:
+    - foo<2
+    must_not:
+    - trigger_caused
+    - fix_present
+    rationale: Same external cause; C2 only edits README.md.

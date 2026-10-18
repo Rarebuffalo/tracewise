@@ -1,0 +1,46 @@
+case: B-02
+runs:
+  C1:
+  - tool: read_file
+    args:
+      path: coffee_shop/pricing.py
+      start: 30
+      end: 41
+  - answer:
+      category: code_regression
+      root_cause: total() returns only the tax (subtotal_ * TAX_RATE) instead of subtotal plus tax.
+      why: coffee_shop/pricing.py:41 multiplies the subtotal by TAX_RATE alone, so total([(1.0, 1)]) is 0.21 instead of 1.21.
+      problem_location:
+        path: coffee_shop/pricing.py
+        line_start: 41
+        line_end: 41
+      fix:
+        description: Multiply by (1 + TAX_RATE).
+        size: trivial
+        replacement:
+          path: coffee_shop/pricing.py
+          line_start: 41
+          line_end: 41
+          new_text: '    return round(subtotal_ * (1 + TAX_RATE), 2)'
+      next_steps: []
+      file_verdicts:
+      - path: coffee_shop/pricing.py
+        verdict: line 41 drops the subtotal
+  C2:
+  - tool: read_file
+    args:
+      path: coffee_shop/pricing.py
+      start: 30
+      end: 41
+  - answer:
+      category: code_regression
+      root_cause: total() returns only the tax (subtotal_ * TAX_RATE) instead of subtotal plus tax.
+      why: coffee_shop/pricing.py:41 multiplies the subtotal by TAX_RATE alone.
+      problem_location:
+        path: coffee_shop/pricing.py
+        line_start: 41
+        line_end: 41
+      fix: null
+      next_steps:
+      - Fix line 41.
+      file_verdicts: []

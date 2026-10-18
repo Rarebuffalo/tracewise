@@ -1,0 +1,42 @@
+case: B-01
+version: 1
+source_type: synthetic
+phase: mvp
+runs:
+  C1:
+    category:
+    - code_regression
+    location:
+    - path: src/lib.ts
+      line: 1
+    - path: src/app.ts
+      line: 1
+    location_required: true
+    touches_implicated: true
+    primaries: 1
+    failed_step: Run tsc
+    first_error_contains: TS2305
+    evidence:
+    - log: 101
+      contains: has no exported member 'formatPrice'
+    - file: src/lib.ts
+      line: 1
+      contains: formatAmount
+    must_not:
+    - high_confidence_wrong
+    rationale: C1 renamed the export in src/lib.ts:1; src/app.ts:1 still imports the old name (TS2305).
+  C2:
+    category:
+    - code_regression
+    location:
+    - path: src/lib.ts
+      line: 1
+    - path: src/app.ts
+      line: 1
+    location_required: true
+    touches_implicated: false
+    statement_contains:
+    - changed only README.md; not implicated; likely pre-dates this push
+    must_not:
+    - trigger_caused
+    rationale: C2 only edits README.md on top of the C1 defect.

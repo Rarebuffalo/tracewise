@@ -1,0 +1,34 @@
+case: B-08
+version: 1
+source_type: synthetic-handwritten
+phase: mvp
+runs:
+  C1:
+    category:
+    - config_secret
+    - code_regression
+    location:
+    - path: .github/workflows/ci.yml
+      line: 10
+      tolerance: 2
+    location_required: true
+    touches_implicated: true
+    siblings_count: 1
+    evidence:
+    - log: 101
+      contains: connection refused
+    - file: .github/workflows/ci.yml
+      line: 10
+      contains: POSTGRES_PASS
+    rationale: C1 renamed POSTGRES_PASSWORD to POSTGRES_PASS (ci.yml:10); the postgres image refuses to start without it.
+  C2:
+    category:
+    - config_secret
+    - code_regression
+    location:
+    - path: .github/workflows/ci.yml
+      line: 10
+      tolerance: 2
+    location_required: true
+    touches_implicated: false
+    rationale: C2 only edits README.md.

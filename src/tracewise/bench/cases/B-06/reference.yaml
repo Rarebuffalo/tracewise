@@ -1,0 +1,36 @@
+case: B-06
+runs:
+  C1:
+  - tool: read_file
+    args:
+      path: requirements.txt
+      start: 1
+  - answer:
+      category: dependency
+      root_cause: bar 2.0 requires foo>=2.0 but foo is pinned to 1.0.
+      why: requirements.txt:2 pins bar==2.0 which conflicts with foo==1.0.
+      problem_location:
+        path: requirements.txt
+        line_start: 2
+        line_end: 2
+      fix: null
+      next_steps:
+      - 'Align versions: upgrade foo to 2.x or keep bar at 1.4.'
+      file_verdicts: []
+  C2:
+  - tool: read_file
+    args:
+      path: requirements.txt
+      start: 1
+  - answer:
+      category: dependency
+      root_cause: bar 2.0 requires foo>=2.0 but foo is pinned to 1.0.
+      why: The pins conflict.
+      problem_location:
+        path: requirements.txt
+        line_start: 2
+        line_end: 2
+      fix: null
+      next_steps:
+      - Align foo and bar versions.
+      file_verdicts: []

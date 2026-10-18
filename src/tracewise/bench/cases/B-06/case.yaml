@@ -1,0 +1,19 @@
+id: B-06
+version: 1
+title: conflicting pins after a dependency bump (ResolutionImpossible)
+track: B
+source_type: synthetic-handwritten
+language: python
+repo: bench/b-06
+commits:
+  C1:
+    message: 'deps: bump bar to 2.0'
+    delete: []
+  C2:
+    message: 'docs: update README'
+jobs:
+- id: 101
+  name: Install
+  step: Install dependencies
+  command: pip install -r requirements.txt
+  handwritten: handwritten/pip.log

@@ -1,0 +1,11 @@
+case: A-04
+version: 1
+source_type: synthetic-handwritten
+phase: mvp
+runs:
+  C1:
+    first_error_contains: Could not find a version
+    cascades: 1
+    primaries: 1
+    failed_step: Install and test
+    rationale: The install failure is the cause; the later missing-module error is its cascade (AT-DX-07).

@@ -1,0 +1,5 @@
+============================= test session starts ==============================
+collected 1 item
+
+tests/test_hang.py::test_poll 
+##[error]The job running on runner GitHub Actions 2 has exceeded the maximum execution time of 10 minutes.

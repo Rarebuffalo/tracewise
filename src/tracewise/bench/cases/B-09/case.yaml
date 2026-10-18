@@ -1,0 +1,27 @@
+id: B-09
+version: 1
+title: external HTTP ReadTimeout; no code cause
+track: B
+source_type: synthetic
+language: python
+repo: bench/b-09
+commits:
+  C1:
+    message: 'docs: ops notes'
+    delete: []
+  C2:
+    message: 'docs: update README'
+jobs:
+- id: 101
+  name: Tests
+  step: Run pytest
+  command: pytest --tb=short -v
+  exec:
+  - - pytest
+    - --tb=short
+    - -v
+    - -p
+    - no:cacheprovider
+    - tests
+  pythonpath:
+  - env/netlib

@@ -1,0 +1,37 @@
+case: B-10
+runs:
+  C1:
+  - tool: read_file
+    args:
+      path: coffee_shop/greet.py
+      start: 1
+  - answer:
+      category: code_regression
+      root_cause: greet() is annotated to return int but returns a str; os is imported but unused.
+      why: mypy reports return-value at coffee_shop/greet.py:5 and ruff F401 at line 1.
+      problem_location:
+        path: coffee_shop/greet.py
+        line_start: 5
+        line_end: 5
+      fix:
+        description: Annotate greet() as returning str and remove the unused import.
+        size: trivial
+      next_steps: []
+      file_verdicts: []
+  C2:
+  - tool: read_file
+    args:
+      path: coffee_shop/greet.py
+      start: 1
+  - answer:
+      category: code_regression
+      root_cause: greet() is annotated to return int but returns a str.
+      why: mypy return-value at line 5.
+      problem_location:
+        path: coffee_shop/greet.py
+        line_start: 5
+        line_end: 5
+      fix: null
+      next_steps:
+      - Fix the annotation.
+      file_verdicts: []

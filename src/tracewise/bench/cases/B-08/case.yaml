@@ -1,0 +1,19 @@
+id: B-08
+version: 1
+title: 'services: postgres never starts after a workflow env rename (connection refused)'
+track: B
+source_type: synthetic-handwritten
+language: python
+repo: bench/b-08
+commits:
+  C1:
+    message: 'ci: tidy the postgres service env'
+    delete: []
+  C2:
+    message: 'docs: update README'
+jobs:
+- id: 101
+  name: test
+  step: Run pytest
+  command: pytest
+  handwritten: handwritten/pg.log

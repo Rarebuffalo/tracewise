@@ -1,0 +1,33 @@
+case: B-10
+version: 1
+source_type: synthetic
+phase: mvp
+runs:
+  C1:
+    category:
+    - code_regression
+    location:
+    - path: coffee_shop/greet.py
+      line: 1
+    - path: coffee_shop/greet.py
+      line: 5
+    location_required: true
+    touches_implicated: true
+    primaries: 2
+    evidence:
+    - log: 101
+      contains: F401
+    - log: 101
+      contains: return-value
+    rationale: C1 added an unused import (line 1, F401) and a str return under an int annotation (line 5).
+  C2:
+    category:
+    - code_regression
+    location:
+    - path: coffee_shop/greet.py
+      line: 1
+    - path: coffee_shop/greet.py
+      line: 5
+    location_required: true
+    touches_implicated: false
+    rationale: C2 only edits README.md.

@@ -1,0 +1,28 @@
+id: E-06
+version: 1
+title: hostile model output (links, mentions, HTML, injected commands, forbidden fields)
+track: E
+source_type: synthetic
+language: python
+repo: bench/e-06
+commits:
+  C1:
+    message: 'refactor: simplify total()'
+    delete: []
+  C2:
+    message: 'docs: update README'
+jobs:
+- id: 101
+  name: Tests (Python 3.11)
+  step: Run pytest
+  command: pytest --tb=short -v
+  exec:
+  - - pytest
+    - --tb=short
+    - -v
+    - -p
+    - no:cacheprovider
+    - tests
+runs:
+- C1
+provider_override: adversarial

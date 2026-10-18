@@ -1,0 +1,23 @@
+case: B-09
+runs:
+  C1:
+  - answer:
+      category: infra_runner
+      root_cause: The rates service did not answer within the read timeout.
+      why: netlib.ReadTimeout from rates.example.invalid; no code change is involved.
+      problem_location: null
+      fix: null
+      next_steps:
+      - Re-run the job.
+      - Check the status of the rates service.
+      file_verdicts: []
+  C2:
+  - answer:
+      category: infra_runner
+      root_cause: The rates service did not answer within the read timeout.
+      why: An external timeout.
+      problem_location: null
+      fix: null
+      next_steps:
+      - Re-run the job.
+      file_verdicts: []

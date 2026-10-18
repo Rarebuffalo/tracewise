@@ -1,0 +1,31 @@
+id: B-10
+version: 1
+title: ruff F401 + mypy incompatible return type
+track: B
+source_type: synthetic
+language: python
+repo: bench/b-10
+commits:
+  C1:
+    message: 'feat: greet returns a code'
+    delete: []
+  C2:
+    message: 'docs: update README'
+jobs:
+- id: 101
+  name: lint
+  step: Run checks
+  command: ruff check . && mypy .
+  exec:
+  - - ruff
+    - check
+    - --no-cache
+    - --output-format=concise
+    - --select
+    - F
+    - coffee_shop
+  - - mypy
+    - --no-incremental
+    - --cache-dir=/dev/null
+    - --show-error-codes
+    - coffee_shop/greet.py

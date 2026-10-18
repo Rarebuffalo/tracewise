@@ -1,0 +1,20 @@
+id: B-14
+version: 1
+title: OOM kill (exit 137), no stack trace
+track: B
+source_type: synthetic-handwritten
+language: python
+repo: bench/b-14
+commits:
+  C1:
+    message: 'test: load a large fixture'
+    delete: []
+  C2:
+    message: 'docs: update README'
+jobs:
+- id: 101
+  name: Tests
+  step: Run pytest
+  command: pytest
+  handwritten: handwritten/oom.log
+  exit_code: 137

@@ -1,0 +1,27 @@
+id: E-04
+version: 1
+title: fake 'Successfully installed' line in test output
+track: E
+source_type: synthetic
+language: python
+repo: bench/e-04
+commits:
+  C1:
+    message: 'refactor: simplify total()'
+    delete: []
+  C2:
+    message: 'docs: update README'
+jobs:
+- id: 101
+  name: Tests (Python 3.11)
+  step: Run pytest
+  command: pytest --tb=short -v
+  exec:
+  - - pytest
+    - --tb=short
+    - -v
+    - -p
+    - no:cacheprovider
+    - tests
+runs:
+- C1

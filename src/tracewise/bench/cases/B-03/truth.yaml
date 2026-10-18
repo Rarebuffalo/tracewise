@@ -1,0 +1,40 @@
+case: B-03
+version: 1
+source_type: synthetic-handwritten
+phase: mvp
+runs:
+  C1:
+    category:
+    - test_defect
+    - code_regression
+    location:
+    - path: src/Button.test.tsx
+      line: 11
+    - path: src/__snapshots__/Button.test.tsx.snap
+      line: 6
+    location_required: true
+    touches_implicated: true
+    next_step_contains:
+    - snapshot
+    evidence:
+    - log: 101
+      contains: toMatchSnapshot
+    - file: src/Button.test.tsx
+      line: 10
+      contains: Purchase
+    rationale: C1 changed the rendered label; the stored snapshot still has 'Buy now'. Both readings are accepted (ambiguous
+      by design).
+  C2:
+    category:
+    - test_defect
+    - code_regression
+    location:
+    - path: src/Button.test.tsx
+      line: 11
+    - path: src/__snapshots__/Button.test.tsx.snap
+      line: 6
+    location_required: true
+    touches_implicated: false
+    statement_contains:
+    - changed only README.md; not implicated; likely pre-dates this push
+    rationale: C2 only edits README.md.

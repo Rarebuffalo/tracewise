@@ -1,0 +1,4 @@
+============================= test session starts ==============================
+collected 3 items
+
+tests/test_big.py::test_load Killed

@@ -1,0 +1,24 @@
+case: B-14
+version: 1
+source_type: synthetic-handwritten
+phase: mvp
+runs:
+  C1:
+    category: []
+    answerable: false
+    fix_expected: false
+    evidence:
+    - log: 101
+      contains: Killed
+    must_not:
+    - high_confidence_wrong
+    - fix_present
+    rationale: 'Exit 137 with no stack: any causal claim at >=medium is unsupported; abstention is the correct answer.'
+  C2:
+    category: []
+    answerable: false
+    fix_expected: false
+    must_not:
+    - high_confidence_wrong
+    - fix_present
+    rationale: Same OOM kill; C2 only edits README.md.

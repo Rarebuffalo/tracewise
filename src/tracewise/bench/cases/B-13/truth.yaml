@@ -1,0 +1,30 @@
+case: B-13
+version: 1
+source_type: synthetic-handwritten
+phase: mvp
+runs:
+  C1:
+    category:
+    - code_regression
+    - test_defect
+    answerable: either
+    max_band: low
+    location:
+    - path: tests/test_hang.py
+      line: 5
+    evidence:
+    - log: 101
+      contains: maximum execution time
+    must_not:
+    - high_confidence_wrong
+    rationale: The log ends at the timeout; abstaining is justified, a hang location is accepted only at low.
+  C2:
+    category:
+    - code_regression
+    - test_defect
+    answerable: either
+    max_band: low
+    location:
+    - path: tests/test_hang.py
+      line: 5
+    rationale: Same timeout; C2 only edits README.md.
