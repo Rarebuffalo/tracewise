@@ -22,3 +22,6 @@ htmlcov/
 # Quarantined evidence (D-3): kept untouched on disk, never in git history.
 # See research/final-audit/PROVENANCE-QUARANTINE.md
 research/final-audit/evidence/
+
+# Benchmark output (never product state, never committed)
+.bench-results/

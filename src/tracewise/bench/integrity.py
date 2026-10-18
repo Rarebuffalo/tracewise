@@ -26,7 +26,7 @@ def check_case(case_id: str) -> list[str]:
         return problems
     try:
         spec, truth, ref = load_case(case_id)
-    except Exception as e:
+    except Exception as e:  # any load failure is an integrity problem, reported by type
         return [f"{case_id}: schema invalid ({type(e).__name__})"]
     if spec.id != case_id or truth.case != case_id:
         bad("id does not match its directory")
