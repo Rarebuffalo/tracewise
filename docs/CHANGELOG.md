@@ -1,5 +1,28 @@
 # Change Log
 
+## 2026-10-19 (ab): Phase 13 recovery and concurrency adversarial tests
+
+### Defects found (regression tests written first) and fixed in `recovery.py`
+
+| ID | Defect | Fix |
+|---|---|---|
+| R-1 | A 4xx, invalid JSON or malformed page from one repository **raised out of the sweep**. Later repositories were never swept and no summary was emitted. Because the cursor never passed it, the same repository blocked every future pass. A permanent delivery-list error also raised. | Faults are isolated per repository (`failed_repos`; the pass is incomplete) |
+| R-2 | 5xx and timeouts were labelled `rate_limited`, and a 5xx on one repository stopped the whole sweep. | Labels: `rate_limited`, `github_unavailable`, `list_failed`. Only a rate limit stops the sweep. |
+| R-3 | A redelivery POST interrupted by a 5xx or transport error was not recorded, so its cooldown and cap were bypassed. | Recorded as `uncertain` |
+
+### Tests
+
+`tests/db/test_recovery_faults.py` (10) and `tests/db/test_adversarial.py` (9):
+
+- a worker crash (BaseException) after claim, after evidence, during diagnosis and during publication, followed by a restart (new HTTP client and token cache) and reaping of the expired lease: exactly one commit comment and one Check Run;
+- duplicate delivery (same and new GUID) after completion writes nothing;
+- retry exhaustion ends dead, with the commit comment never duplicated;
+- two workers racing for one job;
+- repository removal during publication (**pending D-10**);
+- purge alongside jobs in every state.
+
+Repeated 3× with no failure.
+
 ## 2026-10-19 (aa): Phase 12 fresh-install and migration lifecycle
 
 - `scripts/db/provision_roles.sql`: a reviewed role template. It has no passwords and creates a non-superuser migration owner. Hardening: no TEMP and no CREATE for PUBLIC.

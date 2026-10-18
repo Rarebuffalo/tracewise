@@ -59,12 +59,18 @@ class RecoverySummary:
     repos_swept: int = 0
     errors: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     stopped: str | None = None
+    failed_repos: int = 0  # repositories skipped this pass after a GitHub fault (revisited next round)
     completed: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         d = asdict(self)
         d["skipped"], d["errors"] = dict(self.skipped), dict(self.errors)
         return d
+
+
+def _stop_reason(e: gh_err.GitHubRetryable) -> str:
+    """A rate limit (with a reset time) is not the same signal as a 5xx or a transport failure."""
+    return "rate_limited" if e.retry_after_s is not None or "rate limited" in str(e) else "github_unavailable"
 
 
 def _checkpoint(conn: Conn, key: str) -> str | None:
@@ -127,8 +133,12 @@ def redeliver_failed_deliveries(
             newest = when if newest is None or when > newest else newest
             if when >= floor:
                 groups[guid].append(d)
-    except gh_err.GitHubRetryable:
-        s.stopped = "rate_limited"
+    except gh_err.GitHubRetryable as e:
+        s.stopped = _stop_reason(e)
+        s.errors["list"] += 1
+        return _done(s, completed=False)
+    except gh_err.GitHubPermanent:  # 4xx, invalid JSON, unexpected shape: report, never raise or advance
+        s.stopped = "list_failed"
         s.errors["list"] += 1
         return _done(s, completed=False)
     requested = 0
@@ -163,13 +173,18 @@ def redeliver_failed_deliveries(
             if requested >= max_requests:
                 s.stopped = s.stopped or "request_cap"  # keep an earlier reason (e.g. page_cap)
                 break
+            interrupted = False
             try:
                 http.app_post("redeliver_app_hook_delivery", jwt_, {"delivery_id": latest["id"]})
                 status = "requested"
-            except gh_err.GitHubRetryable:
-                s.stopped = s.stopped or "rate_limited"
+            except gh_err.GitHubRetryable as e:
+                s.stopped = s.stopped or _stop_reason(e)
                 s.errors["redeliver"] += 1
-                break
+                if _stop_reason(e) == "rate_limited":
+                    break  # a definite refusal: nothing reached GitHub, so nothing is recorded
+                # 5xx or transport failure: the POST may have reached GitHub. Record an uncertain attempt
+                # (the cooldown and the attempt cap apply to it), then stop.
+                status, interrupted = "uncertain", True
             except gh_err.GitHubPermanent as e:
                 status = f"refused:{e.status}"
                 s.errors["redeliver"] += 1
@@ -194,6 +209,8 @@ def redeliver_failed_deliveries(
             )
             if status == "requested":
                 s.redelivered += 1
+            if interrupted:
+                break
     if s.stopped is None and newest is not None:  # only a complete pass may advance the high-water mark
         with transaction(pool) as conn:
             _set_checkpoint(conn, "deliveries:high_water", newest.isoformat())
@@ -241,16 +258,40 @@ def sweep_failed_runs(
                 for run in runs:
                     s.scanned += 1
                     _ingest_run(pool, r, run, s)
-        except gh_err.GitHubRetryable:
-            s.stopped = "rate_limited"
-            s.errors["list_runs"] += 1
-            break
+        except gh_err.GitHubRetryable as e:
+            if _stop_reason(e) == "rate_limited":
+                s.stopped = "rate_limited"  # stop the whole pass: every further call would be refused too
+                s.errors["list_runs"] += 1
+                break
+            s.errors["GitHubRetryable"] += 1  # this repository only: skip it, keep sweeping the others
+            s.failed_repos += 1
+            event(
+                log,
+                "recovery.repo_failed",
+                logging.WARNING,
+                repo_id=r["id"],
+                installation_id=r["installation_id"],
+                error_type=type(e).__name__,
+            )
+            continue
         except (gh_err.InstallationUnavailable, gh_err.PermissionDenied, gh_err.NotFound) as e:
             s.errors[type(e).__name__] += 1  # lifecycle (T-701) or the next pass sorts this out; move on
+        except gh_err.GitHubPermanent as e:  # 4xx, invalid JSON, unexpected shape: never block the other repositories
+            s.errors["GitHubPermanent"] += 1
+            s.failed_repos += 1
+            event(
+                log,
+                "recovery.repo_failed",
+                logging.WARNING,
+                repo_id=r["id"],
+                installation_id=r["installation_id"],
+                error_type=type(e).__name__,
+            )
+            continue
         s.repos_swept += 1
         with transaction(pool) as conn:
             _set_checkpoint(conn, "sweep:repo_cursor", str(r["id"]))
-    return _done(s, completed=s.stopped is None)
+    return _done(s, completed=s.stopped is None and s.failed_repos == 0)
 
 
 def _ingest_run(pool: ConnectionPool[Conn], r: dict[str, Any], run: dict[str, Any], s: RecoverySummary) -> None:
