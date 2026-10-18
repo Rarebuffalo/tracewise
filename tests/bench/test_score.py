@@ -251,3 +251,10 @@ def test_scoring_is_deterministic_and_pure() -> None:
     r = _results(records, ["B-02", "B-14"])
     before = copy.deepcopy(r)
     assert score_results(r) == score_results(r) and r == before
+
+
+def test_unexecuted_required_run_makes_the_suite_incomplete() -> None:
+    """A required case that did not run (e.g. slow A-05 excluded) must never yield complete=True."""
+    records = [{"case": "A-05", "commit": "C1", "repetition": 0, "status": "not_executed", "reason": "slow case excluded"}]
+    s = score_results(_results(records, ["A-05"]))["summary"]
+    assert s["counts"]["not_executed"] == 1 and s["complete"] is False
