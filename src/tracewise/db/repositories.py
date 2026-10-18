@@ -96,6 +96,23 @@ def insert_workflow_run(
     return int(row["id"])
 
 
+def find_workflow_run(conn: Conn, repo_id: int, run_id: int, attempt: int) -> int | None:
+    row = conn.execute(
+        "SELECT id FROM workflow_run WHERE repo_id = %s AND github_run_id = %s AND run_attempt = %s",
+        (repo_id, run_id, attempt),
+    ).fetchone()
+    return int(row["id"]) if row else None
+
+
+def repository_scope(conn: Conn, repo_id: int) -> dict[str, Any] | None:
+    """Authorisation context for a job: the repository row joined with its installation."""
+    return conn.execute(
+        """SELECT r.id, r.installation_id, r.full_name, r.enabled, r.removed_at, i.status AS installation_status
+           FROM repository r JOIN installation i ON i.id = r.installation_id WHERE r.id = %s""",
+        (repo_id,),
+    ).fetchone()
+
+
 def upsert_analysis(
     conn: Conn,
     *,
@@ -173,11 +190,32 @@ def reserve_publication(
     return row
 
 
-def mark_published(conn: Conn, publication_id: int, analysis_id: int, github_id: int) -> None:
+def mark_published(
+    conn: Conn,
+    publication_id: int,
+    analysis_id: int,
+    github_id: int,
+    *,
+    source_run_id: int | None = None,
+    source_attempt: int | None = None,
+    content_digest: str | None = None,
+) -> None:
     conn.execute(
-        """UPDATE publication SET state = 'published', github_id = %s, analysis_id = %s, last_error = NULL, updated_at = now()
+        """UPDATE publication SET state = 'published', github_id = %s, analysis_id = %s, last_error = NULL,
+               missing_permission = NULL, source_run_id = COALESCE(%s, source_run_id),
+               source_attempt = COALESCE(%s, source_attempt), content_digest = COALESCE(%s, content_digest),
+               updated_at = now()
            WHERE id = %s""",
-        (github_id, analysis_id, publication_id),
+        (github_id, analysis_id, source_run_id, source_attempt, content_digest, publication_id),
+    )
+
+
+def mark_unpublished_permission(conn: Conn, publication_id: int, permission: str | None) -> None:
+    """FS-PUB-5 / FS-ERR-3: the surface could not be written for lack of a permission. Never overwrites a published row."""
+    conn.execute(
+        """UPDATE publication SET state = 'unpublished_permission', missing_permission = %s, updated_at = now()
+           WHERE id = %s AND state <> 'published'""",
+        ((permission or "unknown")[:100], publication_id),
     )
 
 

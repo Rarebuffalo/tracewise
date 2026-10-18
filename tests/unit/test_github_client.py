@@ -329,3 +329,23 @@ def test_regression_log_cap_crossed_inside_a_later_chunk_keeps_complete_lines() 
 
     gh.route("GET", r"^//productionresultssa1", httpx.Response(200, content=chunks()))
     assert list(rc.job_log_lines(99)) == ["first line", "second"]
+
+
+@pytest.mark.parametrize("fault", ["timeout", 502])
+def test_post_is_never_retried_inline(fault) -> None:  # type: ignore[no-untyped-def]
+    """A POST may be applied without a response; repeating it inline could duplicate a comment (T-502)."""
+    gh, rc = setup("publish")
+    n = {"calls": 0}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        n["calls"] += 1
+        if fault == "timeout":
+            raise httpx.ReadTimeout("lost", request=req)
+        return jresp(502)
+
+    gh.route("POST", r"/check-runs$", handler)
+    with pytest.raises(err.GitHubRetryable):
+        rc.request("create_check_run", json_body={"name": "Tracewise"})
+    assert n["calls"] == 1
+    gh.route("PATCH", r"/check-runs/1$", [jresp(502), jresp(200, {"id": 1})])
+    assert rc.request("update_check_run", check_run_id=1, json_body={}) == {"id": 1}  # PATCH is idempotent: retried
