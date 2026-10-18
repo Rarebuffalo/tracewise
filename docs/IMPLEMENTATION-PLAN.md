@@ -39,7 +39,8 @@ tracewise/                       repo root (~/tracewise)
 │  ├─ analysis/   collect.py (T-307: steps 2–6, retrieval)  diagnose.py (steps 7–8: investigate → validate → confidence)
 │  ├─ investigate/ provider.py  fake.py  prompt.py  schema.py  loop.py  validate.py  confidence.py  (T-401…T-404; openai adapter: T-605 batch)
 │  ├─ report/     render.py                                      (T-501)
-│  └─ bench/      harness.py  cases/  score.py  meta.py          (T-601…T-604)
+│  └─ bench/      model.py fixture.py envelope.py generate.py gitserve.py replay.py harness.py providers.py
+│                 integrity.py score.py report.py __main__.py cases/ (T-601…T-603; meta.py: T-604)
 ├─ tests/ unit/ replay/ bench/ fixtures/
 ├─ scripts/check_docs.py
 ├─ docs/   (canonical)

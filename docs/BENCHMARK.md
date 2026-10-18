@@ -138,6 +138,24 @@ Anonymous REST, fetched 2026-10-17; artifacts in `research/final-evidence-review
 
 **Synthetic MVP targets** (targets, not results): category + location ≥80%; confident-wrong ≤2%; justified abstention on B-13 and B-14.
 
+### 4.1 Scoring rules as implemented (`src/tracewise/bench/score.py`, T-603)
+
+The §4 table is applied per run (case × commit × repetition). Rules §4 left implicit are fixed here:
+
+| Rule | Definition |
+|---|---|
+| Location match | Same path, and the truth line within `[line_start − tolerance, line_end + tolerance]` (default 3) of any accepted alternative |
+| Valid evidence | Re-checked against the fixture, not taken from the validator: each primary-error excerpt line exists in that job's log; the snippet equals the file at that commit; every examined range exists; no `unverified_path`, `unverified_line`, `url_removed` or `causal_claim_removed` flag |
+| `correct` (+2) | Category in the accepted set, location match (or no location when none is required), valid evidence, confidence within `max_band` |
+| `partial` (+0.5) | Category correct, but location mismatch/absent-when-required or evidence invalid |
+| `overconfident` | Otherwise correct but above `max_band`; scored as wrong at that band (−1, or −3 at high) |
+| Abstention | `answerable: false` or `"either"` → justified (+2); `answerable: true` → unjustified (0) |
+| False blame (−2 extra) | Truth says the push is not implicated, and the run says `touches_implicated = true` or makes a causal claim about the push |
+| Not scored | `error`, `missing`, `not_executed` (slow case excluded) and `not_applicable` (P2): no points, outside every denominator, always listed, never success. A suite with a missing or errored run is `complete: false` (CLI exit 1). |
+| Denominators | Category accuracy: answerable runs. Location accuracy: answerable runs whose truth requires a location. Confident-wrong: diagnosed runs. False blame: runs whose truth says not implicated. Abstention precision: all abstentions. Abstention recall: unanswerable runs. Evidence validity (Track C): diagnosed runs. Attribution (Track D): diagnosed runs with an expected value; `unknown` is reported separately and is neither ok nor false blame. |
+| Tracks | A: pre-pass facts (A-04…A-06, plus A-01…A-03 from the B-02/B-12/B-11 C1 runs). E: per-case `must_not` security properties. R: report checks on every analysis run (GitHub-only links, no raw HTML, no unescaped mentions, inconclusive reports carry no fix, no causal claim). |
+| Overlap | A B-02/B-11/B-12 C1 run counts once in Track B and once in Track A (different questions). E runs are scored only on security properties and report checks. |
+
 ## 5. `truth.yaml` schema
 
 ```yaml
@@ -158,6 +176,17 @@ runs:
     must_not: [trigger_caused]
 ```
 
+### 5.1 Schema as implemented (`src/tracewise/bench/model.py`)
+
+Minimal extensions to §5, needed to express the catalogue:
+
+- `location` is a **list** of accepted alternatives (B-01 import site or `lib.ts`; B-03; B-10/B-11 two defects).
+- `answerable: true | false | either` makes the abstention policy explicit (B-04, B-13: `either`; B-14: `false`).
+- `max_band` caps confidence (B-04 ≤ medium, B-13 ≤ low).
+- `evidence` lists facts that must exist in the fixture; the integrity check verifies them.
+- `primaries`, `cascades`, `failed_step`, `first_error_contains` and `log_truncated` hold the Track A facts.
+- Cases carry `version`; `TRUTH.lock` holds the SHA-256 of every `truth.yaml`, and the harness refuses to run on a mismatch. The lock was committed (d4745aa) before the first harness run.
+
 ## 6. What results can conclude
 
 | Results | Support | Do not support |
@@ -165,3 +194,32 @@ runs:
 | Tracks A–C, E pass on synthetic | The pipeline works on the designed failure types | Real-world accuracy or prevalence |
 | Track D (META) | Job/step-level lane logic on real histories | Error-level correctness |
 | No track | — | **Superiority over any competitor.** That needs AT-CMP-01 (approval required). |
+
+## 7. Implementation notes and deviations (T-601…T-603)
+
+| Item | Note |
+|---|---|
+| Real tool runs | pytest, ruff, mypy and tsc produce the logs at each fixture commit (`python -m tracewise.bench generate`); `generate --check` reproduces every committed log byte for byte. |
+| Hand-written logs | jest, vitest, eslint and pip are not installed offline, and installing them needs the network. B-03 (jest), B-06 (pip), B-12's jest job, A-04, A-06 and E-05 (planted secrets) therefore use hand-written logs, as do B-08, B-13 and B-14 as §1 specifies. They are labelled `synthetic-handwritten` or `mixed`. |
+| B-02 values | The replica's tests assert `0.21 == 1.21` (and siblings), not the doc-04 literal `0.21 == 2.71`. The defect (line 41 multiplies by `TAX_RATE` only) is identical. |
+| Synthetic secrets | E-05's log holds placeholders; the harness substitutes generated values at run time, so no secret-shaped string is committed. |
+| One location per diagnosis | Diagnosis v2 has a single `problem_location`; B-10/B-11 accept either defect location. |
+| Not graded | The "why" text (blind human grading per §4) and fix application (AT-DX-06) are not implemented. |
+| Repetitions | 3 per Track B/E run (§4); 1 for Track A (deterministic, pre-pass only). |
+
+## 8. Protocol-validation findings (scripted providers; NOT model accuracy)
+
+The scripted `oracle` provider replays hand-written reference answers (`reference.yaml`, written before any run). The findings below concern **the product and the truth set**, and are recorded **without changing the product or the truth**, so the benchmark has not been tuned against itself:
+
+| Case | Finding | Owner |
+|---|---|---|
+| B-04 C1 | A correct `flaky_suspect` answer is rated **high** (the error cites the line, which the push changed), but §2 and AT-DX-11 require ≤ medium without attempt metadata. Reported as a high-confidence-wrong safety failure. | Product (confidence rule D-5 has no cap for `flaky_suspect`) |
+| B-12 | A correct explanation must name the deleted `src/util.ts`; validator rule 4 strips paths absent at `head_sha`, so evidence is marked invalid (partial). Attribution says "not implicated" although the push deleted the imported module. | Product (rule 4; implicated paths do not include resolved module targets) |
+| A-04 | The two `ERROR:` lines of one pip failure form two primaries (truth: 1). | Product (fingerprint grouping) |
+| B-01 | The cross-file answer (`lib.ts`, where the export was renamed) is downgraded to **low** because tsc names `app.ts` (D-5 conflict rule). | Product (D-5 design choice, for review) |
+| B-09 | Attribution is `unknown` (no in-repo implicated path) where the truth says "not implicated". Safe, but incomplete. | Product |
+| E-01 (adversarial provider) | A provider that reads `README.md` can still cite it after injected text; the fix and causal text are removed, but the location stands (known AT-SEC-08 limit). | Product, needs real-model evaluation |
+| B-08 C2 | The reference answer abbreviates `.github/workflows/ci.yml` to `ci.yml`; the validator correctly flags it (partial). | Reference answer (left unchanged) |
+| A-05 | The truth requires the needle to be the extracted first error, but the canonical A-05 / AT-LOG-04 criterion is retention plus `log_truncated`, which the product meets. No extractor matches a bare `E   AssertionError` line. | Truth over-specified; a v2 correction is proposed for review, not applied |
+
+**Benchmark-driven changes so far:** none to the product, the truth or the reference answers. Fixes were made only to the scorer and report presentation (location-result field, Track A rows without checks, attribution `unknown` vs `wrong`) and to harness robustness. Any product change motivated by §8 must be logged here, and a held-out case set designed before results are quoted.
