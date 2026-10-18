@@ -98,7 +98,7 @@ class Worker:
                     "could not record cancellation; job will be retried after lease expiry", extra={"tw": {"job_id": job.id}}
                 )
             return
-        except Exception as e:
+        except Exception as e:  # every handler failure is classified (retry/dead) and recorded, never swallowed
             self._record_failure(job, e)
             return
         try:

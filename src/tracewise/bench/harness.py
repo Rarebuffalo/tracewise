@@ -31,7 +31,7 @@ from tracewise.analysis.diagnose import diagnose
 from tracewise.bench.envelope import envelope_lines, job_document
 from tracewise.bench.fixture import BuiltRepo, build_repo, diff_files
 from tracewise.bench.gitserve import LocalGitServer
-from tracewise.bench.model import CASES_DIR, REQUIRED_CASES, CaseSpec, JobSpec, Reference, case_dir, load_case
+from tracewise.bench.model import CASES_DIR, REQUIRED_CASES, CaseSpec, JobSpec, Reference, Truth, case_dir, load_case
 from tracewise.bench.providers import ProviderFactory
 from tracewise.bench.replay import replay_transport
 from tracewise.context.gitfetch import GitFetcher
@@ -219,7 +219,7 @@ def run_one(
             rec["prepass"] = _run_track_a(spec, commit)
             return rec
         _run_analysis(ctx, spec, ref, commit, factory, rec)
-    except Exception as e:
+    except Exception as e:  # one failing run must not stop the suite; recorded (type only), never hidden
         rec.update(status="error", error_type=type(e).__name__)
     finally:
         rec["elapsed_ms"] = int((time.perf_counter() - t0) * 1000)
@@ -308,11 +308,26 @@ def run_suite(
     if problems:
         raise RuntimeError("refusing to run: " + "; ".join(problems))
     ids = case_ids or list(REQUIRED_CASES)
-    loaded = {cid: load_case(cid) for cid in ids}
+    loaded: dict[str, tuple[CaseSpec, Truth, Reference | None]] = {}
     records: list[dict[str, Any]] = []
-    with suite(ids) as ctx:
-        for cid in ids:
-            spec, _truth, ref = loaded[cid]
+    for cid in ids:
+        try:
+            loaded[cid] = load_case(cid)
+        except Exception as e:  # an invalid case is recorded as error rows, never silently dropped
+            for commit in ("C1", "C2"):
+                records.append(
+                    {
+                        "case": cid,
+                        "commit": commit,
+                        "repetition": 1,
+                        "provider": provider_name,
+                        "status": "error",
+                        "error_type": type(e).__name__,
+                        "reason": "case_invalid",
+                    }
+                )
+    with suite(list(loaded)) as ctx:
+        for cid, (spec, _truth, ref) in loaded.items():
             if spec.synthetic_log == "a05_200mb" and not include_slow:
                 for commit in spec.runs:
                     records.append(
