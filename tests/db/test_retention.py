@@ -254,7 +254,7 @@ def test_privileges_only_the_system_role_may_purge_and_only_by_policy(pool, tena
         c.execute("DELETE FROM audit_event")
     assert owner.execute("SELECT prosecdef, proconfig FROM pg_proc WHERE proname = 'tracewise_purge'").fetchone() == (
         True,
-        ["search_path=pg_catalog, public"],
+        ["search_path=pg_catalog, public, pg_temp"],
     )
     assert owner.execute("SELECT pronargs FROM pg_proc WHERE proname = 'tracewise_purge'").fetchone() == (1,)  # no date input
     with transaction(pool) as c:
@@ -372,3 +372,23 @@ def test_at_sec_12_no_raw_logs_or_source_after_twenty_analyses(pool, owner, serv
     # ... and the retention job deletes by age (AT-SEC-12, last clause)
     age(owner, "analysis", "updated_at", 181)
     assert run(pool).deleted["analysis"] == 20 and owner.execute("SELECT count(*) FROM analysis").fetchone() == (0,)
+
+
+def test_definer_function_ignores_caller_temp_tables(pool, owner) -> None:  # type: ignore[no-untyped-def]
+    """SECURITY DEFINER hardening: a caller's temp `installation`/`job` tables must not steer the purge onto an
+    active tenant (pg_temp is searched first unless it is listed last in the function's search_path)."""
+    seed(pool, 10, 2, n=2)
+    before = counts(owner, 10)
+    with transaction(pool) as c:  # the system role may create temp tables (PUBLIC has TEMP by default)
+        c.execute(
+            "CREATE TEMP TABLE installation (id bigint, status text, purge_after timestamptz, purged_at timestamptz, "
+            "account_login text) ON COMMIT DROP"
+        )
+        c.execute("INSERT INTO installation VALUES (10, 'deleted', now() - interval '30 days', NULL, NULL)")
+        c.execute(
+            "CREATE TEMP TABLE job (id bigint, installation_id bigint, status text, finished_at timestamptz) ON COMMIT DROP"
+        )
+        r = c.execute("SELECT tracewise_purge(1000) AS r").fetchone()["r"]
+    assert r.get("tenant") is None and r.get("tenant_purged") is None
+    assert counts(owner, 10) == before
+    assert owner.execute("SELECT status FROM installation WHERE id = 10").fetchone() == ("active",)

@@ -64,8 +64,20 @@ class SecretFilter(logging.Filter):
             record.exc_info = None
         extra = getattr(record, "tw", None)
         if isinstance(extra, dict):
-            record.tw = {k: self.scrub(v) if isinstance(v, str) else v for k, v in extra.items()}
+            record.tw = self._deep(extra)
         return True
+
+    def _deep(self, v: Any, depth: int = 0) -> Any:
+        """Scrub strings at any nesting depth (dict values, lists, tuples); keys too."""
+        if isinstance(v, str):
+            return self.scrub(v)
+        if depth > 6:
+            return "[TRUNCATED]"
+        if isinstance(v, dict):
+            return {self.scrub(k) if isinstance(k, str) else k: self._deep(x, depth + 1) for k, x in v.items()}
+        if isinstance(v, list | tuple):
+            return [self._deep(x, depth + 1) for x in v]
+        return v
 
 
 class JsonFormatter(logging.Formatter):
@@ -99,6 +111,20 @@ def configure(level: int = logging.INFO, secrets: list[str] | None = None) -> No
     root.handlers[:] = [handler]
     root.setLevel(level)
     quiet_libraries()
+
+
+def configure_cli() -> None:
+    """Logging for the `python -m tracewise.*` entry points: JSON to stderr, secrets registered, URL loggers quieted.
+
+    Settings are read best-effort: a configuration error must not stop logging from being scrubbed."""
+    secrets: list[str] = []
+    try:
+        from tracewise.config import get_settings
+
+        secrets = get_settings().secret_values()
+    except Exception:  # the CLI reports configuration errors itself
+        secrets = []
+    configure(secrets=secrets)
 
 
 def quiet_libraries() -> None:

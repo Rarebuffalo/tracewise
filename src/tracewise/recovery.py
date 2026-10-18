@@ -32,7 +32,7 @@ from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
 
 from tracewise.contracts import WorkflowRunEvent
-from tracewise.db.session import Conn, transaction
+from tracewise.db.session import Conn, DatabaseUnavailable, transaction
 from tracewise.github import errors as gh_err
 from tracewise.github.auth import AppCredentials, TokenProvider
 from tracewise.github.client import GitHubHTTP, RepoClient
@@ -332,13 +332,21 @@ def main(argv: list[str] | None = None, build: Callable[[], tuple[Any, Any, Any]
     a = ap.parse_args(argv)
     pool, http, creds = build()
     out: list[RecoverySummary] = []
-    if a.what in ("deliveries", "both"):
-        out.append(redeliver_failed_deliveries(pool, http, creds))
-    if a.what in ("runs", "both"):
-        out.append(sweep_failed_runs(pool, http, TokenProvider(creds, http, clock=time.time)))
+    try:
+        if a.what in ("deliveries", "both"):
+            out.append(redeliver_failed_deliveries(pool, http, creds))
+        if a.what in ("runs", "both"):
+            out.append(sweep_failed_runs(pool, http, TokenProvider(creds, http, clock=time.time)))
+    except DatabaseUnavailable as e:
+        event(log, "recovery.failed", logging.ERROR, error_type=type(e).__name__)
+        print(json.dumps({"error": "database_unavailable", "completed": [x.as_dict() for x in out]}, sort_keys=True))
+        return 1
     print(json.dumps([x.as_dict() for x in out], sort_keys=True))
     return 0 if all(x.completed for x in out) else 1
 
 
 if __name__ == "__main__":
+    from tracewise.logging import configure_cli
+
+    configure_cli()
     raise SystemExit(main())

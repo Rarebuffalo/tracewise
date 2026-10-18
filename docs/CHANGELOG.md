@@ -1,5 +1,29 @@
 # Change Log
 
+## 2026-10-19 (z): Phase 11 independent audit of Phases 5–10
+
+### Defects found, regression tests written first, fixed
+
+| ID | Severity | Defect | Fix |
+|---|---|---|---|
+| SA-5 | Medium | The purge's SECURITY DEFINER `search_path` let caller temp tables redirect it onto an active tenant (demonstrated). | Migration 0009 |
+| SA-6 | Low | Nested log fields were not scrubbed. | Recursive filter |
+| SA-7 | Medium | The CLIs ran without logging configuration (no secret filter on WARNING+). An unreachable database gave an unhandled traceback. | `configure_cli()`; `DatabaseUnavailable` handled |
+
+### Other changes
+
+- The ops alert rule is validated: threshold in (0, 1], `min_sample` ≥ 1. The output labels the default threshold `provisional`.
+- T-706 status corrected to **partial**: no cost figure without T-605 prices, and no alert routing.
+
+### Tests
+
+- `tests/db/test_cli_entrypoints.py` (5)
+- 1 new test in `test_retention.py`
+- 2 new tests in `test_db_security.py`
+- 1 new test in `test_logging.py`
+
+A mutation check confirmed the new tests fail without the fixes.
+
 ## 2026-10-19 (y): Final integration and acceptance audit (Phase 10)
 
 - `tests/db/test_cross_phase.py::test_full_chain_webhook_to_retention_purge` covers the full chain. GitHub, the model and the git host are simulated.
