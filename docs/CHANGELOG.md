@@ -1,5 +1,23 @@
 # Change Log
 
+## 2026-10-19 (ae): Phase 16 offline release-readiness package
+
+- `docs/OPERATIONS.md`: covers
+  - install order and the role template;
+  - credential separation;
+  - App permissions and surfaces, with the G-PLAT-11 risk;
+  - webhook verification;
+  - worker and recovery operation, with exit codes;
+  - retention operation and recovery;
+  - observability (provisional threshold);
+  - backup, rollback and incidents;
+  - privacy and retention (D-12 pending);
+  - the release checklist with stop conditions.
+
+  It states that there are **no web or worker process entry points** and **no real model adapter** yet (T-1002, T-605).
+- `docs/LIVE-VALIDATION-PLAN.md`: stages S0–S5 for G-PLAT-1 to G-PLAT-12, F-1 to F-3, the bundled token, the PR→commit fallback, the Check Run under a missing permission, suspension, deletion and repository removal mid-publication, redelivery and listing, reinstallation, and duplicate delivery. Each step has expected observations, evidence, cleanup and abort conditions. **Not executed.**
+- The documentation index now lists the audit and review documents.
+
 ## 2026-10-19 (ad): Phase 15 independent end-to-end verification
 
 The Phase 10 chain test was reviewed. It uses the real app, queue, worker, recovery and purge, but it did not prove four things:

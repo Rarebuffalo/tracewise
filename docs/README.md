@@ -13,6 +13,11 @@
 | [VALIDATION-PLAN.md](VALIDATION-PLAN.md) | Commercial gate G-0 (interviews, metadata-only G-2) |
 | [DECISIONS.md](DECISIONS.md) | Closed decisions (Q1–Q6), applied defaults (D-1…D-3), open items |
 | [DOC-CHANGE-PLAN.md](DOC-CHANGE-PLAN.md) | The 15 blocking corrections and the cleanup plan (change record) |
+| [OPERATIONS.md](OPERATIONS.md) | Install, roles, App setup, worker/recovery/retention operation, incidents, release checklist (offline package) |
+| [LIVE-VALIDATION-PLAN.md](LIVE-VALIDATION-PLAN.md) | Staged test-org plan for the live gates (not executed; needs approval) |
+| [SECURITY-AUDIT.md](SECURITY-AUDIT.md) | Security audit findings SA-1 to SA-8 and evidence |
+| [GITHUB-CONTRACT-AUDIT.md](GITHUB-CONTRACT-AUDIT.md) | G-PLAT gates versus recorded evidence and tests; findings F-1 to F-3 |
+| [BENCHMARK-REVIEW-QUEUE.md](BENCHMARK-REVIEW-QUEUE.md) | Benchmark review items (proposals only; truth unchanged) |
 | [CHANGELOG.md](CHANGELOG.md) | What changed, with validation results |
 
 **Rules that apply everywhere:**
