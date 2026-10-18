@@ -67,7 +67,7 @@ Version 2.0, 2026-10-18. Dependency-ordered. Each task lists the SPEC requiremen
 | T-605 | Measured evaluation with OpenAI (**needs a key you provide locally**); model choice (UD-3); cost and latency measured | FS-DX-3, FS-OPS-2 | AT-DX-15, AT-OPS-02 | T-603, T-402 | 1.5 | todo |
 | **Phase 7: pilot hardening** | | | | | | |
 | T-701 | Installation lifecycle (created, deleted, suspend, repos added/removed; in-flight cancel) | FS-INS-3, FS-INS-4 | AT-INS-03, AT-INS-04 | T-105 | 0.75 | done |
-| T-702 | Recovery: deliveries API redelivery + failed-run sweep | FS-EVT-5 | AT-REL-03 | T-302, T-105 | 1.0 | todo |
+| T-702 | Recovery: deliveries API redelivery + failed-run sweep | FS-EVT-5 | AT-REL-03 | T-302, T-105 | 1.0 | done |
 | T-703 | Quotas + over-quota notice | FS-QTA-1 | AT-QTA-01 | T-502 | 0.5 | todo |
 | T-704 | Retention and purge jobs | FS-SEC-3 | AT-SEC-12 | T-104 | 0.75 | todo |
 | T-705 | Postgres RLS (transaction-local context; non-owner role) | FS-SEC-6 | AT-SEC-03 | T-104 | 1.0 | todo |

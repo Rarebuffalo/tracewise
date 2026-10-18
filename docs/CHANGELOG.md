@@ -1,5 +1,70 @@
 # Change Log
 
+## 2026-10-18 (q): T-702 redelivery and failed-run recovery
+
+**Scope** (FS-EVT-5, AT-REL-03):
+
+- (a) Deliveries API redelivery.
+- (b) Bounded failed-run sweep.
+
+The other recovery scenarios were mapped to existing mechanisms (ARCHITECTURE §4.6) and not re-implemented.
+
+### Code
+
+| File | Change |
+|---|---|
+| `db/migrations/versions/0004_recovery.py` | `recovery_checkpoint`, `redelivery_request`; runtime role gets SELECT/INSERT/UPDATE (no DELETE); reversible |
+| `github/endpoints.py` | `list_app_hook_deliveries`, `redeliver_app_hook_delivery` (App JWT), `list_workflow_runs` (Actions read, analysis scope) |
+| `github/client.py` | `GitHubHTTP.app_paginate`, `app_post` |
+| `recovery.py` | `redeliver_failed_deliveries`, `sweep_failed_runs`, `RecoverySummary`, `python -m tracewise.recovery {deliveries,runs,both}` |
+| `tests/db/conftest.py` | Recovery tables truncated between tests (state leaked before this fix) |
+
+### Bugs found by the tests and fixed
+
+| Bug | Effect |
+|---|---|
+| `last_requested_at` written with the DB clock while cooldown compares the injected clock | Two time sources |
+| A later stop reason overwrote an earlier one | Page cap reported as request cap |
+| **Security-relevant:** a run's `repository` was overwritten before being checked | The foreign-repository guard was vacuous; a listing entry GitHub attributed to another repository would have been enqueued under ours |
+
+### Tests
+
+- **`tests/db/test_recovery.py` (14 tests):**
+  - redelivery once per GUID (latest attempt);
+  - skips for already received, later success, unhandled event, inactive installation (lifecycle events still redelivered), too old, malformed;
+  - cooldown and the 3-attempt cap;
+  - rate limits on list and on redeliver, with resume and no repeat;
+  - cursor pagination, page cap (no checkpoint advance), request cap;
+  - **AT-REL-03(a) end to end**: redelivery → signed webhook replayed twice → one job → real worker → one commit comment + one Check Run → a later pass sees it as received;
+  - **AT-REL-03(b) end to end**: an undelivered failed run → sweep → one job → published once; a repeated sweep adds nothing;
+  - scope and ownership, including a foreign-repo listing;
+  - non-failed and malformed runs;
+  - rate-limited sweep resuming at the unfinished repository;
+  - a refused token for one installation;
+  - an interrupted sweep re-run without duplicates;
+  - sweep concurrent with a webhook giving one job;
+  - the entry point (refuses without project config; non-zero on an incomplete pass).
+- **`test_schema_repositories.py`:** 0004 round trip and grants.
+
+### Verification (actually run)
+
+| Command | Result |
+|---|---|
+| ruff check / format check | pass (130 files) |
+| mypy | no issues in 79 files |
+| Full pytest (slow included) | **479 passed** in 176.6 s |
+| Recovery, lifecycle, webhook and queue suites, ×3 | 78 passed each time |
+| `check_docs.py` | PASS |
+
+### Status
+
+| Item | Status |
+|---|---|
+| T-702 | done at REPLAY level |
+| AT-REL-03 (a), (b) | **REPLAY passed** |
+| Live API behaviour | G-PLAT-12 |
+| Production schedule | Not configured (by instruction) |
+
 ## 2026-10-18 (p): T-701 installation lifecycle
 
 **Phase 0 (`3e2ceed`):** complete slow-inclusive oracle benchmark run (115 required, 111 executed, 4 P2 not applicable, 0 errors). A-05 fails its over-specified truth (decision pending). An unexecuted required run now makes the suite incomplete. Truth and lock unchanged.

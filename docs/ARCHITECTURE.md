@@ -158,11 +158,22 @@ See [SPEC.md](SPEC.md) FS-SEC-*, and [ACCEPTANCE-TESTS.md](ACCEPTANCE-TESTS.md) 
 
 Validation: lifecycle payloads are HMAC-verified and schema-validated (ids > 0, `owner/repo` names). Invalid payloads → 400, recorded as `rejected`, no state change. Historical analyses and publications are kept (purge is T-704).
 
+### 4.6 Recovery (T-702)
+
+| Pass | Behaviour |
+|---|---|
+| (a) Redelivery | `GET /app/hook/deliveries?status=failure` (App JWT; cursor pagination; ≤`max_pages`×100 items). Kept: newer than `max(now−72h, high_water−10m)`, grouped by GUID. Redelivered (`POST …/attempts`, the latest attempt id) only if we never recorded that GUID, no attempt succeeded, the event is handled, the installation is not inactive (lifecycle events always pass), fewer than 3 attempts and ≥15 min since the last. Each request is recorded in `redelivery_request`; at most `max_requests` per pass. The high-water mark advances only after a complete pass. |
+| (b) Failed-run sweep | Round-robin over enabled, in-scope repositories of active installations from a durable cursor (`sweep:repo_cursor`, advanced per finished repository). `GET /repos/{o}/{r}/actions/runs?status=failure|timed_out&created>=now−24h` with the repository's analysis token. A run is accepted only if GitHub attributes it to that repository, and is then fed through `ingest_workflow_run` (delivery id `sweep-{repo}-{run}-{attempt}`), so run dedupe and T-701 scope apply exactly as for webhooks. |
+| Already covered elsewhere | Delivery without a job: impossible, since delivery, run and job are one transaction (T-106). Vanished worker, expired lease, retry not executed: queue reaper and `run_after` (T-105). Failed GitHub calls: job retries (T-302/T-503). Disabled or removed scope: T-701. |
+| Stops | A rate limit stops the pass with `completed=false`; checkpoints keep progress. A refused token for one repository is counted and the sweep moves on. |
+| Entry point | `python -m tracewise.recovery {deliveries|runs|both}`: one bounded pass, JSON summary, non-zero exit if incomplete. Needs the project App and database configuration; **no schedule is configured**. |
+
 ## 5. Open architectural items
 
 | ID | Item | Resolved by |
 |---|---|---|
 | G-PLAT-1…7 | Live platform behaviours (startup_failure, re-run delivery, output limits, forks, commit comment with Contents read, uninstall, declined permissions) | LIVE tests after you approve a test org |
+| G-PLAT-12 | Recovery assumptions verified only against fakes: the delivery list honours `status=failure` and cursor links; a redelivery reuses the original GUID as `X-GitHub-Delivery`; the runs list honours `status` plus `created`. | LIVE (T-801…T-803) |
 | G-PLAT-11 | **Publish-token scope bundling.** The `publish` token requests Pull requests write **and** Checks write together. If an installation declined one permission, GitHub may refuse the whole mint (422), which would block the Check Run as well and contradict AT-REL-05's intent (Check Run published, naming the missing permission). Offline tests simulate a 403 on the write, not a mint refusal. A fix would mint one token per surface. | LIVE (G-PLAT-7), then a design change for review |
 | G-PLAT-10 | Publication reconciliation relies on `performed_via_github_app.id` (comments) and `app.id` / `external_id` (check runs) in GitHub's list responses, and on those lists reflecting a just-accepted write. Verified only against the fake API. | LIVE (T-801…T-803) |
 | G-PLAT-9 | github.com accepting `fetch --depth=1 --filter=blob:limit=1m <sha>` with an installation token in a Basic header (verified only against local `git http-backend`) | LIVE (T-801…T-803) |
