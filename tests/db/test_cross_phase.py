@@ -126,3 +126,81 @@ def test_sweep_across_tenants_lifecycle_then_worker_under_rls(pool, tenant_pool,
     assert {r[0]: r[1] for r in owner.execute("SELECT installation_id, status FROM job")} == statuses
     s2 = sweep(pool, hub)  # a later sweep: run already recorded, no new job
     assert (s2.enqueued, s2.duplicates) == (0, 2)
+
+
+def test_full_chain_webhook_to_retention_purge(pool, tenant_pool, owner, server, tmp_path, head) -> None:  # type: ignore[no-untyped-def]  # noqa: F811
+    """Phase 10: webhook → signature → scope → queue → claim → tenant-scoped evidence → diagnosis → validation →
+    publication → retry → recovery → uninstall → purge. SIMULATED: GitHub API (fake), model (scripted provider),
+    git host (local http-backend). Everything else (HTTP app, Postgres with RLS, worker, publisher) is real."""
+    import hashlib
+    import hmac
+    import json
+
+    from tracewise import ops, retention
+
+    w = World(pool, owner, server, tmp_path / "ws", head)
+    with _client(pool) as c:
+        assert (
+            send(c, "installation", inst("created", repos=[(7, "acme/coffee"), (8, "acme/old")])).json()["outcome"] == "processed"
+        )
+        send(c, "installation_repositories", repos_ev("removed", [(8, "acme/old")]))
+        body = {
+            "action": "completed",
+            "installation": {"id": 9},
+            "repository": {"id": 7, "full_name": "acme/coffee"},
+            "workflow_run": {**run_obj(55, head_sha=head), "head_branch": "feature"},
+        }
+        raw = json.dumps(body).encode()
+        forged = c.post(
+            "/webhooks/github",
+            content=raw,
+            headers={
+                "X-GitHub-Event": "workflow_run",
+                "X-Hub-Signature-256": "sha256=" + "0" * 64,
+                "X-GitHub-Delivery": "forged",
+            },
+        )
+        assert forged.status_code == 401
+        out_of_scope = {
+            **body,
+            "repository": {"id": 8, "full_name": "acme/old"},
+            "workflow_run": {**run_obj(56, head_sha=head, repo_id=8, name="acme/old")},
+        }
+        assert send(c, "workflow_run", out_of_scope, "oos").json()["outcome"] == "repo_not_in_scope"
+        sig = "sha256=" + hmac.new(c.secret.encode(), raw, hashlib.sha256).hexdigest()
+        hdr = {"X-GitHub-Event": "workflow_run", "X-Hub-Signature-256": sig, "X-GitHub-Delivery": "real-1"}
+        assert c.post("/webhooks/github", content=raw, headers=hdr).json()["outcome"] == "enqueued"
+        assert c.post("/webhooks/github", content=raw, headers=hdr).json()["outcome"] == "duplicate_delivery"
+    assert owner.execute("SELECT count(*) FROM job").fetchone() == (1,)
+    (jid,) = owner.execute("SELECT id FROM job").fetchone()
+
+    w.state.fault("POST", "cr", 502)  # transient GitHub failure on the Check Run
+    w.run()
+    assert w.jobrow(jid)["status"] == "retry_wait"
+    w.ready(jid)
+    w.run()
+    assert w.jobrow(jid)["status"] == "succeeded" and (len(w.all_ccs()), len(w.state.check_runs)) == (1, 1)
+    with transaction(tenant_pool, tenant=9) as t:  # what the tenant plane persisted
+        a = t.execute("SELECT status, stage_ms IS NOT NULL AS ops, publish_result FROM analysis").fetchone()
+    assert a == {
+        "status": "diagnosed",
+        "ops": True,
+        "publish_result": {"commit_comment": "already_published", "check_run": "published"},
+    }
+    assert ops.report(pool)["analyses"]["total"] == 1
+
+    hub = Hub(w.gh)  # recovery: GitHub lists our (now received) delivery as failed once; the sweep sees the run
+    hub.deliveries = [delivery(41, "real-1")]
+    hub.runs[7] = [run_obj(55, head_sha=head)]
+    assert redeliver(pool, hub).already_received == 1 and hub.redelivered == []
+    assert sweep(pool, hub).duplicates == 1 and owner.execute("SELECT count(*) FROM job").fetchone() == (1,)
+
+    with _client(pool) as c:
+        send(c, "installation", inst("deleted"))
+    owner.execute("UPDATE installation SET purge_after = now() - interval '1 second' WHERE id = 9")
+    s = retention.purge(pool)
+    assert s.completed and s.tenants_purged == [9]
+    for table in ("repository", "workflow_run", "job", "analysis", "publication", "webhook_delivery"):
+        assert owner.execute(f"SELECT count(*) FROM {table}").fetchone() == (0,), table  # noqa: S608
+    assert owner.execute("SELECT status, purged_at IS NOT NULL FROM installation").fetchone() == ("deleted", True)
+    assert (len(w.all_ccs()), len(w.state.check_runs)) == (1, 1)  # GitHub-side history is untouched by the purge
