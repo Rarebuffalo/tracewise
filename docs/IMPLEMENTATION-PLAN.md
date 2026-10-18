@@ -85,7 +85,7 @@ tracewise/                       repo root (~/tracewise)
 
 ### 4.1 Fresh database setup (order matters; T-705)
 
-An administrator runs these steps. The disposable test cluster in `tests/pg.py` runs the same steps, so the test suite reproduces them.
+An administrator runs these steps. The reviewed template is `scripts/db/provision_roles.sql`: role names and attributes only, no passwords. It creates a non-superuser owner, `tracewise_app` without BYPASSRLS and `tracewise_system` with BYPASSRLS. It also revokes TEMP and CREATE from PUBLIC. `tests/db/test_fresh_install.py` runs exactly this file on a brand-new cluster, migrates it as the non-superuser owner, and checks the result: schema, grants, RLS, the definer owner, an identical catalogue after a full downgrade and upgrade, and fail-closed behaviour. The session test cluster (`tests/pg.py`) uses an initdb superuser as owner, for speed.
 
 1. Create three roles, each with its own credentials:
    - `tracewise_owner` owns the database and runs migrations;
