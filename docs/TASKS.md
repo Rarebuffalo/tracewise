@@ -70,7 +70,7 @@ Version 2.0, 2026-10-18. Dependency-ordered. Each task lists the SPEC requiremen
 | T-702 | Recovery: deliveries API redelivery + failed-run sweep | FS-EVT-5 | AT-REL-03 | T-302, T-105 | 1.0 | done |
 | T-703 | Quotas + over-quota notice | FS-QTA-1 | AT-QTA-01 | T-502 | 0.5 | todo |
 | T-704 | Retention and purge jobs | FS-SEC-3 | AT-SEC-12 | T-104 | 0.75 | todo |
-| T-705 | Postgres RLS (transaction-local context; non-owner role) | FS-SEC-6 | AT-SEC-03 | T-104 | 1.0 | todo |
+| T-705 | Postgres RLS (transaction-local context; non-owner role) | FS-SEC-6 | AT-SEC-03 | T-104 | 1.0 | done (offline; role provisioning for deployment is a review item, ARCHITECTURE §4.7) |
 | T-706 | Observability: stage timings, usage and cost records, alerts | FS-OPS-1, FS-OPS-2 | AT-OPS-01, AT-OPS-02 | T-105 | 0.75 | todo |
 | **Phase 8: LIVE (gated: needs your approved test org + dev App)** | | | | | | |
 | T-801 | Dev App registration checklist and execution **by you** (permissions per FS-INS-2) | FS-INS-1, FS-INS-2 | AT-INS-01, AT-INS-02 | Approval | 0.5 | todo |

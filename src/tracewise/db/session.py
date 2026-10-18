@@ -32,13 +32,20 @@ def make_pool(url: str, *, min_size: int = 1, max_size: int = 10, timeout_s: flo
 
 
 @contextmanager
-def transaction(pool: ConnectionPool[Conn], timeout_s: float | None = None) -> Iterator[Conn]:
+def transaction(pool: ConnectionPool[Conn], timeout_s: float | None = None, *, tenant: int | None = None) -> Iterator[Conn]:
     """One connection, one transaction: commit on success, roll back on any exception.
 
+    `tenant` sets the transaction-local RLS context (`tracewise.installation_id`, T-705). It is cleared
+    automatically at commit/rollback, so it can never leak to the next user of a pooled connection.
+    Tenant-plane code must always pass it; without it the tenant role sees nothing (fail closed).
     Connection-level failures are raised as `DatabaseUnavailable` (no URL in the message).
     """
+    if tenant is not None and (isinstance(tenant, bool) or not isinstance(tenant, int) or tenant <= 0):
+        raise ValueError("tenant must be a positive installation id")
     try:
         with pool.connection(timeout=timeout_s) as conn, conn.transaction():
+            if tenant is not None:
+                conn.execute("SELECT set_config('tracewise.installation_id', %s, true)", (str(tenant),))
             yield conn
     except PoolTimeout as e:
         raise DatabaseUnavailable("database pool timeout") from e

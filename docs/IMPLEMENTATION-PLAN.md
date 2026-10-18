@@ -71,7 +71,8 @@ tracewise/                       repo root (~/tracewise)
 | Variable | Purpose | Required |
 |---|---|---|
 | `TW_ENV` | local, test, staging or prod | yes |
-| `DATABASE_URL` | Postgres (runtime role) | yes, for DB tasks |
+| `DATABASE_URL` | Postgres tenant-plane role `tracewise_app` (RLS applies; analysis and publication) | yes, for DB tasks |
+| `DATABASE_URL_SYSTEM` | Postgres system-plane role `tracewise_system` (BYPASSRLS; ingress, lifecycle, queue, recovery; T-705) | yes, for DB tasks |
 | `DATABASE_URL_MIGRATIONS` | Postgres (owner role) | yes, for migrations |
 | `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY_PATH`, `GITHUB_WEBHOOK_SECRET` | **Project-scoped dev App** (LIVE only) | LIVE only |
 | `LLM_PROVIDER` | `fake` (default offline) or `openai` | yes |

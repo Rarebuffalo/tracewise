@@ -9,7 +9,7 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
-from tests.pg import OWNER, EphemeralPostgres, ephemeral
+from tests.pg import APP, OWNER, SYSTEM, EphemeralPostgres, ephemeral
 from tracewise.db.migrate import upgrade
 from tracewise.db.session import Conn, make_pool
 
@@ -42,9 +42,34 @@ def owner(pg: EphemeralPostgres) -> Iterator[psycopg.Connection[tuple[object, ..
 
 @pytest.fixture
 def pool(pg: EphemeralPostgres, owner: psycopg.Connection[tuple[object, ...]]) -> Iterator[ConnectionPool[Conn]]:
-    """Runtime-role pool (least privilege), as the service uses it."""
-    p = make_pool(pg.url(), min_size=1, max_size=20)
+    """System-plane pool (tracewise_system, BYPASSRLS): ingress, lifecycle, queue, recovery (T-705)."""
+    p = make_pool(pg.url(SYSTEM), min_size=1, max_size=20)
     try:
         yield p
     finally:
         p.close()
+
+
+@pytest.fixture
+def tenant_pool(pg: EphemeralPostgres, owner: psycopg.Connection[tuple[object, ...]]) -> Iterator[ConnectionPool[Conn]]:
+    """Tenant-plane pool (tracewise_app): RLS applies; every transaction must name its installation."""
+    p = make_pool(pg.url(APP), min_size=1, max_size=20)
+    try:
+        yield p
+    finally:
+        p.close()
+
+
+@pytest.fixture(autouse=True)
+def _tenant_pool_for_worlds(request: pytest.FixtureRequest) -> Iterator[None]:
+    """End-to-end World helpers run the analyze handler on the RLS-restricted tenant pool."""
+    if "pool" not in request.fixturenames:
+        yield
+        return
+    from tests.db import test_analyze_worker
+
+    test_analyze_worker.World.tenant_pool = request.getfixturevalue("tenant_pool")
+    try:
+        yield
+    finally:
+        test_analyze_worker.World.tenant_pool = None

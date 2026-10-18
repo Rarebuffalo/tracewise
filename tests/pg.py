@@ -17,6 +17,7 @@ from urllib.parse import quote
 
 OWNER = "tracewise_owner"
 APP = "tracewise_app"
+SYSTEM = "tracewise_system"
 DB = "tracewise"
 
 
@@ -64,7 +65,8 @@ class EphemeralPostgres:
         import psycopg
 
         with psycopg.connect(self.url(OWNER, "postgres"), autocommit=True) as c:
-            c.execute(f"CREATE ROLE {APP} LOGIN")
+            c.execute(f"CREATE ROLE {APP} LOGIN")  # tenant plane: RLS-restricted
+            c.execute(f"CREATE ROLE {SYSTEM} LOGIN BYPASSRLS")  # system plane (T-705)
             c.execute(f"CREATE DATABASE {DB} OWNER {OWNER}")
         return self
 

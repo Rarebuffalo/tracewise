@@ -1,5 +1,40 @@
 # Change Log
 
+## 2026-10-18 (r): T-705 Postgres row-level security and tenant isolation
+
+**Scope:** FS-SEC-6, AT-SEC-03. Two database roles: a tenant plane under RLS and a system plane (D-11, ARCHITECTURE §4.7).
+
+### Code
+
+| File | Change |
+|---|---|
+| `db/migrations/versions/0005_rls.py` | `tracewise_tenant()`; RLS plus a `tenant_isolation` policy on 10 tables; grants for `tracewise_system` (when the role exists); revokes the recovery tables from `tracewise_app`; reversible |
+| `db/session.py` | `transaction(pool, tenant=id)` sets `tracewise.installation_id` transaction-locally; invalid ids are rejected |
+| `jobs/handlers/analyze.py`, `github/publish.py` | Every tenant-plane transaction names the job's installation |
+| `config.py`, `.env.example`, `recovery.py`, `web/app.py` | `DATABASE_URL_SYSTEM` for the system plane; recovery uses it |
+| `tests/pg.py`, `tests/db/conftest.py` | The disposable cluster creates `tracewise_system` (BYPASSRLS). `pool` is the system plane; the new `tenant_pool` is `tracewise_app`, and every end-to-end worker test now runs the analyze handler on it. |
+
+### Tests (all as the actual runtime role `tracewise_app`)
+
+- **`tests/db/test_rls.py`** (10 tests):
+  - role attributes (neither runtime role is superuser or owner; only the system role bypasses RLS);
+  - own rows readable and writable; other tenant's rows invisible, with UPDATE and DELETE matching nothing;
+  - cross-tenant INSERT, UPDATE and publication reservation rejected by WITH CHECK;
+  - missing or empty context: nothing visible, inserts fail;
+  - malformed context is an error, and an unknown tenant sees nothing;
+  - context does not survive COMMIT or ROLLBACK on a reused pooled connection (same backend pid);
+  - 20 rounds of overlapping transactions for two tenants;
+  - no access to the recovery tables, and neither `row_security = off` nor `ALTER TABLE` gets around RLS;
+  - the system plane sees both tenants and `audit_event` stays append-only;
+  - 0005 down and up.
+- **`test_analyze_worker.py`:** a background job runs as `tracewise_app`; a job naming another installation's repository cannot see it, dies permanently, and mints no token for that installation.
+- **Mutation check:** with the tenant argument removed from the handler, the end-to-end tests fail.
+
+### Not done / review
+
+- `tracewise_system` provisioning and credential separation are deployment items (D-11).
+- RLS is not a barrier against arbitrary SQL execution as the app role.
+
 ## 2026-10-18 (q): T-702 redelivery and failed-run recovery
 
 **Scope** (FS-EVT-5, AT-REL-03):

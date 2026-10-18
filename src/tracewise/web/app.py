@@ -11,6 +11,7 @@ from tracewise.web import health, webhooks
 
 
 def create_app(settings: Settings, pool: ConnectionPool[Conn]) -> FastAPI:
+    """`pool` is the system plane (tracewise_system): ingress records deliveries before any tenant is known (T-705)."""
     app = FastAPI(title="tracewise", docs_url=None, redoc_url=None, openapi_url=None)
     secret = settings.github_webhook_secret
     app.state.webhook_secret = secret.get_secret_value().encode() if secret else None

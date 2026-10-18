@@ -284,15 +284,15 @@ def _done(s: RecoverySummary, *, completed: bool) -> RecoverySummary:
 
 
 def build_from_settings() -> tuple[ConnectionPool[Conn], GitHubHTTP, AppCredentials]:
-    """Project-scoped App credentials and the runtime database only (ADR-16). Fails closed when unconfigured."""
+    """Project-scoped App credentials and the system-plane database role (ADR-16, T-705). Fails closed when unconfigured."""
     from tracewise.config import get_settings
     from tracewise.db.session import make_pool
 
     st = get_settings()
-    if not (st.database_url and st.github_app_id and st.github_app_private_key_path):
-        raise SystemExit("recovery needs DATABASE_URL, GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY_PATH (project App only)")
+    if not (st.database_url_system and st.github_app_id and st.github_app_private_key_path):
+        raise SystemExit("recovery needs DATABASE_URL_SYSTEM, GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY_PATH (project App only)")
     return (
-        make_pool(st.database_url.get_secret_value()),
+        make_pool(st.database_url_system.get_secret_value()),
         GitHubHTTP(),
         AppCredentials.from_pem_file(st.github_app_id, st.github_app_private_key_path),
     )
