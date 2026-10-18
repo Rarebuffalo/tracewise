@@ -82,6 +82,31 @@ tracewise/                       repo root (~/tracewise)
 
 **Removed vs S1:** `GITHUB_TOKEN_LAB` (personal PAT) and all `gh` CLI usage.
 
+### 4.1 Fresh database setup (order matters; T-705)
+
+An administrator runs these steps. The disposable test cluster in `tests/pg.py` runs the same steps, so the test suite reproduces them.
+
+1. Create three roles, each with its own credentials:
+   - `tracewise_owner` owns the database and runs migrations;
+   - `tracewise_app` (LOGIN; **not** BYPASSRLS, not superuser, owns nothing) is the tenant plane;
+   - `tracewise_system` (LOGIN BYPASSRLS; not superuser, owns nothing) is the system plane.
+
+   Both runtime roles must exist **before** step 2: migrations grant them privileges only if they already exist (0001 grants `tracewise_app`; 0005 grants `tracewise_system`).
+2. Run the migrations as the owner, using `DATABASE_URL_MIGRATIONS`: `tracewise.db.migrate.upgrade(owner_url)`.
+3. Configure the runtime URLs:
+   - the worker's analyze handler and the publisher use `DATABASE_URL` (`tracewise_app`);
+   - webhook ingress, lifecycle, the queue and recovery use `DATABASE_URL_SYSTEM`.
+
+   Never point both at the same role. The analyze handler refuses a pool whose role is a superuser, has BYPASSRLS or owns tables (`require_tenant_plane`).
+
+A new migration that adds a table must:
+- either give it `installation_id`, RLS and the `tenant_isolation` policy;
+- or add it to the reviewed system-only list in `tests/db/test_db_security.py`.
+
+Either way it must grant the system role explicitly. That test fails otherwise.
+
+Not done: provisioning real roles and credentials (D-11, deployment).
+
 ## 5. Security controls (carried and extended)
 
 | Area | Control | Tests |

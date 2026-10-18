@@ -1,5 +1,29 @@
 # Change Log
 
+## 2026-10-19 (t): Security audit (Phase 5)
+
+Record: `docs/SECURITY-AUDIT.md`.
+
+### Pre-signed URLs
+
+The S3 pre-signed URLs in the public marketplace snapshot belong to GitHub's screenshot proxy. They expired on 2026-10-17 (five-minute window). They appear in one file and one commit, and there is no secret key or session token.
+
+Not edited. Redacting the query strings before any push is a review item.
+
+### Database fixes
+
+| ID | Change |
+|---|---|
+| SA-1 | Migration 0006 revokes write access to `alembic_version` from both runtime roles |
+| SA-2 | `require_tenant_plane()` fails closed when the analyze handler is given a pool that bypasses RLS |
+| SA-3 | A schema guard fails if a table carrying an installation has no RLS policy, or if a new table is not declared |
+
+### Other changes
+
+- Tests: `tests/db/test_db_security.py` (8).
+- Docs: fresh database setup order (IMPLEMENTATION-PLAN §4.1), ARCHITECTURE §4.7 guards.
+- Full suite: 500 passed.
+
 ## 2026-10-18 (s): Cross-phase integration audit (T-701, T-702, T-705)
 
 ### Tests
