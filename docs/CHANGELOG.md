@@ -1,5 +1,19 @@
 # Change Log
 
+## 2026-10-19 (aa): Phase 12 fresh-install and migration lifecycle
+
+- `scripts/db/provision_roles.sql`: a reviewed role template. It has no passwords and creates a non-superuser migration owner. Hardening: no TEMP and no CREATE for PUBLIC.
+- `tests/db/test_fresh_install.py` (9) runs on a new cluster bootstrapped only by that template and migrated by the non-superuser owner. It checks:
+  - role attributes, with no passwords;
+  - the exact table set, RLS on exactly the 10 tenant tables, the policies and the grant matrix;
+  - `alembic_version` and audit append-only;
+  - the purge function: owned by the non-superuser owner, `pg_temp` last, EXECUTE only for the owner and system;
+  - runtime paths: tenant isolation, the purge, and refusal of temp tables and migration-state writes;
+  - full downgrade to base and upgrade, with an **identical** catalogue snapshot;
+  - roles created after migration get no access (fail closed);
+  - the schema guard catches an unprotected tenant table;
+  - malformed, unreachable or unknown-role URLs fail without leaking the password.
+
 ## 2026-10-19 (z): Phase 11 independent audit of Phases 5–10
 
 ### Defects found, regression tests written first, fixed
