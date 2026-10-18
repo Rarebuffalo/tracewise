@@ -366,7 +366,7 @@ def summarise(runs: list[dict[str, Any]], results: dict[str, Any]) -> dict[str, 
                 for k in ("correct", "partial", "justified_abstention", "unjustified_abstention", "wrong", "overconfident")
             },
         },
-        "complete": counts["missing"] == 0 and counts["error"] == 0,
+        "complete": counts["missing"] == 0 and counts["error"] == 0 and counts["not_executed"] == 0,
         "track_b": {
             "points": round(sum(r["points"] for r in b), 2),
             "max_points": 2.0 * len(b),
