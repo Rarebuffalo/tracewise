@@ -1,5 +1,13 @@
 # Change Log
 
+## 2026-10-19 (x): Benchmark integrity and review queue (Phase 9)
+
+- Truth lock verified; no case file changed since d4745aa.
+- `tests/bench/test_review_items.py` (4) pins today's oracle outcomes for D-5 (B-01), B-04, B-12 and B-02.
+- `docs/BENCHMARK-REVIEW-QUEUE.md` lists options and recommendations for D-5, B-04, B-12, A-05, E-01 and B-02, kept separate from the canonical benchmark.
+
+No truth, scorer or policy change.
+
 ## 2026-10-19 (w): GitHub integration contract audit (Phase 8)
 
 Record: `docs/GITHUB-CONTRACT-AUDIT.md`. Every gate (G-PLAT-1 to G-PLAT-12) is mapped to its recorded documentation, recorded responses and local tests. All of them remain live gates.
