@@ -37,6 +37,7 @@ from tracewise.db import repositories as repo
 from tracewise.db.session import Conn, transaction
 from tracewise.github import errors as gh_err
 from tracewise.github.client import RepoClient
+from tracewise.observe import event
 from tracewise.report.render import CheckOutput
 
 log = logging.getLogger(__name__)
@@ -215,7 +216,7 @@ class Publisher:
 
     def _unpublished(self, conn: Conn, row: dict[str, Any], surface: Surface, e: gh_err.PermissionDenied) -> PublishResult:
         repo.mark_unpublished_permission(conn, row["id"], e.permission)
-        log.warning("publication refused for lack of permission", extra={"tw": {"surface": surface, "permission": e.permission}})
+        event(log, "publication.permission_refused", logging.WARNING, surface=surface, permission=e.permission)
         return PublishResult(surface, "unpublished_permission", None, e.permission)
 
     def _ours(self, obj: dict[str, Any]) -> bool:

@@ -15,6 +15,7 @@ lost its lease can never overwrite the outcome of the worker that reclaimed the 
 
 from __future__ import annotations
 
+import logging
 import random
 from dataclasses import dataclass
 from datetime import datetime
@@ -24,6 +25,7 @@ from psycopg.types.json import Jsonb
 
 from tracewise.db.repositories import short_error
 from tracewise.db.session import Conn
+from tracewise.observe import event
 
 JobStatus = Literal["queued", "running", "retry_wait", "succeeded", "dead", "cancelled"]
 TERMINAL: frozenset[str] = frozenset({"succeeded", "dead", "cancelled"})
@@ -34,6 +36,8 @@ JOB_DEADLINE_S = 600  # FS-ERR-2: 10 minutes from the first claim
 BACKOFF_BASE_S = 30.0
 BACKOFF_MAX_S = 300.0
 _CLAIM_LOCK = 0x7472_6163  # advisory lock id serialising claims, so the per-installation cap is exact
+
+log = logging.getLogger(__name__)
 
 
 class RetryableError(Exception):
@@ -110,9 +114,20 @@ def reap_expired(conn: Conn) -> int:
                status = CASE WHEN attempts >= max_attempts OR deadline_at <= now() THEN 'dead' ELSE 'retry_wait' END,
                finished_at = CASE WHEN attempts >= max_attempts OR deadline_at <= now() THEN now() END,
                last_error = 'lease expired', locked_by = NULL, locked_until = NULL, run_after = now(), updated_at = now()
-           WHERE status = 'running' AND locked_until < now()"""
+           WHERE status = 'running' AND locked_until < now()
+           RETURNING id, installation_id, status"""
     )
-    return cur.rowcount
+    rows = cur.fetchall()
+    for r in rows:  # T-706: stale-job recovery is visible per job (emitted inside the claiming transaction)
+        event(
+            log,
+            "queue.lease_expired",
+            logging.WARNING,
+            job_id=r["id"],
+            installation_id=r["installation_id"],
+            new_status=r["status"],
+        )
+    return len(rows)
 
 
 def claim(

@@ -182,6 +182,27 @@ Validation: lifecycle payloads are HMAC-verified and schema-validated (ids > 0, 
 | Guards (security audit 2026-10-19) | Migration 0006 revokes write access to `alembic_version` from both runtime roles. `require_tenant_plane()` runs when the analyze handler is built and fails closed on a role that is not subject to RLS. `tests/db/test_db_security.py` fails if a table carrying an installation has no RLS policy, or if a new table is not declared. |
 | Provisioning (review item) | `tracewise_system` must exist (LOGIN BYPASSRLS, created by an administrator) **before** migration 0005 runs, or 0005 grants it nothing. Tables added after 0005 must grant the system role explicitly. Deployment provisioning is not done (no deployment in this phase). |
 
+### 4.8 Observability (T-706)
+
+| Item | Behaviour |
+|---|---|
+| Events | `tracewise.observe.event(log, name, **fields)` writes one JSON log line carrying `event` (a stable dotted name), the fields, and the correlation ids bound with `bind()`: `delivery_id`, `job_id`, `installation_id`, `repo_id`, `run_id`, `attempt`. This uses stdlib `logging` with the existing `JsonFormatter`; no new dependency (ADR-12 named structlog; the existing formatter already provides the same JSON lines). |
+| Field safety | Fields must be scalars, short lists, or flat dicts of scalars. A field is dropped if any word of its name names credentials or content: `token`, `secret`, `authorization`, `url`, `body`, `payload`, `source`, `patch`, `diff`, `message`, `text`, `jwt`, and others. Strings are capped at 200 characters. The `SecretFilter` additionally scrubs token shapes, registered secrets, URL credentials and **every URL query string**. `configure()` sets `httpx`, `httpcore` and `urllib3` to WARNING, because their INFO lines print full request URLs, including signed log redirects (security audit SA-4). |
+| Never breaks processing | `event()` never raises. A fault is counted in `observe.dropped_events`. If the per-analysis record cannot be written after publication, the failure is reported (`analysis.ops_record_failed`) and not raised, so publication is never repeated. |
+| Per-analysis record (AT-OPS-01) | `analysis.status` (outcome), `tokens_in` and `tokens_out`, `latency_ms` (model time), `cost_usd`, plus `stage_ms` (`collect`, `associate`, `diagnose`, `persist`, `publish`, `total`), `publish_result` ({surface: state}) and `finished_at`. Migration 0007 adds the last three. **Cost** is computed only from configured prices (`LLM_PRICE_INPUT_PER_MTOK`, `LLM_PRICE_OUTPUT_PER_MTOK`); otherwise it stays NULL and the report counts it as `unpriced`. Prices are a T-605 output. |
+| Report and alert (FS-OPS-1, FS-OPS-2) | `python -m tracewise.ops report` gives outcomes, job states, retries, end-to-end p50/p95 (job created → finished; target ≤ 600 s), processing and model time, tokens, cost and publication states, all with sample sizes and `null` when there is no data. `python -m tracewise.ops alerts` computes the failure rate: (dead + `could_not_complete`) / (succeeded + dead) over 1 h. Cancelled no-ops are excluded. The provisional threshold is 0.2, with at least 10 jobs. When it fires it logs `alert.failure_rate` and exits 2. The report gives aggregates only, via the system plane. **Nothing is scheduled and no alert is routed anywhere** (deployment, T-1002). |
+
+Event catalogue:
+
+| Area | Events |
+|---|---|
+| Webhook | `webhook.ingested` (`outcome`: enqueued, duplicate_delivery, duplicate_run, ignored, repo_not_in_scope, repo_disabled, installation_inactive), `webhook.recorded`, `webhook.lifecycle`, `webhook.payload_rejected`, `webhook.signature_rejected`, `webhook.bad_headers`, `webhook.too_large`, `webhook.not_configured`, `webhook.db_unavailable`, `webhook.ping` |
+| Queue and worker | `job.claimed`, `job.succeeded`, `job.retry_scheduled`, `job.failed` (dead), `job.cancelled` (`reason`), `job.lease_lost`, `job.completion_ignored`, `job.record_failed`, `job.processed`, `queue.lease_expired`, `worker.db_unavailable` |
+| Analysis | `analysis.started`, `analysis.diagnosed` (status, category, band, `abstained`, `inconclusive_reason`, validation flags, tokens, tool calls), `analysis.finished` (outcome, `stage_ms`, publications), `analysis.ops_record_failed`, `analysis.notice_failed` |
+| Publication | `publication.result` (surface, state), `publication.permission_refused` |
+| Recovery | `recovery.redelivery_requested`, `recovery.run_ingested`, `recovery.pass_finished` |
+| Alert | `alert.failure_rate` |
+
 ## 5. Open architectural items
 
 | ID | Item | Resolved by |

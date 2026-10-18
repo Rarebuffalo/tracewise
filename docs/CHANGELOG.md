@@ -1,5 +1,37 @@
 # Change Log
 
+## 2026-10-19 (u): T-706 observability
+
+**Scope:** FS-OPS-1, FS-OPS-2, AT-OPS-01, AT-OPS-02. Design: ARCHITECTURE §4.8.
+
+### Code
+
+| File | Change |
+|---|---|
+| `observe.py` (new) | `event()`: stable dotted names, never raises. `bind()`: correlation ids. Word-based field deny-list. `Stages` timer. |
+| `logging.py` | The formatter includes bound ids. Every URL query string is redacted. `httpx`, `httpcore` and `urllib3` are set to WARNING (SA-4). |
+| Instrumentation | Webhook, worker, queue reaper, analyze handler, publisher and recovery now emit events (catalogue in §4.8) |
+| `db/migrations/versions/0007_analysis_ops_record.py` | `analysis.stage_ms`, `publish_result`, `finished_at`; an index on `created_at` |
+| `repositories.py` | `record_analysis_ops`; `upsert_analysis(cost_usd=…)` |
+| `ops.py` (new) | `python -m tracewise.ops report\|alerts`: measured p50/p95 with sample sizes, and the failure-rate rule. On demand only. |
+| `config.py`, `.env.example` | Optional `LLM_PRICE_INPUT_PER_MTOK` and `LLM_PRICE_OUTPUT_PER_MTOK` |
+
+### Tests
+
+| File | Covers |
+|---|---|
+| `tests/unit/test_observe.py` (7) | Sanitising, bound ids, thread locality, JSON scrubbing, never-raise, stage timer |
+| `tests/unit/test_logging.py` (+1) | Query redaction; quieted loggers |
+| `tests/db/test_observability.py` (12) | Event order and ids end to end; the per-analysis record; cost only from configured prices; no token, signed URL, log or source content in any line; retry vs dead vs cancel; stale-lease visibility; an ops-record failure does not republish; an instrumentation fault does not break processing; webhook duplicate vs rejection vs scope; report and alert with hand-calculated percentiles, thresholds and exclusions; CLI exit codes |
+
+Full suite: 520 passed.
+
+### Not done
+
+- No cost figure, because no prices are set (T-605).
+- No latency measured on real traffic.
+- No scheduling or routing of alerts.
+
 ## 2026-10-19 (t): Security audit (Phase 5)
 
 Record: `docs/SECURITY-AUDIT.md`.

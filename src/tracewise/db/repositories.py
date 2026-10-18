@@ -3,6 +3,7 @@ transaction boundaries belong to the caller so multi-table writes are atomic (FS
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any, Literal
 
 from psycopg.types.json import Jsonb
@@ -212,15 +213,16 @@ def upsert_analysis(
     tokens_in: int | None = None,
     tokens_out: int | None = None,
     latency_ms: int | None = None,
+    cost_usd: Decimal | None = None,
 ) -> int:
     row = conn.execute(
         """INSERT INTO analysis (installation_id, run_pk, status, category, confidence_band, diagnosis, provider, model,
-                                 tokens_in, tokens_out, latency_ms)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                 tokens_in, tokens_out, latency_ms, cost_usd)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
            ON CONFLICT (run_pk) DO UPDATE SET status = EXCLUDED.status, category = EXCLUDED.category,
                confidence_band = EXCLUDED.confidence_band, diagnosis = EXCLUDED.diagnosis, provider = EXCLUDED.provider,
                model = EXCLUDED.model, tokens_in = EXCLUDED.tokens_in, tokens_out = EXCLUDED.tokens_out,
-               latency_ms = EXCLUDED.latency_ms, updated_at = now()
+               latency_ms = EXCLUDED.latency_ms, cost_usd = EXCLUDED.cost_usd, updated_at = now()
            RETURNING id""",
         (
             installation_id,
@@ -234,10 +236,19 @@ def upsert_analysis(
             tokens_in,
             tokens_out,
             latency_ms,
+            cost_usd,
         ),
     ).fetchone()
     assert row is not None
     return int(row["id"])
+
+
+def record_analysis_ops(conn: Conn, analysis_id: int, stage_ms: dict[str, int], publish_result: dict[str, str]) -> None:
+    """T-706 (AT-OPS-01): stage timings and publish result. Identifiers and numbers only; idempotent overwrite."""
+    conn.execute(
+        "UPDATE analysis SET stage_ms = %s, publish_result = %s, finished_at = now(), updated_at = now() WHERE id = %s",
+        (Jsonb(stage_ms), Jsonb(publish_result), analysis_id),
+    )
 
 
 # ------------------------------------------------------------------ publications (FS-PUB-1, FS-PUB-2)

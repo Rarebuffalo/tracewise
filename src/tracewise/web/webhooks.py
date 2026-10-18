@@ -18,6 +18,7 @@ import hmac
 import json
 import logging
 import re
+from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -25,6 +26,7 @@ from pydantic import ValidationError
 
 from tracewise.contracts import WorkflowRunEvent
 from tracewise.db.session import DatabaseUnavailable
+from tracewise.observe import event as event_
 from tracewise.web.ingest import ingest_workflow_run, record_other
 from tracewise.web.lifecycle import (
     InstallationEvent,
@@ -71,21 +73,24 @@ async def github_webhook(request: Request) -> JSONResponse:
     state = request.app.state
     body = await _read_capped(request)
     if body is None:
+        event_(log, "webhook.too_large", logging.WARNING)
         return _resp(413, "too_large")
     secret: bytes | None = state.webhook_secret
     if not secret:
-        log.error("webhook secret not configured; refusing deliveries")
+        event_(log, "webhook.not_configured", logging.ERROR)
         return _resp(503, "not_configured")
     if not verify_signature(secret, body, request.headers.get("x-hub-signature-256")):
-        log.warning("webhook signature rejected")
+        event_(log, "webhook.signature_rejected", logging.WARNING)
         return _resp(401, "bad_signature")
     delivery_id = request.headers.get("x-github-delivery", "")
     event = request.headers.get("x-github-event", "")
     if not _DELIVERY_ID.match(delivery_id) or not _EVENT.match(event):
+        event_(log, "webhook.bad_headers", logging.WARNING)
         return _resp(400, "bad_headers")
-    log_ctx = {"delivery_id": delivery_id, "event": event}
+    log_ctx: dict[str, Any] = {"delivery_id": delivery_id, "gh_event": event}
 
     if event == "ping":
+        event_(log, "webhook.ping", **log_ctx)
         return _resp(200, "pong")
     try:
         doc = json.loads(body)
@@ -96,6 +101,7 @@ async def github_webhook(request: Request) -> JSONResponse:
     action = doc.get("action") if isinstance(doc.get("action"), str) else None
     inst_raw = doc.get("installation", {}).get("id") if isinstance(doc.get("installation"), dict) else None
     inst = inst_raw if isinstance(inst_raw, int) else None
+    log_ctx |= {"installation_id": inst, "action": action}
 
     try:
         if event in ("installation", "installation_repositories"):  # T-701
@@ -106,10 +112,11 @@ async def github_webhook(request: Request) -> JSONResponse:
                 return await _reject(request, delivery_id, event, log_ctx, "invalid_payload", action, inst)
             fn = process_installation if event == "installation" else process_installation_repositories
             lres = await _run_sync(request, fn, delivery_id, lev)
-            log.info("lifecycle event", extra={"tw": {**log_ctx, "outcome": lres.outcome, "cancelled": lres.cancelled_jobs}})
+            event_(log, "webhook.lifecycle", **log_ctx, outcome=lres.outcome, cancelled_jobs=lres.cancelled_jobs)
             return _resp(200, lres.outcome, cancelled_jobs=lres.cancelled_jobs)
         if event != "workflow_run":
             new = await _run_sync(request, record_other, delivery_id, event, action, inst, "ignored")
+            event_(log, "webhook.recorded", **log_ctx, outcome="ignored" if new else "duplicate_delivery")
             return _resp(202, "ignored" if new else "duplicate_delivery")
         try:
             parsed = WorkflowRunEvent.model_validate(doc)
@@ -117,9 +124,9 @@ async def github_webhook(request: Request) -> JSONResponse:
             return await _reject(request, delivery_id, event, log_ctx, "invalid_payload", action, inst)
         result = await _run_sync(request, ingest_workflow_run, delivery_id, parsed)
     except DatabaseUnavailable:
-        log.error("database unavailable; delivery not recorded", extra={"tw": log_ctx})
+        event_(log, "webhook.db_unavailable", logging.ERROR, **log_ctx)
         return _resp(503, "unavailable")
-    log.info("webhook ingested", extra={"tw": {**log_ctx, "outcome": result.outcome, "job_id": result.job_id}})
+    event_(log, "webhook.ingested", **log_ctx, outcome=result.outcome, job_id=result.job_id)
     status = 202 if result.outcome == "enqueued" else 200
     return _resp(status, result.outcome, job_id=result.job_id)
 
@@ -128,12 +135,12 @@ async def _reject(
     request: Request,
     delivery_id: str,
     event: str,
-    log_ctx: dict[str, str],
+    log_ctx: dict[str, Any],
     why: str,
     action: str | None = None,
     inst: int | None = None,
 ) -> JSONResponse:
-    log.warning("webhook payload rejected", extra={"tw": {**log_ctx, "reason": why}})
+    event_(log, "webhook.payload_rejected", logging.WARNING, **log_ctx, reason=why)
     try:
         await _run_sync(request, record_other, delivery_id, event, action, inst, "rejected")
     except DatabaseUnavailable:
