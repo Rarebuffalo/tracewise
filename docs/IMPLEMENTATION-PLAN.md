@@ -106,6 +106,8 @@ A new migration that adds a table must:
 
 Either way it must grant the system role explicitly. That test fails otherwise.
 
+Migration 0008 grants EXECUTE on `tracewise_purge()` to `tracewise_system`, again only if the role exists when the migration runs.
+
 Not done: provisioning real roles and credentials (D-11, deployment).
 
 ## 5. Security controls (carried and extended)

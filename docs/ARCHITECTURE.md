@@ -203,6 +203,16 @@ Event catalogue:
 | Recovery | `recovery.redelivery_requested`, `recovery.run_ingested`, `recovery.pass_finished` |
 | Alert | `alert.failure_rate` |
 
+### 4.9 Retention and purge (T-704)
+
+| Item | Behaviour |
+|---|---|
+| Mechanism | `tracewise_purge(batch_limit)`, a SECURITY DEFINER function from migration 0008 with a fixed `search_path`. Only `tracewise_system` may EXECUTE it; the system role still has no DELETE on content. It takes no date input, and its cut-offs use the database clock. Each step deletes at most `batch_limit` rows (clamped to 1..10000). One call is one transaction. An advisory try-lock makes a concurrent call return `locked`. |
+| Policy | 90-day excerpts (diagnosis document), 180-day analyses with their publications, 14-day deliveries, and 365 days for fingerprints, runs (once unreferenced), terminal jobs, usage, audit and redelivery bookkeeping. Non-terminal jobs are never deleted. Interpretations are in D-12. |
+| Tenant purge (FS-INS-3) | Applies to a `deleted` installation past `purge_after` (+7 days) with no queued, running or retry_wait job. All of its tenant rows are deleted, bounded per call and resumable. Then `purged_at` is set, `account_login` is cleared, and a `tenant_purged` audit event is written. A tombstone row remains, so late lifecycle events stay no-ops. A `deleted` row without `purge_after` is reported, not purged. |
+| Driver | `python -m tracewise.retention [--batch-limit N] [--max-batches M]` runs on the system role. Exit codes: 0 when everything due was handled, 3 when unfinished (run again), 1 on error. It logs `retention.batch`, `retention.finished` and `retention.failed`. **No schedule is installed.** |
+| Deduplication | Run deduplication (unique repo, run and attempt in `workflow_run`, 365 days) outlives delivery deduplication (14 days). A delivery GUID that reappears after 14 days is therefore `duplicate_run` and creates no new job. The recovery window (72 h) is far shorter than both. |
+
 ## 5. Open architectural items
 
 | ID | Item | Resolved by |

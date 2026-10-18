@@ -69,7 +69,7 @@ Version 2.0, 2026-10-18. Dependency-ordered. Each task lists the SPEC requiremen
 | T-701 | Installation lifecycle (created, deleted, suspend, repos added/removed; in-flight cancel) | FS-INS-3, FS-INS-4 | AT-INS-03, AT-INS-04 | T-105 | 0.75 | done |
 | T-702 | Recovery: deliveries API redelivery + failed-run sweep | FS-EVT-5 | AT-REL-03 | T-302, T-105 | 1.0 | done |
 | T-703 | Quotas + over-quota notice | FS-QTA-1 | AT-QTA-01 | T-502 | 0.5 | todo |
-| T-704 | Retention and purge jobs | FS-SEC-3 | AT-SEC-12 | T-104 | 0.75 | todo |
+| T-704 | Retention and purge jobs | FS-SEC-3 | AT-SEC-12 | T-104 | 0.75 | done (offline; on-demand CLI, nothing scheduled; retention interpretations D-12 for review) |
 | T-705 | Postgres RLS (transaction-local context; non-owner role) | FS-SEC-6 | AT-SEC-03 | T-104 | 1.0 | done (offline; role provisioning for deployment is a review item, ARCHITECTURE §4.7) |
 | T-706 | Observability: stage timings, usage and cost records, alerts | FS-OPS-1, FS-OPS-2 | AT-OPS-01, AT-OPS-02 | T-105 | 0.75 | done (offline; cost stays NULL/"unpriced" until T-605 sets prices; alert is on-demand, nothing scheduled or routed; no latency measured on real traffic) |
 | **Phase 8: LIVE (gated: needs your approved test org + dev App)** | | | | | | |

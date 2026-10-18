@@ -1,5 +1,49 @@
 # Change Log
 
+## 2026-10-19 (v): T-704 retention and tenant purge
+
+**Scope:** FS-SEC-3, FS-INS-3, AT-SEC-12, AT-INS-03 (the "purge" half). Design: ARCHITECTURE §4.9; interpretations D-12 (for review).
+
+### Code
+
+| File | Change |
+|---|---|
+| `db/migrations/versions/0008_retention_purge.py` | `tracewise_purge(batch_limit)`: a fixed-policy SECURITY DEFINER function, EXECUTE for `tracewise_system` only, no date input, bounded steps, an advisory try-lock. Adds `installation.purged_at`, `analysis.content_purged_at` and age indexes. Reversible. |
+| `retention.py` (new) | `python -m tracewise.retention`: a bounded batch loop. Exit codes: 0 done, 3 unfinished, 1 error. Events: `retention.batch`, `retention.finished`, `retention.failed`. |
+
+### Tests
+
+`tests/db/test_retention.py` (14):
+
+- an empty database;
+- exact age boundaries for every rule, mixing eligible and ineligible rows; non-terminal jobs are never touched;
+- idempotent repeats;
+- bounded batches and resume after interruption;
+- tenant purge:
+  - only the deleted tenant is affected, and the other tenant is byte-for-byte unchanged;
+  - audit events are kept, a tombstone remains, and there is no resurrection by late events;
+  - the grace period is honoured;
+  - the purge waits for in-flight jobs;
+  - it is bounded and resumable, and `purged_at` is set only at the end;
+- a `deleted` installation without a purge date is reported, not purged;
+- run deduplication survives delivery expiry;
+- privileges:
+  - the tenant role cannot purge;
+  - the system role still cannot DELETE content;
+  - the function has a fixed `search_path`, no date argument, and a clamped limit;
+- a concurrent purge returns `locked`;
+- a privilege error and a mid-run outage are reported as failures, with committed batches kept;
+- CLI exit codes;
+- 0008 down and up;
+- **AT-SEC-12:** after 20 real-pipeline analyses, no raw log or source file is stored, excerpts are ≤2 KB, and the retention job deletes by age.
+
+Full suite: 534 passed.
+
+### Not done
+
+- No schedule.
+- Never run against real data.
+
 ## 2026-10-19 (u): T-706 observability
 
 **Scope:** FS-OPS-1, FS-OPS-2, AT-OPS-01, AT-OPS-02. Design: ARCHITECTURE §4.8.
