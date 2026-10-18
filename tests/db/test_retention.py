@@ -392,3 +392,51 @@ def test_definer_function_ignores_caller_temp_tables(pool, owner) -> None:  # ty
     assert r.get("tenant") is None and r.get("tenant_purged") is None
     assert counts(owner, 10) == before
     assert owner.execute("SELECT status FROM installation WHERE id = 10").fetchone() == ("active",)
+
+
+@pytest.mark.parametrize(
+    ("table", "column", "days", "where"),
+    [
+        ("analysis", "updated_at", 90, "true"),  # content strip
+        ("webhook_delivery", "received_at", 14, "true"),
+        ("failure_signature", "last_seen_at", 365, "true"),
+        ("usage_event", "created_at", 365, "true"),
+        ("audit_event", "created_at", 365, "true"),
+    ],
+)
+def test_one_second_either_side_of_each_expiry(pool, owner, table, column, days, where) -> None:  # type: ignore[no-untyped-def]
+    """Cut-offs are strict (`older than`): a row 1 s younger than its period stays, 1 s older goes."""
+    seed(pool, 9, 1, n=2)
+    key = (
+        "id"
+        if table not in ("webhook_delivery", "failure_signature")
+        else ("delivery_id" if table == "webhook_delivery" else "fingerprint")
+    )
+    keys = [r[0] for r in owner.execute(f"SELECT {key} FROM {table} ORDER BY {key}")][:2]  # noqa: S608
+    owner.execute(
+        f"UPDATE {table} SET {column} = now() - make_interval(days => %s) + interval '1 second' WHERE {key} = %s",  # noqa: S608
+        (days, keys[0]),
+    )
+    owner.execute(
+        f"UPDATE {table} SET {column} = now() - make_interval(days => %s) - interval '1 second' WHERE {key} = %s",  # noqa: S608
+        (days, keys[1]),
+    )
+    run(pool)
+    if table == "analysis":
+        got = dict(owner.execute("SELECT id, diagnosis IS NOT NULL FROM analysis").fetchall())
+        assert got == {keys[0]: True, keys[1]: False}
+    else:
+        assert [r[0] for r in owner.execute(f"SELECT {key} FROM {table} WHERE {key} = ANY(%s)", (keys,))] == [keys[0]]  # noqa: S608
+
+
+def test_rows_without_an_expiry_timestamp_are_kept(pool, owner) -> None:  # type: ignore[no-untyped-def]
+    seed(pool, 9, 1)
+    with transaction(pool) as c:
+        c.execute(
+            "INSERT INTO redelivery_request (guid, github_delivery_id, installation_id, event, attempts)"
+            " VALUES ('never', 2, 9, 'e', 0)"
+        )
+    owner.execute("UPDATE job SET status='running', locked_by='w', locked_until=now() + interval '1 min', finished_at=NULL")
+    run(pool)
+    assert owner.execute("SELECT count(*) FROM redelivery_request WHERE guid = 'never'").fetchone() == (1,)
+    assert owner.execute("SELECT count(*) FROM job").fetchone() == (1,)

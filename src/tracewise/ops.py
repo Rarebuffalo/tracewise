@@ -97,7 +97,8 @@ def report(pool: ConnectionPool[Conn], *, window: timedelta = timedelta(hours=24
             )
         ]
         rows = conn.execute(
-            """SELECT (stage_ms->>'total')::bigint AS total_ms, latency_ms, tokens_in, tokens_out, cost_usd,
+            """SELECT CASE WHEN jsonb_typeof(stage_ms->'total') = 'number' AND (stage_ms->>'total')::numeric >= 0
+                           THEN (stage_ms->>'total')::numeric END AS total_ms, latency_ms, tokens_in, tokens_out, cost_usd,
                       publish_result IS NOT NULL AS recorded
                FROM analysis WHERE created_at >= %s AND created_at < %s""",
             (start, end),

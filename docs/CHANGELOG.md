@@ -1,5 +1,29 @@
 # Change Log
 
+## 2026-10-19 (ac): Phase 14 observability and retention verification
+
+### Defects fixed (tests written first)
+
+| ID | Defect | Fix |
+|---|---|---|
+| SA-8 | Five redaction bypass shapes | New scrubber patterns |
+| O-1 | One malformed `stage_ms.total` (non-numeric) crashed `ops.report` | Type-checked extraction; negative or invalid values are ignored |
+
+### Tests
+
+- 12 new tests in `test_logging.py` (bypass shapes; benign text unchanged).
+- `test_observability.py`:
+  - malformed or incomplete ops records;
+  - a failure injected in each of 4 pipeline stages produces `job.retry_scheduled` with the error type only, and the secret-bearing exception text appears in neither logs nor `job.last_error`;
+  - the report carries no tenant content.
+- `test_retention.py`:
+  - 1-second boundaries either side of the 90/14/365-day cut-offs (strict "older than");
+  - rows with no expiry timestamp are kept.
+
+### Retention conflict check
+
+Implementation versus documented policy: no conflict found. The open interpretations remain D-12. The 0.2 alert threshold remains provisional.
+
 ## 2026-10-19 (ab): Phase 13 recovery and concurrency adversarial tests
 
 ### Defects found (regression tests written first) and fixed in `recovery.py`

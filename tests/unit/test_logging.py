@@ -96,3 +96,35 @@ def test_nested_fields_are_scrubbed_at_any_depth() -> None:
     assert "ghs_bbbb" not in out and "sig=abc" not in out and "nested-secret-value" not in out
     assert rec.tw["n"] == 3 and rec.tw["stage"]["x"] == "https://h.example/p?[REDACTED]"  # type: ignore[attr-defined]
     assert "[TRUNCATED]" in out
+
+
+import pytest  # noqa: E402
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "loc=https%3A%2F%2Fblob.core.windows.net%2Fl%3Fsig%3DSECRETSIG1",
+        "Authorization: Bearer SECRETOPAQUE3abcdef",
+        "authorization: token SECRETOPAQUE4abcdef",
+        "headers={'Authorization': 'Bearer SECRETOPAQUE5abcdef'}",
+        "Cookie: session=SECRETCOOKIE5; other=1",
+        "Set-Cookie: tw=SECRETCOOKIE8",
+        "X-Amz-Signature=SECRETSIG9abcdef&X-Amz-Credential=SECRETCRED",
+        "blob.core.windows.net/l.txt?sv=1&sig=SECRETSIG10",
+        "redirect to //h/p?token=SECRETTOK11",
+        "bearer SECRETOPAQUE12abcdef in text",
+    ],
+)
+def test_phase14_redaction_bypass_shapes(raw: str) -> None:
+    """Phase 14 audit (SA-8): encoded URLs, auth/cookie headers and bare signature parameters."""
+    from tracewise.logging import SecretFilter
+
+    assert "SECRET" not in SecretFilter().scrub(raw), raw
+
+
+def test_redaction_keeps_benign_metric_text() -> None:
+    from tracewise.logging import SecretFilter
+
+    text = "tokens_in=120 tokens_out=30 outcome=diagnosed https://api.github.com/repos/a/b/check-runs"
+    assert SecretFilter().scrub(text) == text
