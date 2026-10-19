@@ -20,6 +20,7 @@ import os
 import signal
 import socket
 import sys
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -122,6 +123,28 @@ def main(argv: list[str] | None = None, build: Callable[[Settings, str], Runtime
     ap.add_argument("--once", action="store_true", help="process at most one job, then exit")
     ap.add_argument("--idle-sleep", type=float, default=1.0)
     a = ap.parse_args(argv)
+    stop = threading.Event()
+    holder: list[Runtime] = []
+
+    def on_signal(signum: int, _frame: FrameType | None) -> None:
+        # Installed before startup (Phase 41): a stop requested while connecting or validating is graceful too.
+        event(log, "worker.stopping", signal=signal.Signals(signum).name)
+        stop.set()
+        if holder:
+            holder[0].worker.stop()
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)  # a second signal: default action (immediate exit)
+        signal.signal(signal.SIGINT, signal.default_int_handler)
+
+    old = {s: signal.signal(s, on_signal) for s in (signal.SIGTERM, signal.SIGINT)}
+    event(log, "worker.starting", worker=a.worker_id)
+    try:
+        return _run(a, build, stop, holder)
+    finally:
+        for s, h in old.items():
+            signal.signal(s, h)
+
+
+def _run(a: argparse.Namespace, build: Callable[[Settings, str], Runtime], stop: threading.Event, holder: list[Runtime]) -> int:
     try:
         st = get_settings()
     except Exception as e:  # pydantic: names only, never values
@@ -137,14 +160,11 @@ def main(argv: list[str] | None = None, build: Callable[[Settings, str], Runtime
         event(log, "worker.refused", logging.ERROR, error_type=type(e).__name__)
         print("worker refused to start: database unavailable", file=sys.stderr)
         return EXIT_RUNTIME
-
-    def on_signal(signum: int, _frame: FrameType | None) -> None:
-        event(log, "worker.stopping", signal=signal.Signals(signum).name)
-        rt.worker.stop()
-        signal.signal(signal.SIGTERM, signal.SIG_DFL)  # a second signal: default action (immediate exit)
-        signal.signal(signal.SIGINT, signal.default_int_handler)
-
-    old = {s: signal.signal(s, on_signal) for s in (signal.SIGTERM, signal.SIGINT)}
+    holder.append(rt)
+    if stop.is_set():  # stopped during startup: release resources, claim nothing
+        rt.close()
+        event(log, "worker.stopped", exit_code=EXIT_OK, during_startup=True)
+        return EXIT_OK
     event(log, "worker.started", worker=a.worker_id, once=a.once)
     code = EXIT_OK
     try:
@@ -159,8 +179,6 @@ def main(argv: list[str] | None = None, build: Callable[[Settings, str], Runtime
         code = EXIT_RUNTIME
         event(log, "worker.failed", logging.ERROR, error_type=type(e).__name__)
     finally:
-        for s, h in old.items():
-            signal.signal(s, h)
         rt.close()
         event(log, "worker.stopped", exit_code=code)
     return code
