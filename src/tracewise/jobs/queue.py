@@ -85,6 +85,21 @@ def backoff_s(attempts: int, retry_after_s: float | None = None, rnd: random.Ran
     return float(max(base * jitter, retry_after_s or 0.0))
 
 
+RETRY_MARGIN_S = 5.0  # slack between the decision and fail(): clocks, the remainder of the attempt
+
+
+def retry_fits(job: Job, now: datetime) -> bool:
+    """Whether a failure at `now` could still be retried: attempts remain AND the longest possible backoff (jitter
+    included) ends before the job deadline (FS-ERR-2). When False, the current attempt is the final one, so a handler
+    must tell the user now (FS-ERR-1) instead of leaving `fail()` to kill the job silently."""
+    if job.attempts >= job.max_attempts:
+        return False
+    if job.deadline_at is None:
+        return True
+    worst = min(BACKOFF_MAX_S, BACKOFF_BASE_S * 4 ** max(0, job.attempts - 1)) * 1.2
+    return bool(now.timestamp() + worst + RETRY_MARGIN_S < job.deadline_at.timestamp())
+
+
 def enqueue(
     conn: Conn,
     *,
@@ -137,9 +152,11 @@ def claim(
     Must be called inside a transaction; the job is `running` once it commits."""
     conn.execute("SELECT pg_advisory_xact_lock(%s)", (_CLAIM_LOCK,))
     reap_expired(conn)
+    # Past the deadline: a job that never ran is dropped. A job that already ran (retry_wait, attempts > 0) has
+    # fetched logs, so it is claimed once more and its handler only reports "could not complete" (FS-ERR-1).
     conn.execute(
         """UPDATE job SET status = 'dead', finished_at = now(), last_error = 'deadline exceeded', updated_at = now()
-           WHERE status IN ('queued', 'retry_wait') AND deadline_at <= now()"""
+           WHERE status IN ('queued', 'retry_wait') AND deadline_at <= now() AND attempts = 0"""
     )
     row = conn.execute(
         """SELECT j.id FROM job j
