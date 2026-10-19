@@ -207,3 +207,30 @@ def test_migration_0004_roundtrip_and_runtime_grants(pg, owner, pool) -> None:  
     assert owner.execute("SELECT to_regclass('public.recovery_checkpoint')").fetchone() == (None,)
     upgrade(pg.url(OWNER))
     assert owner.execute("SELECT to_regclass('public.redelivery_request')::text").fetchone() == ("redelivery_request",)
+
+
+def test_short_error_never_copies_row_or_input_content(pg, owner) -> None:  # type: ignore[no-untyped-def]
+    """Phase 36 (P-5): psycopg errors carry `DETAIL: Failing row contains (...)` and pydantic errors echo
+    `input_value=...`. short_error() feeds job.last_error and publication.last_error (kept up to 365 days), so it
+    must keep the error class and primary message only (its own contract: never log content; FS-SEC-3)."""
+    import pydantic
+
+    try:
+        owner.execute(
+            "INSERT INTO publication (installation_id, analysis_id, surface, target_key, content_digest) "
+            "VALUES (1, 1, 'check_run', 'ROW_CONTENT_MARKER_7', 'zz')"
+        )
+    except psycopg.Error as e:
+        db_err = e
+    s = repo.short_error(db_err)
+    assert "ROW_CONTENT_MARKER_7" not in s and "Failing row" not in s and s  # still says what failed
+
+    class M(pydantic.BaseModel):
+        n: int
+
+    try:
+        M.model_validate({"n": "INPUT_CONTENT_MARKER_8"})
+    except pydantic.ValidationError as e:
+        v_err = e
+    s2 = repo.short_error(v_err)
+    assert "INPUT_CONTENT_MARKER_8" not in s2 and "validation error" in s2 and "n" in s2
