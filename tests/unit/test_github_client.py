@@ -388,3 +388,22 @@ def test_model_adapter_is_the_only_other_network_module_and_reaches_one_endpoint
     ]
     calls = [p for p in posts if p.func.attr != "close"]  # type: ignore[attr-defined]
     assert len(calls) == 1 and ast.unparse(calls[0].args[1]) == "self.codec.endpoint"
+
+
+@pytest.mark.parametrize(
+    ("body", "cap", "lines", "truncated"),
+    [
+        ("a" * 10 + "\n" + "b" * 9, 20, ["a" * 10, "b" * 9], False),  # exactly at the cap: complete
+        ("a" * 10 + "\n" + "b" * 10, 20, ["a" * 10], True),  # one byte over: the partial tail line is dropped
+        ("é" * 5 + "\n" + "é" * 10, 20, ["é" * 5], True),  # multibyte at the boundary: no split character
+        ("", 20, [], False),
+    ],
+)
+def test_download_cap_boundaries_and_truncation_signal(body: str, cap: int, lines: list[str], truncated: bool) -> None:
+    """Phase 37: the cap counts decoded UTF-8 bytes while streaming; `.truncated` is observable after consumption."""
+    gh, rc = setup(max_log_bytes=cap)
+    gh.route("GET", LOGS, httpx.Response(302, headers={"location": BLOB}))
+    gh.route("GET", r"^//productionresultssa1", httpx.Response(200, text=body))
+    it = rc.job_log_lines(99)
+    assert it.truncated is False  # nothing known before reading
+    assert list(it) == lines and it.truncated is truncated

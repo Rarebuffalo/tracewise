@@ -34,3 +34,21 @@ def test_fake_in_test_env_fails_closed_and_there_is_no_fallback() -> None:
     src = inspect.getsource(providers)
     assert "except" not in src  # no error path that could switch to another provider
     assert src.count("return ") == 1  # one provider per configuration (the test-only fake)
+
+
+def test_no_code_path_can_reach_a_real_model_today() -> None:
+    """Phase 39: the only network-capable provider (HTTPProvider) is never constructed in product code, and the
+    benchmark CLI offers scripted providers only. Wiring a real provider must change this test deliberately."""
+    import re
+    from pathlib import Path
+
+    from tracewise.bench.providers import SCRIPTED
+
+    src = Path(__file__).resolve().parents[2] / "src" / "tracewise"
+    constructs = [p for p in src.rglob("*.py") if re.search(r"\bHTTPProvider\(", p.read_text()) and p.name != "http_adapter.py"]
+    assert constructs == []
+    assert all("openai" not in name.lower() and "http" not in name.lower() for name in SCRIPTED)
+    codecs = [
+        p for p in src.rglob("*.py") if re.search(r"class \w*Wire\b|WireCodec\)", p.read_text()) and p.name != "http_adapter.py"
+    ]
+    assert codecs == []  # no vendor codec ships yet (MODEL-ADAPTER C-1..C-9)

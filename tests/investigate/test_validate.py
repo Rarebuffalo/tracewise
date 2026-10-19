@@ -347,3 +347,26 @@ def test_log_excerpts_are_at_most_2kb_in_bytes_even_for_multibyte_text() -> None
         assert len(raw) > 1990 or len(text.encode()) <= 2000  # not cut shorter than needed
     secret = "ghp_" + "Kq7" * 12
     assert "Kq7Kq7Kq7" not in excerpt_of("é" * 600 + " " + secret)  # redaction happens before the cut
+
+
+@pytest.mark.parametrize("shape", ["traceback", "generic", "multiline"])
+def test_excerpt_cap_holds_through_the_full_prepass_path(shape: str) -> None:
+    """Phase 38: the 2000-byte cap is active on the real pipeline (pre-pass → validator), not only in the helper."""
+    from tests.investigate.factory import b02_script, evidence
+    from tracewise.analysis.diagnose import diagnose
+    from tracewise.investigate.fake import ScriptedProvider
+
+    wide = "日本語のエラー" * 180  # 3780 bytes per line
+    log = {
+        "traceback": f'Traceback (most recent call last):\n  File "app.py", line 3, in <module>\n    main()\nValueError: {wide}',
+        "generic": f"building...\nerror: {wide}",
+        "multiline": "Traceback (most recent call last):\n"
+        + "\n".join(f'  File "m{i}.py", line {i}, in f{i}\n    x{i}()  # {wide[:300]}' for i in range(8))
+        + "\nValueError: boom",
+    }[shape] + "\nProcess completed with exit code 1."
+    d = diagnose(evidence(log=log, step="Run app", command="python app.py"), ScriptedProvider(b02_script())).diagnosis
+    assert d.primary_errors
+    for pe in d.primary_errors:
+        raw = pe.excerpt.encode("utf-8")
+        assert 1990 <= len(raw) <= 2000  # the cap was reached and held
+        raw.decode("utf-8")

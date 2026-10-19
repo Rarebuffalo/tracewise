@@ -115,6 +115,18 @@ import pytest  # noqa: E402
         "redirect to //h/p?token=SECRETTOK11",
         "bearer SECRETOPAQUE12abcdef in text",
     ],
+    ids=[
+        "encoded-url",
+        "auth-bearer",
+        "auth-token",
+        "repr-dict",
+        "cookie",
+        "set-cookie",
+        "amz-params",
+        "schemeless-sas",
+        "token-param",
+        "bare-bearer",
+    ],  # ids never echo the synthetic secrets
 )
 def test_phase14_redaction_bypass_shapes(raw: str) -> None:
     """Phase 14 audit (SA-8): encoded URLs, auth/cookie headers and bare signature parameters."""
