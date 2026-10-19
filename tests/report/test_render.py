@@ -161,3 +161,18 @@ def test_marker_and_tamper_and_secrets() -> None:
     assert not render(v, marker="--><script>").startswith("<!--")
     with pytest.raises(ValueError):
         render(ValidatedDiagnosis(v.diagnosis.model_copy(update={"why": "x"}), v.digest))
+
+
+def test_truncated_log_without_error_line_never_claims_the_log_has_no_error() -> None:
+    """Phase 37: with a truncated log, 'no error line' only describes the RETAINED part. The report must not assert
+    that the log has none (the error may lie beyond the download cap or the retention budget)."""
+    from tracewise.report.render import check_output
+
+    quiet = "\n".join(f"step output line {i}" for i in range(30)) + "\nProcess completed with exit code 1."
+    complete = diagnose(evidence(log=quiet), ScriptedProvider([]))
+    truncated = diagnose(evidence(log=quiet, truncated_log=True), ScriptedProvider([]))
+    assert complete.diagnosis.inconclusive_reason == truncated.diagnosis.inconclusive_reason == "no_error_line"
+    assert "the log has no error line" in render(complete)  # a complete log may say so
+    for text in (render(truncated), check_output(truncated, render(truncated)).summary):
+        assert "the log has no error line" not in text
+        assert "retained" in text  # it says what was actually checked
