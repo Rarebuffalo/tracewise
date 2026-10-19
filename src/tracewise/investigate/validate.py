@@ -71,7 +71,14 @@ def excerpt_of(text: str) -> str:
 
 
 MAX_SNIPPET_LINES = 15
-_URL = re.compile(r"(?i)\b(?:https?|ftp|file|javascript|data|vbscript):[^\s<>\"')\]]*|\bwww\.[^\s<>\"')\]]+")
+# GFM autolinks `scheme://` and `www.` after ANY prefix (digits and `_` included), so those match without a word
+# boundary (A3). Other schemes are never autolinked; they still need a boundary and something after the colon, so
+# prose such as "the file: x" or "metadata:" is left alone.
+_URL = re.compile(
+    r"(?i)(?:https?|ftp)://[^\s<>\"')\]]*"
+    r"|\b(?:https?|ftp|file|javascript|data|vbscript):(?=\S)[^\s<>\"')\]]*"
+    r"|www\.[^\s<>\"')\]]+"
+)
 _MD_LINK = re.compile(r"\[([^\]\n]{0,200})\]\([^)\n]{0,2000}\)")
 _PATH_TOKEN = re.compile(
     r"(?<![\w/.@-])((?:[\w.-]+/)*[\w.-]+\.(?:py|pyi|ts|tsx|js|jsx|mjs|cjs|json|ya?ml|toml|cfg|ini|txt|md|lock|sh|go|rs|"

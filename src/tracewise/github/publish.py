@@ -227,9 +227,12 @@ class Publisher:
         return bool(self.bot_login) and isinstance(user, dict) and user.get("login") == self.bot_login
 
     def _find_comment(self, endpoint: str, tag: str, **params: Any) -> int | None:
+        """Only the FIRST line identifies a report: the renderer writes the marker there, while log excerpts and
+        snippets further down are untrusted and may contain any marker text (A4)."""
         needle = f"<!-- tracewise:{tag} -->"
         for c in self.rc.paginate(endpoint, None, **params):
-            if isinstance(c, dict) and needle in str(c.get("body") or "") and self._ours(c) and isinstance(c.get("id"), int):
+            first = str(c.get("body") or "").split("\n", 1)[0] if isinstance(c, dict) else ""
+            if first == needle and self._ours(c) and isinstance(c.get("id"), int):
                 return int(c["id"])
         return None
 

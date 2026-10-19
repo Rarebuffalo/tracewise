@@ -86,6 +86,9 @@ BASIS_TEXT = {
 }
 
 
+_AUTOLINK = re.compile(r"(?i):/|www\\?\.")  # `scheme://` and `www.` (the dot may already be escaped)
+
+
 def esc(text: str | None, *, single_line: bool = True) -> str:
     """Escape untrusted text for inline Markdown on GitHub."""
     if not text:
@@ -96,6 +99,7 @@ def esc(text: str | None, *, single_line: bool = True) -> str:
     t = t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     t = _MD_SPECIAL.sub(r"\\\1", t)
     t = re.sub(r"@(?=[A-Za-z0-9])", "@​", t)  # break @user / @org/team mentions
+    t = _AUTOLINK.sub(lambda m: m.group(0)[:-1] + "​" + m.group(0)[-1], t)  # break autolinks (A3, 2nd layer)
     return re.sub(r"(?<![\w&])\\?#(?=\d)", "#​", t)  # break #123 auto-references
 
 
