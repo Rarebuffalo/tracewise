@@ -190,7 +190,7 @@ Expired leases are reaped at the next claim (`queue.lease_expired`). Handlers ar
 - **Never stored:** full logs or full source files (AT-SEC-12, verified offline after 20 analyses), webhook bodies, tokens.
 - **Stored, redacted, inside the diagnosis document:**
   - log excerpts of at most 2000 bytes each;
-  - a source snippet of up to 15 lines at the validated location (its size rule is pending P-3);
+  - a source snippet of up to 15 lines at the validated location (the stored copy is at most 2000 bytes; P-3);
   - model-written explanation and fix text.
 
   The redaction is pattern-based (P-4).
