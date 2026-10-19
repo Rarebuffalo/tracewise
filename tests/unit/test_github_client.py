@@ -53,7 +53,9 @@ BENCH_OFFLINE = {SRC / "bench" / "replay.py", SRC / "bench" / "harness.py"}
 
 
 def test_sec01_no_http_or_github_urls_outside_the_client() -> None:
-    allowed = {SRC / "github" / "client.py", *BENCH_OFFLINE}
+    # The two network modules: the GitHub client, and the model adapter core (T-605 prep), which may only reach
+    # its codec's single endpoint (see test_model_adapter_is_the_only_other_network_module below).
+    allowed = {SRC / "github" / "client.py", SRC / "investigate" / "http_adapter.py", *BENCH_OFFLINE}
     fixtures = SRC / "bench" / "cases"  # benchmark fixture repositories: data, not product code
     for f in SRC.rglob("*.py"):
         if f in allowed or fixtures in f.parents:
@@ -370,3 +372,19 @@ def test_post_is_never_retried_inline(fault) -> None:  # type: ignore[no-untyped
     assert n["calls"] == 1
     gh.route("PATCH", r"/check-runs/1$", [jresp(502), jresp(200, {"id": 1})])
     assert rc.request("update_check_run", check_run_id=1, json_body={}) == {"id": 1}  # PATCH is idempotent: retried
+
+
+def test_model_adapter_is_the_only_other_network_module_and_reaches_one_endpoint() -> None:
+    """Phase 19: the adapter core posts only to `codec.endpoint`, never follows redirects, names no host itself."""
+    f = SRC / "investigate" / "http_adapter.py"
+    text = f.read_text()
+    assert "api.github.com" not in text and "openai.com" not in text and "http://" not in text.replace('"http"', "")
+    assert "follow_redirects=False" in text
+    tree = ast.parse(text)
+    posts = [
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and ast.unparse(n.func.value) == "self._client"
+    ]
+    calls = [p for p in posts if p.func.attr != "close"]  # type: ignore[attr-defined]
+    assert len(calls) == 1 and ast.unparse(calls[0].args[1]) == "self.codec.endpoint"

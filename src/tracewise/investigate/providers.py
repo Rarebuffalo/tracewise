@@ -26,5 +26,7 @@ def provider_factory(st: Settings) -> Callable[[], Provider]:
 
         return lambda: ScriptedProvider([])  # every call fails → could_not_complete; process smoke tests only
     if st.llm_provider == "openai":
-        raise ProviderConfigError("LLM_PROVIDER=openai: the adapter is not available in this build (T-605)")
+        raise ProviderConfigError(
+            "LLM_PROVIDER=openai: no OpenAI wire codec in this build; its API contract is not recorded (docs/MODEL-ADAPTER.md)"
+        )
     raise ProviderConfigError("LLM_PROVIDER must be 'openai' or 'fake'")  # pragma: no cover - Settings restricts it

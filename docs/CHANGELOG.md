@@ -1,5 +1,29 @@
 # Change Log
 
+## 2026-10-19 (ag): Phase 19 model adapter core (T-605 preparation; no real model)
+
+- `investigate/http_adapter.py`: `HTTPProvider` over a pluggable `WireCodec`. It covers:
+  - a `SecretStr` key, scrubbed from logs and never in messages;
+  - validated configuration (key, model, HTTPS endpoint);
+  - bounded retries for 429, 5xx, timeouts and transport errors, within the investigation's time budget;
+  - permanent 401/403/4xx, never retried; no redirects followed;
+  - a byte cap on the body, and an output-length cap;
+  - strict decoding;
+  - redacted errors.
+- **No OpenAI codec.** The API contract is not in the recorded evidence; the details to record are listed as C-1 to C-9 in `docs/MODEL-ADAPTER.md`. `LLM_PROVIDER=openai` still refuses, saying why.
+- `tests/investigate/test_http_adapter.py` (35 adapter **contract** tests with a test-defined wire format) covers:
+  - valid text and tool calls;
+  - 7 malformed or empty shapes;
+  - oversize body and overlong text;
+  - auth and other 4xx errors;
+  - bounded 5xx retries, rate limits with `retry-after`, timeouts and transport errors;
+  - the time budget;
+  - 10 configuration refusals;
+  - key scrubbing;
+  - the real investigator, validator and renderer: valid diagnosis, unsupported claim, provider failure;
+  - prompt injection in a repository file and a log, with an obeying model: forbidden tools rejected, no other host contacted, no dangerous fix.
+- These are not real-model or accuracy evidence.
+
 ## 2026-10-19 (af): Phase 18 runnable web and worker entry points
 
 ### Dependency
