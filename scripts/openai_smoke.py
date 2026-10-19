@@ -32,14 +32,17 @@ import argparse
 import json
 import os
 import re
+import socket
 import stat
 import sys
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import httpcore
 import httpx
 from pydantic import SecretStr
 
@@ -65,6 +68,7 @@ MAX_RESPONSE_BYTES = 262_144
 MAX_OUTPUT_CHARS = 2_048  # also sent as max_output_tokens
 STEP_TIMEOUT_S = 30.0
 TOTAL_DEADLINE_S = 90.0
+WATCHDOG_INTERVAL_S = 0.02  # how often the watchdog compares the wall clock with the deadline
 
 # ------------------------------------------------------------------ the fixed synthetic conversation (§3)
 INSTRUCTIONS = "You are a test fixture for an API compatibility check. Follow the user's instruction exactly."
@@ -87,6 +91,8 @@ EXIT = {
     "request_refused": 7,
     "unsupported_response": 8,
     "observation_missing": 9,
+    "deadline": 10,
+    "harness_error": 1,
 }
 
 
@@ -96,6 +102,236 @@ class Refused(Exception):
 
 class ResponseTooLarge(Exception):
     """The provider's response exceeded the smoke cap: an unsupported response, not a transport failure."""
+
+
+class SchemaViolation(Exception):
+    """Valid JSON whose structure is not the recorded one: an unsupported response (exit 8)."""
+
+
+class DeadlineExceeded(Exception):
+    """The per-step or overall wall-clock deadline was reached; the in-flight exchange was abandoned (exit 10)."""
+
+
+# ------------------------------------------------------------------ wall-clock deadline
+
+
+class Deadline:
+    """One monotonic deadline shared by the run, the guarded transport and the socket backend.
+
+    `at` is the current step's deadline: min(step start + STEP_TIMEOUT_S, run start + TOTAL_DEADLINE_S). The overall
+    deadline is fixed once per run and never restarts. `expired` is sticky."""
+
+    def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
+        self.clock = clock
+        self.at: float | None = None
+        self.expired = False
+
+    def start_step(self, overall_at: float) -> None:
+        now = self.clock()
+        if now >= overall_at:
+            self.expired = True
+            raise DeadlineExceeded()
+        self.at = min(now + STEP_TIMEOUT_S, overall_at)
+
+    def remaining(self) -> float:
+        if self.at is None:
+            return float("inf")
+        left = self.at - self.clock()
+        if left <= 0:
+            self.expired = True
+        return left
+
+
+def _clamp(deadline: Deadline, timeout: float | None, exc: type[Exception]) -> float:
+    """The socket timeout for one operation: never longer than the time left; nothing starts after the deadline."""
+    left = deadline.remaining()
+    if left <= 0:
+        raise exc("smoke deadline reached")
+    return left if timeout is None else min(timeout, left)
+
+
+def _bounded[T](deadline: Deadline, timeout: float | None, exc: type[Exception], op: Callable[[float], T]) -> T:
+    """Run one socket operation under the clamped timeout. If it times out while the deadline was the binding
+    limit, the deadline is what ended it, even if the clock reads a hair before `at` (socket timers are not exact)."""
+    t = _clamp(deadline, timeout, exc)
+    try:
+        return op(t)
+    except httpcore.TimeoutException:
+        if timeout is None or t < timeout:
+            deadline.expired = True
+        raise
+
+
+class DeadlineStream(httpcore.NetworkStream):
+    """Every blocking socket operation gets at most the remaining time; the watchdog can shut the socket down."""
+
+    def __init__(self, inner: httpcore.NetworkStream, deadline: Deadline, backend: DeadlineBackend | None = None) -> None:
+        self.inner, self.deadline, self.backend = inner, deadline, backend
+
+    def read(self, max_bytes: int, timeout: float | None = None) -> bytes:
+        return _bounded(self.deadline, timeout, httpcore.ReadTimeout, lambda t: self.inner.read(max_bytes, t))
+
+    def write(self, buffer: bytes, timeout: float | None = None) -> None:
+        _bounded(self.deadline, timeout, httpcore.WriteTimeout, lambda t: self.inner.write(buffer, t))
+
+    def close(self) -> None:
+        if self.backend is not None:
+            self.backend.untrack(self)
+        self.inner.close()
+
+    def start_tls(self, ssl_context: Any, server_hostname: str | None = None, timeout: float | None = None) -> DeadlineStream:
+        tls = _bounded(
+            self.deadline, timeout, httpcore.ConnectTimeout, lambda t: self.inner.start_tls(ssl_context, server_hostname, t)
+        )
+        upgraded = DeadlineStream(tls, self.deadline, self.backend)
+        if self.backend is not None:
+            self.backend.untrack(self)
+            self.backend.track(upgraded)
+        return upgraded
+
+    def get_extra_info(self, info: str) -> Any:
+        return self.inner.get_extra_info(info)
+
+
+class DeadlineBackend(httpcore.NetworkBackend):
+    """httpcore network backend for the live smoke run (no new dependency: httpcore ships with httpx).
+
+    * Name resolution runs in a worker thread that is abandoned at the deadline (getaddrinfo has no timeout).
+    * Connect, TLS handshake, every read and every write are clamped to the remaining time (`DeadlineStream`).
+    * A watchdog thread shuts down every open socket once the wall clock passes the deadline. That interrupts an
+      operation already blocked in the kernel (a slow multi-step TLS handshake, a write split into several sends, a
+      peer that trickles bytes) so that no exchange outlives the deadline by more than about WATCHDOG_INTERVAL_S."""
+
+    def __init__(
+        self,
+        deadline: Deadline,
+        inner: httpcore.NetworkBackend | None = None,
+        resolver: Callable[..., Any] = socket.getaddrinfo,
+    ) -> None:
+        self.deadline, self.resolver = deadline, resolver
+        self.inner = inner or httpcore.SyncBackend()
+        self._streams: set[DeadlineStream] = set()
+        self._lock = threading.Lock()
+        self._closed = threading.Event()
+        self._watchdog = threading.Thread(target=self._watch, name="smoke-deadline-watchdog", daemon=True)
+        self._watchdog.start()
+
+    def track(self, s: DeadlineStream) -> None:
+        with self._lock:
+            self._streams.add(s)
+
+    def untrack(self, s: DeadlineStream) -> None:
+        with self._lock:
+            self._streams.discard(s)
+
+    def close(self) -> None:
+        self._closed.set()
+
+    def _watch(self) -> None:
+        while not self._closed.wait(WATCHDOG_INTERVAL_S):
+            if self.deadline.at is not None and self.deadline.clock() >= self.deadline.at:
+                self.deadline.expired = True
+                with self._lock:
+                    streams = list(self._streams)
+                for s in streams:
+                    _shutdown(s)
+
+    def _resolve(self, host: str, port: int) -> list[Any]:
+        box: dict[str, Any] = {}
+
+        def work() -> None:
+            try:
+                box["addrs"] = self.resolver(host, port, type=socket.SOCK_STREAM)
+            except OSError as e:
+                box["error"] = e
+
+        t = threading.Thread(target=work, name="smoke-resolver", daemon=True)
+        t.start()
+        t.join(_clamp(self.deadline, None, httpcore.ConnectTimeout))
+        if t.is_alive():
+            self.deadline.expired = True
+            raise httpcore.ConnectTimeout("smoke deadline reached during name resolution")
+        if "error" in box or not box.get("addrs"):
+            raise httpcore.ConnectError("name resolution failed")
+        addrs: list[Any] = box["addrs"]
+        return addrs
+
+    def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: Any = None,
+    ) -> DeadlineStream:
+        last: Exception = httpcore.ConnectError("no address")
+        for *_info, sockaddr in self._resolve(host, port):
+            addr = str(sockaddr[0])
+
+            def connect(t: float, addr: str = addr) -> httpcore.NetworkStream:
+                return self.inner.connect_tcp(addr, port, t, local_address, socket_options)
+
+            try:  # a literal address: no further name lookup inside create_connection
+                raw = _bounded(self.deadline, timeout, httpcore.ConnectTimeout, connect)
+            except httpcore.ConnectTimeout:
+                if self.deadline.expired:
+                    raise
+                last = httpcore.ConnectTimeout("connect timed out")
+                continue
+            except httpcore.ConnectError as e:
+                last = e
+                continue
+            s = DeadlineStream(raw, self.deadline, self)
+            self.track(s)
+            return s
+        raise last
+
+    def connect_unix_socket(self, path: str, timeout: float | None = None, socket_options: Any = None) -> DeadlineStream:
+        raise httpcore.ConnectError("unix sockets are not used by the smoke harness")
+
+    def sleep(self, seconds: float) -> None:
+        time.sleep(max(0.0, min(seconds, self.deadline.remaining())))
+
+
+def _shutdown(s: DeadlineStream) -> None:
+    """Shut the connection down through a duplicate descriptor, so the (possibly TLS) socket object used by the
+    blocked thread is not touched from this thread; the blocked call then returns with an error."""
+    sock = s.get_extra_info("socket")
+    fd = sock.fileno() if sock is not None else -1
+    if fd < 0:
+        return
+    try:
+        dup = socket.socket(fileno=os.dup(fd))
+    except OSError:
+        return
+    try:
+        dup.shutdown(socket.SHUT_RDWR)
+    except OSError:
+        pass
+    finally:
+        dup.close()
+
+
+class DeadlineHTTPTransport(httpx.HTTPTransport):
+    """httpx's own transport with the connection pool rebuilt on `DeadlineBackend` (live mode only)."""
+
+    def __init__(self, deadline: Deadline) -> None:
+        super().__init__(trust_env=False, retries=0)
+        self._pool.close()
+        self.backend = DeadlineBackend(deadline)
+        self._pool = httpcore.ConnectionPool(
+            ssl_context=httpx.create_ssl_context(trust_env=False),
+            max_connections=1,
+            max_keepalive_connections=0,
+            http1=True,
+            http2=False,
+            retries=0,
+            network_backend=self.backend,
+        )
+
+    def close(self) -> None:
+        super().close()
+        self.backend.close()
 
 
 # ------------------------------------------------------------------ guarded, recording transport
@@ -123,12 +359,15 @@ def request_shape(body: bytes) -> dict[str, Any]:
 
 
 def response_shape(status: int, body: bytes, headers: httpx.Headers) -> dict[str, Any]:
+    """Content-free summary of a response. Every JSON type is checked before it is iterated or measured; anything
+    not in the recorded structure becomes a fixed `schema_violations` code (never the offending value)."""
     out: dict[str, Any] = {
         "http_status": status,
         "bytes": len(body),
         "retry_after_present": "retry-after" in headers,
         "ratelimit_headers": sorted(h for h in headers if h.lower().startswith("x-ratelimit-")),
     }
+    violations: set[str] = set()
     try:
         doc = json.loads(body)
     except ValueError:
@@ -136,53 +375,98 @@ def response_shape(status: int, body: bytes, headers: httpx.Headers) -> dict[str
         return out
     out["json"] = True
     if not isinstance(doc, dict):
-        out["top_level"] = type(doc).__name__
+        out["top_level"] = _enum(type(doc).__name__)
+        out["schema_violations"] = ["top_level_not_object"]
         return out
     out["keys"] = sorted(k for k in doc if _ENUM.match(k))
     err = doc.get("error")
     if isinstance(err, dict):  # G-2: the error body shape; never the message
-        out["error"] = {"code": _enum(err.get("code")), "type": _enum(err.get("type")), "keys": sorted(err)[:10]}
+        out["error"] = {
+            "code": _enum(err.get("code")),
+            "type": _enum(err.get("type")),
+            "keys": sorted(k for k in err if _ENUM.match(k))[:10],
+        }
+    elif err is not None:
+        violations.add("error_not_object")
     out["object"] = _enum(doc.get("object"))
     out["status"] = _enum(doc.get("status"))
     inc = doc.get("incomplete_details")
     if isinstance(inc, dict):
         out["incomplete_reason"] = _enum(inc.get("reason"))  # G-1
+    elif inc is not None:
+        violations.add("incomplete_details_not_object")
+    output = doc.get("output")
     items: list[dict[str, Any]] = []
-    for it in doc.get("output") or []:
-        if not isinstance(it, dict):
-            items.append({"type": "<not-an-object>"})
-            continue
-        rec: dict[str, Any] = {"type": _enum(it.get("type"))}
-        if it.get("type") == "reasoning":  # G-8: presence and size only; the payload is never recorded
-            enc = it.get("encrypted_content")
-            rec["encrypted_content_present"] = isinstance(enc, str) and bool(enc)
-            rec["summary_parts"] = len(it.get("summary") or [])
-        elif it.get("type") == "function_call":  # G-5: the id length, never the id
-            cid = it.get("call_id")
-            rec["call_id_length"] = len(cid) if isinstance(cid, str) else None
-            rec["known_tool"] = it.get("name") in TOOL_NAMES
-            rec["arguments_is_string"] = isinstance(it.get("arguments"), str)
-        elif it.get("type") == "message":
-            rec["content_types"] = [_enum(p.get("type")) for p in it.get("content") or [] if isinstance(p, dict)]
-        items.append(rec)
+    if isinstance(output, list):
+        for it in output:
+            items.append(_item_shape(it, violations))
+    elif output is not None:
+        violations.add("output_not_list")
     out["output"] = items
     usage = doc.get("usage")
     if isinstance(usage, dict):
-        out["usage"] = {
-            k: usage.get(k) for k in ("input_tokens", "output_tokens", "total_tokens") if isinstance(usage.get(k), int)
-        }
+        out["usage"] = {k: usage[k] for k in ("input_tokens", "output_tokens", "total_tokens") if type(usage.get(k)) is int}
+    elif usage is not None:
+        violations.add("usage_not_object")
+    if violations:
+        out["schema_violations"] = sorted(violations)
     return out
 
 
-class GuardedTransport(httpx.BaseTransport):
-    """Only the recorded endpoint; bounded sizes; a hard request budget; a content-free record of every exchange."""
+def _item_shape(it: Any, violations: set[str]) -> dict[str, Any]:
+    if not isinstance(it, dict):
+        violations.add("item_not_object")
+        return {"type": "<not-an-object>"}
+    kind = it.get("type")
+    if not isinstance(kind, str):
+        violations.add("item_type_not_string")
+    rec: dict[str, Any] = {"type": _enum(kind)}
+    if kind == "reasoning":  # G-8: presence and size only; the payload is never recorded
+        enc, summary = it.get("encrypted_content"), it.get("summary")
+        if enc is not None and not isinstance(enc, str):
+            violations.add("encrypted_content_not_string")
+        if summary is not None and not isinstance(summary, list):
+            violations.add("summary_not_list")
+        rec["encrypted_content_present"] = isinstance(enc, str) and bool(enc)
+        rec["summary_parts"] = len(summary) if isinstance(summary, list) else 0
+    elif kind == "function_call":  # G-5: the id length, never the id
+        cid, args = it.get("call_id"), it.get("arguments")
+        if not isinstance(cid, str):
+            violations.add("call_id_not_string")
+        if not isinstance(args, str):
+            violations.add("arguments_not_string")
+        rec["call_id_length"] = len(cid) if isinstance(cid, str) else None
+        rec["known_tool"] = it.get("name") in TOOL_NAMES
+        rec["arguments_is_string"] = isinstance(args, str)
+    elif kind == "message":
+        content = it.get("content")
+        types: list[str | None] = []
+        if isinstance(content, list):
+            for part in content:
+                if not isinstance(part, dict):
+                    violations.add("content_part_not_object")
+                    continue
+                types.append(_enum(part.get("type")))
+                if part.get("type") == "output_text" and not isinstance(part.get("text"), str):
+                    violations.add("text_not_string")
+        else:
+            violations.add("content_not_list")
+        rec["content_types"] = types
+    return rec
 
-    def __init__(self, inner: httpx.BaseTransport) -> None:
-        self.inner = inner
+
+class GuardedTransport(httpx.BaseTransport):
+    """Only the recorded endpoint; bounded sizes; a hard request budget; the wall-clock deadline (checked before
+    sending and after every chunk of the body); a content-free record of every exchange."""
+
+    def __init__(self, inner: httpx.BaseTransport, deadline: Deadline) -> None:
+        self.inner, self.deadline = inner, deadline
         self.records: list[dict[str, Any]] = []
         self.sent = 0
 
     def handle_request(self, request: httpx.Request) -> httpx.Response:
+        if self.deadline.remaining() <= 0:
+            raise DeadlineExceeded()  # nothing starts after the deadline
         if str(request.url) != ENDPOINT or request.method != "POST":
             raise Refused("only POST to the recorded endpoint is allowed")
         if self.sent >= MAX_REQUESTS:
@@ -193,23 +477,37 @@ class GuardedTransport(httpx.BaseTransport):
         rec: dict[str, Any] = {"request": request_shape(body)}
         self.records.append(rec)
         self.sent += 1
-        try:
-            resp = self.inner.handle_request(request)
-        except httpx.TransportError as e:
-            rec["transport_error"] = type(e).__name__
-            raise
         raw = bytearray()
         try:
-            for chunk in resp.iter_bytes():  # decoded; bounded while reading
-                raw.extend(chunk)
-                if len(raw) > MAX_RESPONSE_BYTES:
-                    rec["response"] = {"http_status": resp.status_code, "too_large": True}
-                    raise ResponseTooLarge()
-        finally:
-            resp.close()
-        rec["response"] = response_shape(resp.status_code, bytes(raw), resp.headers)
+            resp = self.inner.handle_request(request)
+            try:
+                for chunk in resp.iter_bytes():  # decoded; bounded in size and time while reading
+                    raw.extend(chunk)
+                    if len(raw) > MAX_RESPONSE_BYTES:
+                        rec["response"] = {"http_status": resp.status_code, "too_large": True}
+                        raise ResponseTooLarge()
+                    if self.deadline.remaining() <= 0:
+                        raise DeadlineExceeded()
+            finally:
+                resp.close()
+        except DeadlineExceeded:
+            rec["deadline_exceeded"] = True
+            raise
+        except httpx.TransportError as e:
+            if self.deadline.expired:  # the watchdog or a clamped socket operation cut the exchange off
+                rec["deadline_exceeded"] = True
+                raise DeadlineExceeded() from None
+            rec["transport_error"] = type(e).__name__
+            raise
+        shape = response_shape(resp.status_code, bytes(raw), resp.headers)
+        rec["response"] = shape
+        if shape.get("schema_violations") and 200 <= resp.status_code < 300:
+            raise SchemaViolation()  # never handed to the codec as if it were a supported response
         headers = [(k, v) for k, v in resp.headers.multi_items() if k.lower() not in ("content-encoding", "content-length")]
         return httpx.Response(resp.status_code, headers=headers, content=bytes(raw))
+
+    def close(self) -> None:
+        self.inner.close()
 
 
 # ------------------------------------------------------------------ key handling (live only)
@@ -245,15 +543,13 @@ def read_key_file(path: str) -> SecretStr:
 class Run:
     provider: HTTPProvider
     transport: GuardedTransport
-    clock: Callable[[], float]
-    deadline: float
+    deadline: Deadline
+    overall_at: float  # run start + TOTAL_DEADLINE_S; fixed for the whole run
     steps: list[dict[str, Any]] = field(default_factory=list)
 
     def step(self, name: str, messages: tuple[Message, ...], tools: bool) -> StepResponse:
-        remaining = self.deadline - self.clock()
-        if remaining <= 0:
-            raise ProviderTimeout("total smoke deadline exhausted")
-        req = StepRequest(messages, TOOL_SPECS if tools else (), tools, MAX_OUTPUT_CHARS, min(STEP_TIMEOUT_S, remaining))
+        self.deadline.start_step(self.overall_at)  # raises DeadlineExceeded once the overall deadline has passed
+        req = StepRequest(messages, TOOL_SPECS if tools else (), tools, MAX_OUTPUT_CHARS, self.deadline.remaining())
         rec: dict[str, Any] = {"step": name, "tools_offered": tools}
         self.steps.append(rec)
         resp = self.provider.step(req)
@@ -287,7 +583,9 @@ def run_steps(run: Run) -> str:
 def classify(e: BaseException) -> str:
     if isinstance(e, Refused):
         return "refused"
-    if isinstance(e, ResponseTooLarge):
+    if isinstance(e, DeadlineExceeded):
+        return "deadline"
+    if isinstance(e, ResponseTooLarge | SchemaViolation):
         return "unsupported_response"
     if isinstance(e, ProviderTimeout):
         return "transport"
@@ -386,7 +684,7 @@ def parse(argv: list[str]) -> argparse.Namespace:
     return ap.parse_args(argv)
 
 
-def build(args: argparse.Namespace, env: dict[str, str]) -> tuple[HTTPProvider, GuardedTransport, str]:
+def build(args: argparse.Namespace, env: dict[str, str], deadline: Deadline) -> tuple[HTTPProvider, GuardedTransport, str]:
     config = AdapterConfig(args.model, max_retries=0, max_response_bytes=MAX_RESPONSE_BYTES)  # validates the model id
     if args.live:
         if env.get("PYTEST_CURRENT_TEST") or env.get("CI"):
@@ -396,18 +694,24 @@ def build(args: argparse.Namespace, env: dict[str, str]) -> tuple[HTTPProvider, 
         if not _AUTH_REF.match(args.authorization_ref):
             raise Refused("authorization reference is malformed")
         key = read_key_file(args.key_file)
-        inner: httpx.BaseTransport = httpx.HTTPTransport(retries=0)
+        inner: httpx.BaseTransport = DeadlineHTTPTransport(deadline)
         mode = "live"
     else:
         if args.key_file or args.authorization_ref:
             raise Refused("offline mode takes no key file or authorization reference")
         key, inner, mode = SecretStr(OFFLINE_KEY), OfflineTransport(args.offline), f"offline:{args.offline}"
-    guarded = GuardedTransport(inner)
+    guarded = GuardedTransport(inner, deadline)
     client = httpx.Client(transport=guarded, follow_redirects=False, trust_env=False)
     return HTTPProvider(OpenAIResponsesWire(), key, config, client=client, sleep=lambda _s: None), guarded, mode
 
 
-def main(argv: list[str] | None = None, *, env: dict[str, str] | None = None, out: Any = None) -> int:
+def main(
+    argv: list[str] | None = None,
+    *,
+    env: dict[str, str] | None = None,
+    out: Any = None,
+    clock: Callable[[], float] = time.monotonic,
+) -> int:
     out = out or sys.stdout
     args = parse(sys.argv[1:] if argv is None else argv)
     evidence: dict[str, Any] = {
@@ -429,18 +733,33 @@ def main(argv: list[str] | None = None, *, env: dict[str, str] | None = None, ou
     }
     secrets: list[str] = []
     transport: GuardedTransport | None = None
+    deadline = Deadline(clock)
+    result = "harness_error"
+    failure: BaseException | None = None
     try:
-        provider, transport, evidence["mode"] = build(args, dict(os.environ) if env is None else env)
+        provider, transport, evidence["mode"] = build(args, dict(os.environ) if env is None else env, deadline)
+    except (Refused, ValueError) as e:  # configuration: nothing was sent
+        result, failure = "refused", e
+    else:
         secrets.append(provider._key.get_secret_value())
-        run = Run(provider, transport, time.monotonic, time.monotonic() + TOTAL_DEADLINE_S)
+        run = Run(provider, transport, deadline, clock() + TOTAL_DEADLINE_S)
         try:
             result = run_steps(run)
+        except (Refused, DeadlineExceeded, ResponseTooLarge, SchemaViolation, ProviderError) as e:
+            result, failure = classify(e), e
+        except Exception as e:  # a harness defect: contained, classified, never a traceback or a pass
+            result, failure = "harness_error", e
         finally:
             evidence["steps"] = run.steps
-            provider.close()
-    except (Refused, ResponseTooLarge, ProviderError, ValueError) as e:
-        result = classify(e)
-        evidence["failure"] = {"class": result, "error_type": type(e).__name__, "detail": str(e) if result == "refused" else None}
+            provider.close()  # closes the transports, the connection pool and the deadline watchdog
+        if failure is not None and deadline.expired:
+            result = "deadline"  # whatever surfaced, the wall-clock deadline is what ended the exchange
+    if failure is not None:
+        evidence["failure"] = {
+            "class": result,
+            "error_type": type(failure).__name__,
+            "detail": str(failure) if isinstance(failure, Refused) else None,  # fixed harness text only
+        }
     evidence["exchanges"] = transport.records if transport else []
     evidence["requests_sent"] = transport.sent if transport else 0
     evidence["result"] = result

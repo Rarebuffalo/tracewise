@@ -77,8 +77,9 @@ def test_offline_scenarios_classify_and_record_no_content(scenario: str) -> None
 
 def test_pass_sends_exact_ids_and_reasoning_once_without_tools_on_the_final_step() -> None:
     args = S.parse(["--offline", "pass", "--model", "offline-model"])
-    provider, guarded, _ = S.build(args, {})
-    run_ = S.Run(provider, guarded, lambda: 0.0, 60.0)
+    deadline = S.Deadline(lambda: 0.0)
+    provider, guarded, _ = S.build(args, {}, deadline)
+    run_ = S.Run(provider, guarded, deadline, 60.0)
     assert S.run_steps(run_) == "pass"
     bodies = [json.loads(b) for b in guarded.inner.bodies]
     assert [b["store"] for b in bodies] == [False, False, False]
@@ -156,7 +157,7 @@ def test_key_file_rules(tmp_path: Path) -> None:
 def test_guarded_transport_allows_only_the_recorded_endpoint_and_budget() -> None:
     import httpx
 
-    g = S.GuardedTransport(httpx.MockTransport(lambda r: httpx.Response(200, json={})))
+    g = S.GuardedTransport(httpx.MockTransport(lambda r: httpx.Response(200, json={})), S.Deadline())
     with pytest.raises(S.Refused):
         g.handle_request(httpx.Request("POST", "https://example.invalid/v1/responses", content=b"{}"))
     with pytest.raises(S.Refused):
