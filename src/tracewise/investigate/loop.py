@@ -30,6 +30,7 @@ from tracewise.investigate.provider import (
     ToolCallRequest,
 )
 from tracewise.investigate.schema import MAX_FINAL_CHARS, DraftError, ModelDraft, parse_draft
+from tracewise.prepass.sanitize import redact
 
 log = logging.getLogger(__name__)
 
@@ -89,6 +90,35 @@ class InvestigationResult:
     @property
     def budget_exhausted(self) -> bool:
         return self.outcome in ("budget_exhausted", "unproductive")
+
+
+def provider_view(messages: list[Message]) -> tuple[Message, ...]:
+    """The ONLY form in which the conversation crosses the provider boundary (P-2, approved option A).
+
+    Every message text and every string inside replayed tool-call arguments goes through the same redaction as logs
+    (`prepass.sanitize.redact`). That covers the evidence bundle, all tool results (`read_file` windows, `grep`
+    lines, `list_dir` names, `get_diff` patches), the model's own replayed turns and repair prompts, and anything
+    added later. Internal state (duplicate detection, the validator) keeps the original text. Pattern-based: encoded,
+    split or unfamiliar secrets can still pass (P-4)."""
+    return tuple(
+        Message(
+            m.role,
+            redact(m.content),
+            tool_call_id=m.tool_call_id,
+            tool_calls=tuple(ToolCallRequest(tc.id, tc.name, _redact_args(tc.arguments)) for tc in m.tool_calls),
+        )
+        for m in messages
+    )
+
+
+def _redact_args(v: Any) -> Any:
+    if isinstance(v, str):
+        return redact(v)
+    if isinstance(v, dict):
+        return {k: _redact_args(x) for k, x in v.items()}
+    if isinstance(v, list | tuple):
+        return [_redact_args(x) for x in v]
+    return v
 
 
 def has_error_line(ev: Evidence) -> bool:
@@ -173,7 +203,9 @@ def investigate(
         if remaining <= 0:
             return result("budget_exhausted")
         allow_tools = not final_only and calls < lim.max_tool_calls
-        req = StepRequest(tuple(messages), TOOL_SPECS if allow_tools else (), allow_tools, lim.max_output_chars, remaining)
+        req = StepRequest(
+            provider_view(messages), TOOL_SPECS if allow_tools else (), allow_tools, lim.max_output_chars, remaining
+        )
         try:
             resp = provider.step(req)
         except ProviderTimeout:
