@@ -55,6 +55,20 @@ def test_dx07_a04_misleading_tail() -> None:
     assert res.primaries[0].primary.kind == "install"
     assert "Could not find a version" in res.primaries[0].primary.message
     assert [c.module for c in res.cascades] == ["foo"]
+    # Phase 50 (A-04): pip's "No matching distribution" line is the same failure, not a second primary.
+    first = res.primaries[0].primary
+    assert len(res.primaries) == 1 and first.span == (first.log_line, first.log_line + 1)
+
+
+def test_a04_distinct_pip_requirements_stay_separate() -> None:
+    out = "\n".join(
+        [
+            "ERROR: Could not find a version that satisfies the requirement foo==9.9 (from versions: 1.0)",
+            "ERROR: No matching distribution found for bar==1.0",  # a different requirement: not folded
+        ]
+    )
+    res = run_prepass([build_job(1, "test", "Install", "pip install -r requirements.txt", out)])
+    assert len(res.primaries) == 2
 
 
 def test_dx16_b11_two_independent_primaries() -> None:
