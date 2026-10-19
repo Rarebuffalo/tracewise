@@ -16,6 +16,7 @@
 | [PRIVACY-NOTICE-DRAFT.md](PRIVACY-NOTICE-DRAFT.md) | T-1001 privacy notice **draft** (not approved), with its open items |
 | [DATA-INVENTORY.md](DATA-INVENTORY.md) | Every data category: source, purpose, storage, retention, evidence |
 | [MODEL-ADAPTER.md](MODEL-ADAPTER.md) | Model adapter core status, contract tests, unresolved OpenAI contract items (T-605) |
+| [DEPLOYMENT-BLUEPRINT.md](DEPLOYMENT-BLUEPRINT.md) | Vendor-neutral T-1002 design: processes, ingress, secrets, env inventory, DB budget, staging gate (not a deployment) |
 | [OPERATIONS.md](OPERATIONS.md) | Install, roles, App setup, worker/recovery/retention operation, incidents, release checklist (offline package) |
 | [LIVE-VALIDATION-PLAN.md](LIVE-VALIDATION-PLAN.md) | Staged test-org plan for the live gates (not executed; needs approval) |
 | [SECURITY-AUDIT.md](SECURITY-AUDIT.md) | Security audit findings SA-1 to SA-8 and evidence |
