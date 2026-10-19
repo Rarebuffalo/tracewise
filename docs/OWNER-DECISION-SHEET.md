@@ -10,7 +10,7 @@ Plain-language summary of what is waiting on you. Detail and evidence are in [DE
 | Stored log excerpts ≤2 KB (we use 2000 bytes, which satisfies both readings of KB) | SPEC FS-SEC-3; ACCEPTANCE-TESTS AT-SEC-12 | Implemented and tested |
 | Inconclusive when the logs are truncated past the error | SPEC FS-DX-8 | Behaviour matches. The wording no longer claims "no error line" for incomplete logs (L-2). |
 | Log secrets never reach the model | SPEC FS-LOG-5; ACCEPTANCE-TESTS AT-SEC-04 | Tested |
-| `flaky_suspect` only with attempt metadata; otherwise inconclusive is acceptable (B-04) | ACCEPTANCE-TESTS AT-DX-11; BENCHMARK §2 (≤ medium) | **The product does not meet this yet.** The only open question is timing: see B-04 below. |
+| No *high*-confidence `flaky_suspect` without attempt metadata (B-04 floor) | ACCEPTANCE-TESTS AT-DX-11; BENCHMARK §2 | **The product does not meet this yet.** The exact behaviour (≤ medium or inconclusive) still needs choosing: see B-04 below. |
 
 ## Decisions
 
@@ -32,11 +32,11 @@ Plain-language summary of what is waiting on you. Detail and evidence are in [DE
 | Item | Kind | Plain explanation | Recommendation |
 |---|---|---|---|
 | D-5 | Diagnosis policy | When the compiler points at a different file from the real defect, the correct answer is rated *low* confidence | Keep strict until real-model data exists |
-| B-04 | **Spec conformance** (AT-DX-11), timing only | A correct "flaky" answer is rated *high* without attempt data; the spec says ≤ medium | Implement the cap; decide whether a held-out evaluation must come first |
+| B-04 | **Spec gap**: a floor is established, the exact behaviour is not | Both canonical sources forbid a *high*-confidence flaky answer without attempt metadata, and the product gives one. BENCHMARK §2 says "≤ medium". ACCEPTANCE-TESTS AT-DX-11 says `flaky_suspect` "only with attempt metadata; otherwise inconclusive is accepted". | Choose the behaviour (cap at medium, or inconclusive); then decide whether a held-out evaluation must come first |
 | B-12 | Validator policy | Citing a **deleted** file is treated as invalid evidence | Decide together with D-5 |
 | A-05 | Ground truth | The product meets AT-LOG-04 (error kept, truncation flagged), but the truth file also expects `first_error`, which the canonical test does not require | Approve a truth correction (new lock), or keep |
 | E-01 | Safety, needs a real model | Prompt-injection resistance cannot be shown with fake providers | Measure in T-605 |
-| B-02 | Documentation only | The fixture says `0.21 == 1.21`; one catalogue row says `2.71` | Fix the catalogue text |
+| B-02 | **Resolved: documentation** (Phase 44) | The catalogue row deliberately keeps doc-04's literal `2.71`; `scripts/check_docs.py` enforces this fidelity. §7 records that the replica uses `1.21`. The earlier recommendation to change the row was wrong: it would break the fidelity check. The row now points to §7. | None |
 
 None of these is a test-harness defect: the harness is verified by hand-calculated scorer tests.
 
