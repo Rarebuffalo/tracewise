@@ -1,5 +1,12 @@
 # Change Log
 
+## 2026-10-19 (ai): Phase 21 final offline release-readiness audit
+
+- Re-audit recorded in SECURITY-AUDIT §4. No new defects.
+- The whole suite (664, slow included) ran under a session-wide socket guard: **0 external connection attempts**, and the guard was proven to fire.
+- `make check`: 653 passed, 11 slow deselected.
+- Benchmark rerun identical (`docs/benchmark-runs/2026-10-19-phase21-final-rerun.md`). The truth lock is intact.
+
 ## 2026-10-19 (ah): Phase 20 local operator acceptance
 
 `tests/db/test_operator_acceptance.py` walks the 13 operator stages.
