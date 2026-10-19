@@ -5,10 +5,11 @@ sync:
 
 lint:
 	uv run ruff check src tests scripts
-	uv run ruff format --check src tests
+	uv run ruff format --check src tests scripts
 
 type:
 	uv run mypy
+	uv run mypy --strict scripts
 
 test:
 	uv run pytest -m "not live and not slow"
