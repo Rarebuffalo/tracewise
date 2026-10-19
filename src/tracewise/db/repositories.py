@@ -229,6 +229,17 @@ def find_workflow_run(conn: Conn, installation_id: int, repo_id: int, run_id: in
     return int(row["id"]) if row else None
 
 
+def analysis_recorded(conn: Conn, installation_id: int, repo_id: int, run_id: int, attempt: int) -> bool:
+    """Whether any job attempt persisted an analysis for this run attempt. `_persist` runs before ANY publication
+    surface is reserved, so False proves that nothing was (or may have been) written to GitHub for it."""
+    row = conn.execute(
+        """SELECT 1 FROM analysis a JOIN workflow_run w ON w.id = a.run_pk
+           WHERE w.installation_id = %s AND w.repo_id = %s AND w.github_run_id = %s AND w.run_attempt = %s""",
+        (installation_id, repo_id, run_id, attempt),
+    ).fetchone()
+    return row is not None
+
+
 def repository_scope(conn: Conn, repo_id: int) -> dict[str, Any] | None:
     """Authorisation context for a job: the repository row joined with its installation."""
     return conn.execute(
