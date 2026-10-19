@@ -1,5 +1,12 @@
 # Change Log
 
+## 2026-10-19 (aq): Phase 34 final gate
+
+- Full suite (slow included) under the network guard: **688 passed, 0 external attempts**.
+- `make check`: 677 passed, with the same 11 slow tests deselected.
+- Benchmark identical; truth lock intact.
+- No credentials in new lines; quarantine untouched; no leftovers; no remote.
+
 ## 2026-10-19 (ap): Phases 29–33 privacy audit, specification reconciliation and provider boundary
 
 ### P-1 independently verified
