@@ -76,7 +76,7 @@ An unreachable database at startup gives exit 1. At startup it sweeps workspaces
 
 | Signal | Effect |
 |---|---|
-| First SIGTERM or SIGINT | Stop claiming, finish the current job, close the pools, exit 0 |
+| First SIGTERM or SIGINT | Stop claiming, finish the current job, close the pools, exit 0. The handlers are installed before startup validation (`worker.starting`), so a stop during startup also exits 0 without claiming. Only a signal during interpreter start-up and imports (under 1 s) uses the default action. |
 | Second signal | Immediate abort. The job's lease expires and another worker reclaims it, publishing once (tested). |
 
 An unexpected error in the loop exits 1 instead of spinning.

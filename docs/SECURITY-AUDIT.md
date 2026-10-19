@@ -132,3 +132,17 @@ The gate suite was run as one group (259 tests) under the session-wide network g
 | P-4 | Limitation | Redaction is pattern-based; split or encoded secrets are not detected | Documented only | — |
 
 P-2 and P-3 (snippet part) remain open: see DECISION-MEMOS.md.
+
+## 7. Phase 35–41 independent verification (2026-10-19)
+
+| ID | Severity | Finding | Fix | Test |
+|---|---|---|---|---|
+| P-5 | **Medium** (privacy, secondary persistence) | `short_error()` stored `str(err)`. psycopg errors include `DETAIL: Failing row contains (...)`, and pydantic errors include `input_value=...`. A constraint or validation failure while persisting an analysis would therefore copy row content (diagnosis excerpts and snippet) into `job.last_error` or `publication.last_error`, which are kept 365 days, past FS-SEC-3's 90-day rule. It also broke the function's own "never log content" contract. Confirmed by probe: the row value appears in `str(e)`. | Only the class-level message is kept: the psycopg primary message plus SQLSTATE; the pydantic error count plus field locations | `test_schema_repositories.py::test_short_error_never_copies_row_or_input_content` |
+| L-2 | Medium (report correctness) | With a truncated log and no error line, the report stated "the log has no error line … (only an exit code, timeout or kill)". If the error lay past the download cap or outside the retained budget, that statement was false. | Wording is conditional on `log_truncated`: "no error line was found in the retained part of the log …". The reason code is unchanged, so contracts and the benchmark are unaffected. | `test_render.py::test_truncated_log_without_error_line_never_claims_*` |
+| — | Coverage | Download-cap boundaries (at the cap, one byte over, multibyte, empty); the excerpt cap on the full pre-pass path; structural proof that no code path reaches a real model | Tests added | `test_github_client.py`, `test_validate.py`, `test_providers.py` |
+| W-1 | Low (robustness; found by the Phase 41 full gate) | The worker installed its graceful signal handlers only after startup (≈2.2 s: imports, role, schema and key checks, workspace sweep). A SIGTERM in that window, such as a quick orchestrator restart, killed it with the default action (exit −15), skipping graceful cleanup. Nothing could be claimed in that window, so no job was affected. The 2 s fixed sleep in two tests started failing as startup grew past 2 s. | Handlers are installed first (`worker.starting` event); a stop during startup closes resources and exits 0. The tests wait for events instead of sleeping. | `test_process_entrypoints.py::test_sigterm_during_startup_is_graceful` (fails with the old ordering), `::test_worker_starts_idles_and_stops_gracefully` |
+| P-4 | Limitation (unchanged) | Pattern-based redaction misses split, encoded or unknown-format secrets | Not fixable by patterns. Possible mitigations, each a decision: entropy-based detection (false positives in hashes and ids); P-2 option C (do not read secret-looking files); customer guidance to keep secrets out of logs. | — |
+
+Notes:
+- `safe_error_text` in `github/client.py` is unused (dead code; no sink).
+- The P-1 mutation check was re-run on a scratch copy and the source restored (see CHANGELOG).

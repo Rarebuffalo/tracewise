@@ -51,6 +51,17 @@ No current behaviour contradicts an explicit requirement. The gap is that no req
 - Now: redact first, then cap at **2000 UTF-8 bytes** without splitting a character. That satisfies 2 KB under both the 1000-byte and the 1024-byte reading (`excerpt_of`; `test_log_excerpts_are_at_most_2kb_in_bytes_*`).
 - The benchmark is unchanged.
 
+**Interpretation of "≤2 KB":**
+- The spec does not define KB (1000 or 1024 bytes).
+- 2000 bytes is ≤2 KB under **both** readings. 2048 would breach the 1000-byte reading.
+- The cap applies to the **stored and rendered** `primary_errors[].excerpt`. FS-SEC-3 is a persistence rule.
+- The log context sent to the model is bounded separately (`MAX_CONTEXT_LINES`, `MAX_BUNDLE_CHARS`) and is not an "excerpt" in this sense.
+
+**Verified (Phase 38):**
+- redaction runs before the cut, so redaction cannot push it over the limit;
+- no character is ever split;
+- the cap holds on the full pre-pass path for traceback, generic and multi-line shapes (`test_excerpt_cap_holds_through_the_full_prepass_path`).
+
 **What is ambiguous (open):** whether the **source snippet** is an "excerpt". The schema names it differently and bounds it by lines (15). FS-SEC-3's "never persist … source" plus "excerpts ≤2 KB" can be read to include it.
 
 | Path | Current |
@@ -64,6 +75,13 @@ No current behaviour contradicts an explicit requirement. The gap is that no req
 | **1 (recommended):** treat the snippet as an excerpt; cap the stored snippet at 2000 bytes (keep whole lines, mark it truncated) | Matches the strict reading of FS-SEC-3 | Long lines are cut in the stored copy only; the report could still show 15 lines from the live file at publish time | Byte-cap test on the stored snippet; benchmark Track C "snippet identical" must still pass (the B-case snippets are short). Confirm no truth change. |
 | 2: snippet is not an excerpt; keep ≤15 lines and set the 4000-char limit in the spec | Larger stored source fragments for 90 days | Unchanged | Spec edit only; existing tests |
 | 3: do not store the snippet at all; re-derive it at render time | Strongest | Re-renders need source access, so later report edits would need a fetch | Persistence test that the snippet is absent; render path change |
+
+**Implications in more detail:**
+- **Option 1:** caps the *stored* copy only. The in-memory diagnosis and the published report can keep 15 lines, so the benchmark (which scores the in-memory diagnosis) is unaffected. Storage drops from ≤4000 characters to ≤2000 bytes per analysis.
+- **Option 2:** changes no behaviour, only the spec.
+- **Option 3:** removes the snippet at persistence. Reports are rendered in the same job from the in-memory diagnosis, so publication is unaffected. Later re-renders within the same job are unaffected. Stored analyses lose the snippet: no analysis UI or API reads it today.
+
+None of the options has a measured effect on diagnostic quality. The model never sees the snippet, because it is built after the model answers.
 
 **Decision needed:** 1, 2 or 3.
 
@@ -83,6 +101,12 @@ No current behaviour contradicts an explicit requirement. The gap is that no req
 | Retained per job | 2 MB (FS-LOG-4) | `prepass.envelope.retain`, O(budget) memory | **Wired:** `LOG_MAX_BYTES_PER_JOB` was documented but unused. It is now the retention budget, default unchanged (`test_retention_budget_per_job_is_configurable`; worker build path `test_worker_wires_the_log_retention_setting_*`). |
 | Jobs per run | 5 (`MAX_JOBS`) | `collect_evidence` | Unchanged |
 
+**Units and boundaries (verified, Phase 37):**
+- **Download cap:** counts decoded UTF-8 bytes while streaming. At exactly the cap the log is complete; one byte over drops the partial tail line and sets `truncated`. Multibyte characters are never split (`test_download_cap_boundaries_and_truncation_signal`).
+- **Retention budget:** counts **sanitised and redacted** retained line bytes, plus a newline each. Its four parts (first error, windows, head, tail) sum exactly to the budget.
+- **Truncation signal:** observable after consumption. A mid-stream error is recorded as a missing log, which also sets `log_truncated`.
+- **Report wording:** with a truncated log and no error line, the report now says that no error line was found *in the retained part* and that the error may lie beyond it. It no longer says "the log has no error line" (`test_truncated_log_without_error_line_never_claims_*`).
+
 **Remaining for review (open, minor):**
 - The 512 MB download cap is not in the spec, and a slow 512 MB stream could take up a large share of the 10-minute deadline (30 s read timeout per chunk).
 - Options:
@@ -90,3 +114,25 @@ No current behaviour contradicts an explicit requirement. The gap is that no req
   - lower it to, say, 256 MB, which is still ≥200 MB, to bound time;
   - make it configurable.
 - Memory is bounded by the retention budget (5 × 2 MB per job), not by the download size. AT-LOG-04 (slow test) verifies peak RSS.
+
+---
+
+## Decision-queue classification (Phase 40)
+
+| # | Item | Class | Evidence and what is needed |
+|---|---|---|---|
+| 1 | P-2 (model-input redaction of repository content) | **User decision** | No requirement covers repository content (FS-LOG-5 and AT-SEC-04 are about logs). Recommendation: option A before any real-provider pilot. |
+| 2 | P-3 (stored snippet size) | **User decision** (log-excerpt half resolved by FS-SEC-3 and AT-SEC-12) | SPEC treats the snippet separately ("≤15 lines"). Recommendation: option 1. |
+| 3 | C-CFG-1 (512 MB download cap) | Budget wiring **resolved by FS-LOG-4**; cap value is a **user decision** | Neither the spec nor AT-LOG-04 fixes it beyond ≥200 MB. Recommendation: keep 512 MB until staging measures download time. |
+| 4 | G-PLAT-11 (bundled vs per-surface tokens) | **Live validation**, then a decision | LIVE-VALIDATION-PLAN S2 needs a test org and dev App |
+| 5 | D-10 (re-checks between surfaces; re-analysis after suspension) | **User decision** (product semantics) | Behaviour pinned by `test_github_contracts.py` and `test_adversarial.py` |
+| 6 | D-11 (role provisioning) | **External resources** | A real database, credentials and a secret store; the template is ready (`scripts/db/provision_roles.sql`) |
+| 7 | D-12 (retention interpretations) | **User decision** | DECISIONS D-12; implemented in migration 0008 |
+| 8 | AWS signed-URL redaction in `marketplace.html` | **User decision** (evidence file) | SECURITY-AUDIT §1 |
+| 9 | Benchmark D-5, B-04, B-12, A-05, E-01, B-02 | **User decision** (truth or policy); E-01 also needs T-605 | BENCHMARK-REVIEW-QUEUE |
+| 10 | OpenAI reference, then T-605 | **External authorisation**, then key and evaluation | MODEL-ADAPTER §2a |
+| 11 | T-1002 (platform, schedules, alert routing) | **External resources** and decisions | DEPLOYMENT-BLUEPRINT |
+| 12 | Alert threshold 0.2 | **User decision** | `ops.py` labels it `provisional` |
+| 13 | Live GitHub test org and dev App | **External authorisation** | LIVE-VALIDATION-PLAN preconditions |
+
+No item above is resolved by this memo alone. Items 2 and 3 are resolved only for the parts that the cited canonical text fixes.
