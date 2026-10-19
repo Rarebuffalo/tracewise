@@ -62,7 +62,7 @@ The model cannot run commands, change files or reach other systems. It can only 
 |---|---|
 | Installation and repository identifiers and names | Until 7 days after you uninstall, then deleted, except a minimal record of the installation id and its deleted status |
 | Run identifiers and metadata | Up to 365 days |
-| The diagnosis, including redacted log excerpts (≤2 KB each), a redacted snippet of up to 15 source lines at the identified location, and the proposed fix | The diagnosis content is cleared after 90 days; the remaining analysis metadata after 180 days |
+| The diagnosis, including redacted log excerpts (≤2 KB each), a redacted snippet of up to 15 source lines at the identified location [size limit pending P-3], and the proposed fix | The diagnosis content is cleared after 90 days; the remaining analysis metadata after 180 days |
 | Error fingerprints (short, redacted messages) and usage and audit records | Up to 365 days |
 
 [These periods are pending approval: D-12.]

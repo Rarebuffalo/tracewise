@@ -61,7 +61,7 @@ Inject secrets through the platform's secret store. Never bake them into images 
 | `LLM_PROVIDER`, `LLM_MODEL`, `OPENAI_API_KEY` | — | **req** | — | — | — | — | blocked until T-605 |
 | `LLM_PRICE_INPUT_PER_MTOK`, `LLM_PRICE_OUTPUT_PER_MTOK` | — | opt | — | — | — | — | from T-605 |
 | `INVESTIGATION_MAX_TOOL_CALLS` (≤12), `INVESTIGATION_TIMEOUT_S` (≤120), `REPORT_MAX_CHARS` | — | opt | — | — | — | — | defaults |
-| `LOG_MAX_BYTES_PER_JOB` | — | (inert) | — | — | — | — | not wired (C-CFG-1) |
+| `LOG_MAX_BYTES_PER_JOB` | — | opt | — | — | — | — | FS-LOG-4 per-job **retention** budget (default 2 MB); wired since Phase 31 |
 
 ## 6. Database
 

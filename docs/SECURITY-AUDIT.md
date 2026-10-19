@@ -118,3 +118,17 @@ The gate suite was run as one group (259 tests) under the session-wide network g
 - No live exploitation testing was done.
 
 **Open review items from this run:** P-2, P-3, C-CFG-1 (§3 and §4 above).
+
+## 6. Phase 29–32 findings (2026-10-19)
+
+| ID | Severity | Finding | Fix | Test |
+|---|---|---|---|---|
+| P-1 (re-verified) | — | Independent end-to-end check: 8 synthetic secret formats planted in the log, every model field (nested lists, replacement code, forbidden fields), a malformed first answer, a tool argument and a GitHub error body. **None** reached any table, any log line or any GitHub body. A mutation (removing the replacement redaction) is caught. | — | `tests/db/test_privacy_flow.py` |
+| AT-SEC-04 gap | Low (coverage) | The "fake-provider request capture" half of AT-SEC-04 was untested | Test added; it holds | `test_model_input_privacy.py` |
+| X-1 | Low (spec conformance) | Log excerpts were capped at 2048 **characters**, so non-ASCII could exceed "≤2 KB" (FS-SEC-3) | Redact, then cap at 2000 UTF-8 bytes | `test_validate.py::test_log_excerpts_are_at_most_2kb_*` |
+| L-1 | **Medium** (evidence integrity) | A log cut by the 512 MB download cap was not flagged. With the failed step past the cut, `log_truncated` stayed false (FS-LOG-4 violated), so an incomplete log could be taken for complete evidence. | The stream exposes `truncated`; collection marks the job's log | `test_collect.py::test_download_cap_truncation_*` |
+| C-CFG-1 | Resolved | The documented `LOG_MAX_BYTES_PER_JOB` is FS-LOG-4's retention budget; now wired, default unchanged | — | `test_collect.py::test_retention_budget_*`, `test_worker_main.py::test_worker_wires_*` |
+| PR-1 gap | Low (coverage) | The fake provider's refusal was tested only for `TW_ENV=local` | `staging` and `prod` tested; openai refusal in every environment; no-fallback check | `test_providers.py` |
+| P-4 | Limitation | Redaction is pattern-based; split or encoded secrets are not detected | Documented only | — |
+
+P-2 and P-3 (snippet part) remain open: see DECISION-MEMOS.md.
