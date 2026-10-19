@@ -1,5 +1,37 @@
 # Change Log
 
+## 2026-10-19 (ah): Phase 20 local operator acceptance
+
+`tests/db/test_operator_acceptance.py` walks the 13 operator stages.
+
+**Real components:**
+- the uvicorn web process, with every webhook over loopback HTTP and HMAC on the real path;
+- Postgres;
+- `worker.main()` with a fresh runtime per invocation (a restart each time);
+- the tenant-role analysis, audited per transaction;
+- the `HTTPProvider` adapter core;
+- the investigator, validator and publisher;
+- the `ops` and `retention` CLIs.
+
+**Simulated:** GitHub, the model endpoint (provider `fake`) and the git host.
+
+**What it shows:**
+- forged signature refused;
+- removed repository out of scope;
+- duplicate delivery and duplicate run deduplicated;
+- a transient Check Run failure, then retry after restart, gives exactly one commit comment and one Check Run;
+- the log fetched, and a validated `diagnosed` result at line 41;
+- the ops report with no tenant content;
+- suspension refuses new runs;
+- nothing written after deletion;
+- graceful web shutdown and restart, with readiness;
+- the retention CLI purges the tenant and leaves a tombstone;
+- no token minted for any other installation.
+
+**Test-harness finding (not a product defect):** a simulated restart's new token cache received a token the local git host rejects. The run then fell back, never read the file, and the validator **correctly** abstained (`location_not_examined`). The harness now hands the git host's token to every mint, and the test asserts `diagnosed`, so a silent abstention cannot pass.
+
+**Repeat runs:** chain, adversarial, signal, cross-phase and acceptance ×3: 18 passed each. DB suite in reverse order: 258 passed.
+
 ## 2026-10-19 (ag): Phase 19 model adapter core (T-605 preparation; no real model)
 
 - `investigate/http_adapter.py`: `HTTPProvider` over a pluggable `WireCodec`. It covers:
