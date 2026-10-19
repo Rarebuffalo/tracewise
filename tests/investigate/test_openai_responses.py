@@ -133,6 +133,8 @@ def test_decode_text_function_calls_reasoning_and_usage() -> None:
         {**resp(), "output": [{"type": "function_call", "call_id": "", "name": "grep", "arguments": "{}"}]},
         {**resp(), "output": [{"type": "function_call", "call_id": "c", "name": "grep", "arguments": {"not": "a string"}}]},
         "not an object",
+        {**resp(), "output": [{"type": "message", "role": "assistant", "content": 5}]},  # Phase 49: TypeError before
+        {**resp(), "output": [{"type": "message", "role": "assistant", "content": "text"}]},
     ],
     ids=[
         "incomplete",
@@ -144,6 +146,8 @@ def test_decode_text_function_calls_reasoning_and_usage() -> None:
         "empty-call-id",
         "args-not-string",
         "junk",
+        "content-not-a-list",
+        "content-a-string",
     ],
 )
 def test_decode_fails_closed_on_anything_outside_the_contract(doc: Any) -> None:
