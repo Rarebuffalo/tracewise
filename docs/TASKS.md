@@ -77,7 +77,7 @@ Version 2.0, 2026-10-18. Dependency-ordered. Each task lists the SPEC requiremen
 | T-802 | Live gates G-PLAT-1…7 | FS-EVT-1, FS-PUB-1, FS-PUB-5, FS-RPT-10, FS-INS-3 | AT-EVT-04, AT-PUB-05, AT-PUB-06, AT-PUB-08, AT-PUB-10 | T-801, T-502 | 1.5 | todo |
 | T-803 | LIVE versions of the publishing and context tests (Track F) | FS-PUB-1, FS-PUB-2, FS-PUB-3, FS-CTX-1 | AT-PUB-01, AT-PUB-02, AT-PUB-03, AT-CTX-01 | T-802 | 1.5 | todo |
 | **Phase 9: pilot readiness** | | | | | | |
-| T-1001 | Privacy notice (names the provider and model family) + pilot terms template | FS-SEC-4 | AT-SEC-13 | T-605 | 0.5 | todo |
+| T-1001 | Privacy notice (names the provider and model family) + pilot terms template | FS-SEC-4 | AT-SEC-13 | T-605 | 0.5 | partial: **notice DRAFT** written from the implementation (docs/PRIVACY-NOTICE-DRAFT.md, docs/DATA-INVENTORY.md). **Not approved, not published.** AT-SEC-13 is unmet (the provider and model family await T-605/UD-3). The pilot terms template is not drafted (legal). |
 | T-1002 | Staging and production deployment (ADR-09 decided then) | — | — | T-706 | 1.5 | partial: **local process entry points done** (web ASGI factory + uvicorn, worker CLI; startup validation, readiness, graceful shutdown; OPERATIONS §1a). **Gated, not done:** hosting, TLS and ingress, credential provisioning (D-11), schedules, alert routing, deployment |
 | T-1003 | Runbooks + staging soak (effort only; calendar-bound) | — | — | T-1002 | 1.5 | todo |
 | **P2 (after benchmark validation)** | | | | | | |

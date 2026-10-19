@@ -13,6 +13,8 @@
 | [VALIDATION-PLAN.md](VALIDATION-PLAN.md) | Commercial gate G-0 (interviews, metadata-only G-2) |
 | [DECISIONS.md](DECISIONS.md) | Closed decisions (Q1–Q6), applied defaults (D-1…D-3), open items |
 | [DOC-CHANGE-PLAN.md](DOC-CHANGE-PLAN.md) | The 15 blocking corrections and the cleanup plan (change record) |
+| [PRIVACY-NOTICE-DRAFT.md](PRIVACY-NOTICE-DRAFT.md) | T-1001 privacy notice **draft** (not approved), with its open items |
+| [DATA-INVENTORY.md](DATA-INVENTORY.md) | Every data category: source, purpose, storage, retention, evidence |
 | [MODEL-ADAPTER.md](MODEL-ADAPTER.md) | Model adapter core status, contract tests, unresolved OpenAI contract items (T-605) |
 | [OPERATIONS.md](OPERATIONS.md) | Install, roles, App setup, worker/recovery/retention operation, incidents, release checklist (offline package) |
 | [LIVE-VALIDATION-PLAN.md](LIVE-VALIDATION-PLAN.md) | Staged test-org plan for the live gates (not executed; needs approval) |

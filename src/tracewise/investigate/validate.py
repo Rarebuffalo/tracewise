@@ -229,6 +229,7 @@ def _location(ev: Evidence, draft: ModelDraft, examined: list[FileExamined]) -> 
     if loc.line_end > len(lines):
         return "location_beyond_eof"
     snippet = "".join(lines[loc.line_start - 1 : min(loc.line_end, loc.line_start + MAX_SNIPPET_LINES - 1)])
+    snippet = redact(snippet)  # P-1: the snippet is persisted (FS-SEC-3: redacted excerpts only)
     return Location(path=path, line_start=loc.line_start, line_end=loc.line_end), snippet
 
 
@@ -251,7 +252,7 @@ def _fix(ev: Evidence, draft: ModelDraft, loc: Location | None, text: _Text, fla
             eof = text._lines(loc.path)
             ok = eof is not None and r.line_end <= eof and (r.line_end - r.line_start) < 20 and r.new_text.count("\n") < 20
         if ok:
-            repl = Replacement(path=r.path, line_start=r.line_start, line_end=r.line_end, new_text=r.new_text)
+            repl = Replacement(path=r.path, line_start=r.line_start, line_end=r.line_end, new_text=redact(r.new_text))
         else:
             flags.append("fix_replacement_removed")
     if not desc.strip():
