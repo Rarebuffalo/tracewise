@@ -84,7 +84,17 @@ pages state no API version string. `platform.openai.com` returned 403, so only `
 
 **Integration decisions (ours, recorded in the evidence file):** `store: false`; `max_output_tokens` receives the
 existing `max_output_chars` cap as an upper bound (characters ≥ tokens for this content, so it never loosens the cap);
-call ids are capped at 64 characters on both sides (G-5); a refusal is never a diagnosis.
+provider-issued call ids are sent back exactly (Phase 46 corrected an earlier 64-character cap that could merge two
+distinct ids); a duplicate, missing or unpaired id fails closed before anything is sent (G-5); a refusal is never a
+diagnosis.
+
+**Reasoning replay (Phase 46 audit):** `Message.replay` is the one channel that skips P-2 redaction. It carries only
+`reasoning` items decoded from the provider's own response, with a non-empty `id` and `encrypted_content`. They
+are attached to the assistant turn of the same response and emitted before that turn's function calls. They live
+only in memory for one investigation: they are never persisted, and a job retry starts a new conversation. Encode
+refuses any other item in this channel. Their plaintext `summary` is model-authored; it can only reflect input the
+model received, which was already redacted. G-7 (final step without `tools`) and G-8 (`encrypted_content` always
+present) are open questions for the smoke call.
 
 **P-2 on the real codec:** the redacted `provider_view` is what the codec serialises; the end-to-end test plants a
 secret-shaped value in a source file and checks the serialised bytes. Pattern-based redaction remains incomplete (P-4).
@@ -93,7 +103,7 @@ secret-shaped value in a source file and checks the serialised bytes. Pattern-ba
 1. Nothing has been observed from the real endpoint (G-4). The fixtures prove the codec follows the recorded
    contract, not that the service behaves as recorded.
 2. Real-model evaluation (T-605), the key (O-2) and the model choice (UD-3, C-9) are not authorised.
-3. G-1 to G-3 are handled by failing closed, which needs one real observation to confirm it is not over-strict.
+3. G-1, G-3, G-5, G-7 and G-8 are handled by failing closed, which needs one real observation to confirm it is not over-strict.
 
 **To enable (each needs your approval):** one authorised smoke call (G-4) with a project-scoped key held locally; then
 change `providers.py` to construct `HTTPProvider(OpenAIResponsesWire(), …)` and update the structural test

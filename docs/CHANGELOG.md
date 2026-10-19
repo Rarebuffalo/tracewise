@@ -1,5 +1,13 @@
 # Change Log
 
+## 2026-10-19 (aw): Phase 46 independent verification of Phase 45
+
+- **Fixed (identifiers):** tool results and `function_call` items used `id[:64]`, which no recorded contract requires; two distinct ids sharing 64 characters collapsed into one, so a result could be paired with the wrong call. Ids are now exact; ambiguous pairing fails closed before sending.
+- **Fixed (replay channel):** only provider-issued reasoning items with `id` and `encrypted_content` may travel in the unredacted replay channel; anything else is refused.
+- **Fixed (error text):** codec errors no longer quote the provider's `status`; the adapter docstring no longer says that no codec ships.
+- **Coverage:** P-3 boundary sweep; D-10 re-checks on the PR and notice paths (three re-checks were previously unguarded by any test). No behaviour change.
+- Contract gaps G-7 and G-8 recorded for the smoke call. `LLM_PROVIDER=openai` still refuses.
+
 ## 2026-10-19 (av): Phase 45 approved privacy decisions and offline OpenAI adapter
 
 - **P-2 (A):** everything sent to a model provider passes through `provider_view`, which redacts message text and tool-call arguments (source windows, grep, diffs, listings). Opaque provider reasoning items are passed through unmodified.
