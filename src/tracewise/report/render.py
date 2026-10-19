@@ -39,6 +39,19 @@ CATEGORY_LABEL = {
     Category.workflow_invalid: "Invalid workflow",
     Category.unknown: "Unknown",
 }
+NO_ERROR_IN_RETAINED_LOG = (
+    "no error line was found in the retained part of the log; the log was truncated, so the error may be in the part "
+    "that was not downloaded or retained"
+)
+
+
+def reason_text(d: Diagnosis, default: str) -> str:
+    """Reason wording. With a truncated log, 'no error line' describes only what was retained (Phase 37)."""
+    if d.inconclusive_reason == "no_error_line" and d.limits.log_truncated:
+        return NO_ERROR_IN_RETAINED_LOG
+    return REASON_TEXT.get(d.inconclusive_reason or "", default)
+
+
 REASON_TEXT = {
     "no_error_line": "the log has no error line to anchor a diagnosis (only an exit code, timeout or kill)",
     "provider_timeout": "the AI investigation timed out",
@@ -224,7 +237,7 @@ def render(vd: ValidatedDiagnosis, *, max_chars: int = DEFAULT_MAX_CHARS, marker
             d.status, "could not determine the root cause"
         )
         sections.append((0, f"{head}## Tracewise: {title} for {where}"))
-        reason = REASON_TEXT.get(d.inconclusive_reason or "", "the evidence was insufficient")
+        reason = reason_text(d, "the evidence was insufficient")
         sections.append(
             (
                 0,
@@ -311,9 +324,7 @@ def check_output(vd: ValidatedDiagnosis, text: str) -> CheckOutput:
         title = {Status.logs_unavailable: "Logs unavailable", Status.permission_denied: "Missing permission"}.get(
             d.status, "Root cause not determined"
         )
-        summary = (
-            "Tracewise did not name a root cause: " + REASON_TEXT.get(d.inconclusive_reason or "", "insufficient evidence") + "."
-        )
+        summary = "Tracewise did not name a root cause: " + reason_text(d, "insufficient evidence") + "."
     annotations: list[dict[str, object]] = []
     if d.status is Status.diagnosed and d.problem_location is not None:
         loc = d.problem_location
