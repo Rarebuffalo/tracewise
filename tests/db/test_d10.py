@@ -154,3 +154,73 @@ def test_stale_queued_work_is_not_revived_by_resumption(world: World) -> None:
     assert {world.jobrow(q1)["status"], world.jobrow(q2)["status"]} == {"cancelled"}
     world.owner.execute("UPDATE job SET run_after = now() - interval '1 second'")
     assert not world.worker().run_once() and world.state.writes == []
+
+
+# ------------------------------------------------------------------ Phase 46E: the PR and notice paths
+
+
+PRC = re.compile(r"^/repos/acme/coffee/issues/\d+/comments$")
+
+
+def _suspend_after_persist(world: World, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    real = repo.upsert_analysis
+
+    def persist_then_suspend(*a: Any, **k: Any) -> int:
+        out = real(*a, **k)
+        world.owner.execute("UPDATE installation SET status = 'suspended' WHERE id = 9")
+        return out
+
+    monkeypatch.setattr(repo, "upsert_analysis", persist_then_suspend)
+
+
+def _suspend_after_post(world: World, path: re.Pattern[str]) -> None:
+    def hook(req: httpx.Request) -> httpx.Response:
+        resp = next(h for m, p, h in world.gh.routes if h is not hook and m == "POST" and p.search(req.url.path))(req)
+        world.owner.execute("UPDATE installation SET status = 'suspended' WHERE id = 9")
+        return resp
+
+    world.gh.routes.insert(0, ("POST", path, hook))
+
+
+def _jobs_api_forbidden(world: World) -> None:  # forces the missing-permission notice path
+    world.gh.routes.insert(
+        0,
+        (
+            "GET",
+            re.compile(r"^/repos/acme/coffee/actions/runs/55/attempts/\d+/jobs$"),
+            lambda r: httpx.Response(
+                403, json={"message": "Resource not accessible"}, headers={"x-accepted-github-permissions": "actions=read"}
+            ),
+        ),
+    )
+
+
+def test_pr_path_revoked_before_the_pr_comment(world: World, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    world.state.commit_pulls[world.head] = [world.state.pr(12, world.head)]
+    _suspend_after_persist(world, monkeypatch)
+    jid = world.enqueue()
+    world.run()
+    assert (world.jobrow(jid)["status"], world.jobrow(jid)["last_error"]) == ("cancelled", "installation_suspended")
+    assert world.state.pr_comments.get(12, []) == [] and world.state.check_runs == [] and world.state.writes == []
+
+
+def test_notice_path_revoked_before_its_pr_comment(world: World, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    _jobs_api_forbidden(world)
+    world.state.commit_pulls[world.head] = [world.state.pr(12, world.head)]
+    _suspend_after_persist(world, monkeypatch)
+    jid = world.enqueue()
+    world.run()
+    assert (world.jobrow(jid)["status"], world.jobrow(jid)["last_error"]) == ("cancelled", "installation_suspended")
+    assert world.state.pr_comments.get(12, []) == [] and world.state.check_runs == [] and world.state.writes == []
+
+
+def test_notice_path_revoked_between_its_pr_comment_and_check_run(world: World) -> None:
+    _jobs_api_forbidden(world)
+    world.state.commit_pulls[world.head] = [world.state.pr(12, world.head)]
+    _suspend_after_post(world, PRC)
+    jid = world.enqueue()
+    world.run()
+    assert (world.jobrow(jid)["status"], world.jobrow(jid)["last_error"]) == ("cancelled", "installation_suspended")
+    assert len(world.state.pr_comments[12]) == 1 and world.state.check_runs == []  # the comment stays; nothing after
+    states = dict(world.owner.execute("SELECT surface, state FROM publication").fetchall())
+    assert "check_run" not in states or states["check_run"] != "published"
