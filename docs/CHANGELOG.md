@@ -1,5 +1,12 @@
 # Change Log
 
+## 2026-10-19 (ao): Phase 28 final offline gate
+
+- Full suite (slow included) under the network guard: **670 passed, 0 external attempts**.
+- `make check`: 659 passed. The 11 slow tests it deselects are 9 in `test_fuzz.py`, 1 in `test_envelope.py` and 1 in `bench/test_integrity.py`; all of them pass in the full run.
+- Benchmark identical; truth lock intact (`docs/benchmark-runs/2026-10-19-phase28-final-rerun.md`).
+- Quarantine untouched; no leftover processes; no remote.
+
 ## 2026-10-19 (an): Phase 27 security and release gate
 
 The gate suite (259 tests) passes with 0 external connection attempts. The mapping of each gate item to its evidence is in SECURITY-AUDIT §5. There are no credentials in new files, and no new defects beyond P-1, which was fixed in Phase 23.
