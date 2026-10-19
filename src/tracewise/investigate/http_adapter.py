@@ -136,7 +136,10 @@ class HTTPProvider:
     # ------------------------------------------------------------------ Provider.step
 
     def step(self, request: StepRequest) -> StepResponse:
-        body = json.dumps(self.codec.encode(self.config.model, request)).encode()
+        try:
+            body = json.dumps(self.codec.encode(self.config.model, request)).encode()
+        except WireError as e:  # the conversation cannot be expressed in the contract: nothing is sent
+            raise ProviderError(f"{self.name}: request does not match the contract ({e})") from None
         deadline = self._clock() + max(0.0, request.timeout_s)
         attempt = 0
         while True:
