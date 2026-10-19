@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from typing import Literal
 
 from fastapi import FastAPI
 from psycopg_pool import ConnectionPool
@@ -19,11 +20,14 @@ def create_app(
     *,
     schema_head: str | None = None,
     on_shutdown: Callable[[], None] | None = None,
+    required_role: Literal["system"] | None = None,
 ) -> FastAPI:
     """`pool` is the system plane (tracewise_system): ingress records deliveries before any tenant is known (T-705).
 
     `schema_head`: when set, `/readyz` also requires the database schema to be at this revision.
-    `on_shutdown`: called once when the ASGI server shuts down (closes the pool in the runtime factory)."""
+    `on_shutdown`: called once when the ASGI server shuts down (closes the pool in the runtime factory).
+    `required_role`: when "system", `/readyz` also requires the pool's role to satisfy `require_system_plane`
+    (the runtime factory always sets it; unit tests may build apps on other pools)."""
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -38,6 +42,7 @@ def create_app(
     app.state.webhook_secret = secret.get_secret_value().encode() if secret else None
     app.state.pool = pool
     app.state.schema_head = schema_head
+    app.state.required_role = required_role
     app.include_router(webhooks.router)
     app.include_router(health.router)
     return app
