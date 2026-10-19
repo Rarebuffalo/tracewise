@@ -54,5 +54,7 @@ API version: no version string is stated on these pages. The path is `/v1/respon
 | G-2 | No JSON example of the error body (only field names) | Classification reads `error.code` and `error.type` tolerantly; an unknown body is treated as retryable 429/5xx, within bounded retries |
 | G-3 | Whether reasoning items may be omitted for non-reasoning models | Always passed back when present; none appear for non-reasoning models |
 | G-4 | Reachability, real response shapes, and actual refusal/truncation frequency | Need one authorised smoke call (T-605) |
-| G-5 | Maximum `call_id` length | IDs are capped at 64 consistently on both sides (calls and outputs) |
+| G-5 | Maximum `call_id` length | **Corrected in Phase 46:** the earlier 64-character cap was not in the contract and could merge two distinct ids. Ids are now sent back exactly as issued; a duplicate, missing or unpaired id fails closed. A provider-side length limit, if any, would show up in the smoke call. |
 | G-6 | Model identifier, context and output limits, prices | T-605 / UD-3 / C-9 (owner) |
+| G-7 | (Phase 46) Whether a request may contain earlier `function_call` items while `tools` is omitted (our final, tool-free step). R-9 documents `tool_choice: "none"` as the alternative. | Undocumented either way; to be observed in the smoke call |
+| G-8 | (Phase 46) R-10 says reasoning items carry `encrypted_content` "by default" in stateless mode | A reasoning item without it fails closed; the smoke call confirms this is not over-strict |
