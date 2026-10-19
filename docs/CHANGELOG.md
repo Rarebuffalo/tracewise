@@ -1,5 +1,18 @@
 # Change Log
 
+## 2026-10-19 (am): Phase 26 local operator reproducibility
+
+`tests/db/test_reproducibility.py` (3 tests):
+
+- **Documentation consistency:**
+  - every env var named in OPERATIONS, DEPLOYMENT-BLUEPRINT, IMPLEMENTATION-PLAN and `.env.example` is a real setting;
+  - every setting is documented;
+  - every documented CLI flag exists in the CLIs (or is uvicorn's own);
+  - every documented entry point is importable.
+- **Clean environment:** a new cluster bootstrapped only from the role template and migrated by the non-superuser owner. Then the documented worker command (idle, then SIGTERM, exit 0), a wrong-role refusal (exit 2, no credentials), the documented web command (ready; signed install processed; forged signature 401 and not recorded), RLS hiding rows from the tenant role without context, and the documented ops and retention commands (exit 0).
+
+Job processing is not repeated here: it needs GitHub, whose API host is fixed. It is proven in-process by `test_operator_acceptance.py`. No package outside the local cache is needed.
+
 ## 2026-10-19 (al): Phase 25 T-1002 deployment blueprint (design only)
 
 - `docs/DEPLOYMENT-BLUEPRINT.md` is vendor-neutral, because no hosting environment is evidenced (ADR-09 is open). It covers:
