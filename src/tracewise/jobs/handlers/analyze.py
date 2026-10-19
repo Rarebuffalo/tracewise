@@ -27,6 +27,7 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -47,7 +48,7 @@ from tracewise.github.pulls import PRAssociation, associate_pr
 from tracewise.investigate.loop import InvestigationLimits
 from tracewise.investigate.provider import Provider
 from tracewise.investigate.validate import ValidatedDiagnosis
-from tracewise.jobs.queue import JobCancelled, PermanentError, RetryableError
+from tracewise.jobs.queue import JobCancelled, PermanentError, RetryableError, retry_fits
 from tracewise.jobs.worker import Handler, JobContext, LeaseLost
 from tracewise.observe import Stages, bind, event
 from tracewise.prepass.envelope import DEFAULT_MAX_BYTES as DEFAULT_LOG_RETAIN_BYTES
@@ -154,11 +155,25 @@ def _handle(ctx: JobContext, deps: AnalyzeDeps, job: AnalysisJob) -> dict[str, A
     rc_p = RepoClient(
         deps.http, deps.tokens, installation_id=job.installation_id, repo_id=job.repo_id, full_name=job.repo, scope="publish"
     )
-    last_attempt = ctx.job.attempts >= ctx.job.max_attempts
     target = PublishTarget(job.installation_id, job.repo_id, job.repo, job.head_sha, job.run_id, job.attempt, job.workflow_id)
     publisher = Publisher(deps.pool, rc_p, app_id=deps.app_id, check_lease=ctx.check, bot_login=deps.bot_login)
+
+    def is_final() -> bool:
+        """Decided when a failure happens: no attempts left, or no retry can finish before the deadline (FS-ERR-2)."""
+        return not retry_fits(ctx.job, datetime.now(UTC))
+
+    if ctx.job.deadline_at is not None and datetime.now(UTC) >= ctx.job.deadline_at:
+        # Claimed after its deadline (it already ran and failed once): no new investigation. Tell the user, then end
+        # the job as failed (FS-ERR-1). A failing notice ends it the same way; there is no further attempt.
+        try:
+            _publish_notice(deps, job, target, publisher, rc_p, "could_not_complete", None)
+        except (LeaseLost, JobCancelled):
+            raise
+        except Exception:
+            event(log, "analysis.notice_failed", logging.WARNING)
+        raise PermanentError("job deadline passed before a final attempt")
     try:
-        return _run(ctx, deps, job, rc_a, rc_p, target, publisher, last_attempt)
+        return _run(ctx, deps, job, rc_a, rc_p, target, publisher, is_final)
     except gh_err.InstallationUnavailable:
         raise JobCancelled("cancelled_uninstalled") from None  # FS-INS-3: token mint refused
     except gh_err.PermissionDenied as e:
@@ -169,7 +184,7 @@ def _handle(ctx: JobContext, deps: AnalyzeDeps, job: AnalysisJob) -> dict[str, A
     except (LeaseLost, JobCancelled, PermanentError, RetryableError):
         raise
     except Exception:
-        if last_attempt:  # FS-ERR-1: tell the user, then still fail the job (never reported as success)
+        if is_final():  # FS-ERR-1: tell the user, then still fail the job (never reported as success)
             try:
                 _publish_notice(deps, job, target, publisher, rc_p, "could_not_complete", None)
             except Exception:
@@ -186,7 +201,7 @@ def _run(
     rc_p: RepoClient,
     target: PublishTarget,
     publisher: Publisher,
-    last_attempt: bool,
+    is_final: Callable[[], bool],
 ) -> dict[str, Any]:
     stages = Stages()
     t0 = time.monotonic()
@@ -217,7 +232,7 @@ def _run(
         tokens_out=d.usage.output_tokens,
         model_ms=d.usage.latency_ms,
     )
-    if d.inconclusive_reason in PROVIDER_FAILURES and not last_attempt:
+    if d.inconclusive_reason in PROVIDER_FAILURES and not is_final():
         raise RetryableError(f"provider failure ({d.inconclusive_reason})")  # FS-ERR-1: retry ≤2
     if d.inconclusive_reason in PROVIDER_FAILURES:
         outcome = "could_not_complete"

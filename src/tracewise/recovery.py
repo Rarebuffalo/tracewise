@@ -142,6 +142,7 @@ def redeliver_failed_deliveries(
         s.errors["list"] += 1
         return _done(s, completed=False)
     requested = 0
+    hold: datetime | None = None  # oldest latest-attempt time of a delivery skipped only for its cooldown
     for guid, attempts in sorted(groups.items()):
         s.candidates += 1
         latest = max(attempts, key=lambda a: (_ts(a["delivered_at"]), a["id"]))
@@ -169,6 +170,8 @@ def redeliver_failed_deliveries(
                 continue
             if req and req["last_requested_at"] and req["last_requested_at"] > t_now - cooldown:
                 s.skipped["cooldown"] += 1
+                when = _ts(latest["delivered_at"])  # still below the attempt cap: keep it inside the next window
+                hold = when if hold is None or (when is not None and when < hold) else hold
                 continue
             if requested >= max_requests:
                 s.stopped = s.stopped or "request_cap"  # keep an earlier reason (e.g. page_cap)
@@ -212,8 +215,11 @@ def redeliver_failed_deliveries(
             if interrupted:
                 break
     if s.stopped is None and newest is not None:  # only a complete pass may advance the high-water mark
+        # ...and never past a delivery that is only waiting for its cooldown: otherwise it falls below the next
+        # floor (hw - overlap) and is never requested again. The attempt cap bounds how long the mark is held.
+        mark = newest if hold is None else min(newest, hold)
         with transaction(pool) as conn:
-            _set_checkpoint(conn, "deliveries:high_water", newest.isoformat())
+            _set_checkpoint(conn, "deliveries:high_water", mark.isoformat())
     return _done(s, completed=s.stopped is None)
 
 
