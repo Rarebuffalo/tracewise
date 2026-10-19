@@ -64,7 +64,7 @@ Version 2.0, 2026-10-18. Dependency-ordered. Each task lists the SPEC requiremen
 | T-602 | Cases B-01…B-17, A-04…A-06, E-01…E-06 with committed `truth.yaml` | — | AT-DX-15 | T-601 | 2.0 | done |
 | T-603 | Scorer (BENCHMARK §4) + per-track report | — | AT-DX-15 | T-602 | 1.0 | done |
 | T-604 | META runner P-01…P-03 (anonymous REST, provenance recorded) | FS-ATR-2 | AT-ATR-05, AT-SEC-14 | T-603 | 0.5 | todo |
-| T-605 | Measured evaluation with OpenAI (**needs a key you provide locally**); model choice (UD-3); cost and latency measured | FS-DX-3, FS-OPS-2 | AT-DX-15, AT-OPS-02 | T-603, T-402 | 1.5 | todo |
+| T-605 | Measured evaluation with OpenAI (**needs a key you provide locally**); model choice (UD-3); cost and latency measured | FS-DX-3, FS-OPS-2 | AT-DX-15, AT-OPS-02 | T-603, T-402 | 1.5 | todo. Preparation done offline: provider-neutral adapter core plus contract tests (docs/MODEL-ADAPTER.md). **Not done:** the OpenAI wire codec (API contract not recorded, C-1 to C-9) and any real-model evaluation |
 | **Phase 7: pilot hardening** | | | | | | |
 | T-701 | Installation lifecycle (created, deleted, suspend, repos added/removed; in-flight cancel) | FS-INS-3, FS-INS-4 | AT-INS-03, AT-INS-04 | T-105 | 0.75 | done |
 | T-702 | Recovery: deliveries API redelivery + failed-run sweep | FS-EVT-5 | AT-REL-03 | T-302, T-105 | 1.0 | done |
