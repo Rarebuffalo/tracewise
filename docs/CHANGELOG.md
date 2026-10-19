@@ -1,5 +1,15 @@
 # Change Log
 
+## 2026-10-19 (ak): Phase 24 model adapter contract readiness
+
+- Two contract-test gaps closed:
+  - the token budget is enforced from adapter-reported usage (inconclusive, with no further call);
+  - an adapter-driven run with failures logs no key, prompt, log or source content.
+
+  `test_http_adapter.py` now has 37 tests.
+- `docs/MODEL-ADAPTER.md` §2 is a per-item **OpenAI contract checklist** (C-1 to C-9). For each item it gives the fact needed, the dependent code, the planned tests, whether a fake transport can test it, and what needs a real call. It also states exactly what unblocks the codec: approval to obtain and record the official API reference, and the choice of API. **No key is needed for that step.**
+- No OpenAI codec was written and nothing was guessed. `LLM_PROVIDER=openai` still refuses at startup.
+
 ## 2026-10-19 (aj): Phase 23 T-1001 privacy notice draft and data inventory
 
 - `docs/DATA-INVENTORY.md`: what enters the system, what is persisted (field by field, with bounds, redaction and retention), what leaves it (GitHub surfaces, the model provider, logs), and what is never stored. Each row names its code and tests. Retention marked *(D-12)* is pending.
