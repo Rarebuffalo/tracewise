@@ -293,7 +293,9 @@ def _note(results: dict[str, str], missing: dict[str, str | None], r: PublishRes
 
 def _persist(deps: AnalyzeDeps, job: AnalysisJob, vd: ValidatedDiagnosis | None, status: str) -> int:
     with transaction(deps.pool, tenant=job.installation_id) as conn:  # T-705: tenant plane
-        run_pk = repo.find_workflow_run(conn, job.repo_id, job.run_id, job.attempt) or repo.insert_workflow_run(
+        run_pk = repo.find_workflow_run(
+            conn, job.installation_id, job.repo_id, job.run_id, job.attempt
+        ) or repo.insert_workflow_run(
             conn,
             installation_id=job.installation_id,
             repo_id=job.repo_id,

@@ -6,7 +6,7 @@ This document prepares a **later, approved** pilot. Nothing here has been deploy
 
 | Ready (verified offline) | Not ready |
 |---|---|
-| Schema, migrations 0001–0009, roles, RLS, the purge function (`tests/db/test_fresh_install.py`) | Hosting, process supervision, TLS and ingress for the webhook URL (T-1002, gated) |
+| Schema, migrations 0001–0010, roles, RLS, the purge function (`tests/db/test_fresh_install.py`) | Hosting, process supervision, TLS and ingress for the webhook URL (T-1002, gated) |
 | **Process entry points** (Phase 18): web via uvicorn, worker via `python -m tracewise.worker` (§1a) | |
 | Webhook intake, queue, worker, publisher, recovery, retention and observability (offline suites) | **No real model adapter** (D-7). The only provider is `fake`. A real one is T-605. |
 | CLIs: `python -m tracewise.{recovery,ops,retention,bench}` | Credential provisioning (D-11), schedules, alert routing (T-1002) |
@@ -17,9 +17,10 @@ This document prepares a **later, approved** pilot. Nothing here has been deploy
 
 1. **Roles.** A database administrator runs `scripts/db/provision_roles.sql` as superuser, once. It creates the non-superuser owner and the `tracewise_app` and `tracewise_system` roles, and the `tracewise` database. It sets no passwords and revokes TEMP and CREATE from PUBLIC.
 2. **Authentication.** Configure authentication for the three roles (password, certificate or IAM) **outside this repository**. That is the D-11 decision.
-3. **Migrate.** Run the migrations as the owner, in order: `tracewise.db.migrate.upgrade(<owner url>)`. This applies 0001–0009. The runtime roles must exist before this step, otherwise they get no grants, which fails closed.
+3. **Migrate.** Run the migrations as the owner, in order: `tracewise.db.migrate.upgrade(<owner url>)`. This applies 0001–0010. The runtime roles must exist before this step, otherwise they get no grants, which fails closed.
 4. **Verify.** Run the checks on the target database before use:
-   - `SELECT version_num FROM alembic_version` must return `0009`;
+   - `SELECT version_num FROM alembic_version` must return `0010`;
+   - **Migration 0010** (per-installation keys) is reversible only while no two installations share an old global key. After a repository transfer they may, and the downgrade then refuses (`downgrade 0010 refused: …`) without deleting anything; the operator must resolve the rows explicitly.
    - the grant and RLS checks in `tests/db/test_fresh_install.py`. Adapt that file's queries to read-only use; do not run the test suite against a real database.
 5. **New migrations** must keep `tests/db/test_db_security.py` passing:
    - every tenant table has RLS and its policy;

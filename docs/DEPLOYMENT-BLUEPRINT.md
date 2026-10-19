@@ -66,7 +66,7 @@ Inject secrets through the platform's secret store. Never bake them into images 
 ## 6. Database
 
 - **Roles:** `tracewise_owner` (owns the schema; migrations), `tracewise_app` (tenant plane, RLS), `tracewise_system` (BYPASSRLS; system plane). All are non-superuser. The template revokes TEMP and CREATE from PUBLIC. That revoke **has not been applied to any real database**.
-- **Minimum permissions:** as granted by migrations 0001–0009 (verified by `test_fresh_install.py`):
+- **Minimum permissions:** as granted by migrations 0001–0010 (verified by `test_fresh_install.py`):
   - the app role has DML on tenant tables, filtered by RLS, and no recovery tables;
   - the system role has DML on all tables, no DELETE on content, audit append-only, and EXECUTE on `tracewise_purge` only;
   - neither runtime role can write `alembic_version` or create objects.
