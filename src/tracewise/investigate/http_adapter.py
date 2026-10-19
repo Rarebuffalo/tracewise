@@ -53,6 +53,10 @@ class ProviderRequestError(ProviderError):
     """Other 4xx: the request was refused as invalid. Permanent; never retried."""
 
 
+class ProviderQuotaError(ProviderError):
+    """A 429 the vendor documents as quota, billing or spend exhaustion: needs owner action, never retried."""
+
+
 class ProviderUnavailable(ProviderError):
     """429/5xx/transport failure after the bounded retries."""
 
@@ -154,6 +158,8 @@ class HTTPProvider:
                 if status in (401, 403):
                     raise ProviderAuthError(f"{self.name}: authentication refused (HTTP {status})")
                 if status == 429 or status >= 500:
+                    if self._permanent(status, raw):  # e.g. quota or billing: retrying cannot help
+                        raise ProviderQuotaError(f"{self.name}: quota, billing or usage limit (HTTP {status})")
                     failure = ProviderUnavailable(f"{self.name}: HTTP {status}")
                 else:
                     raise ProviderRequestError(f"{self.name}: request refused (HTTP {status})")
@@ -181,6 +187,20 @@ class HTTPProvider:
                     raise _TooLarge()
                 chunks.append(chunk)
             return resp.status_code, b"".join(chunks), _retry_after(resp.headers.get("retry-after"))
+
+    def _permanent(self, status: int, raw: bytes) -> bool:
+        """Ask the codec whether a 429/5xx is permanent (its vendor contract); never raises, never quotes the body."""
+        check = getattr(self.codec, "is_permanent", None)
+        if check is None:
+            return False
+        try:
+            doc = json.loads(raw) if raw else None
+        except ValueError:
+            doc = None
+        try:
+            return bool(check(status, doc))
+        except Exception:
+            return False
 
     def _decode(self, raw: bytes, request: StepRequest) -> StepResponse:
         try:

@@ -23,6 +23,9 @@ class Message:
     content: str
     tool_call_id: str | None = None
     tool_calls: tuple[ToolCallRequest, ...] = ()
+    # Opaque, provider-originated items that the provider requires back on the next turn (e.g. OpenAI reasoning
+    # items with encrypted content). Never repository content; passed back verbatim, never interpreted.
+    replay: tuple[Any, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -59,6 +62,7 @@ class StepResponse:
     text: str | None = None
     tool_calls: tuple[ToolCallRequest, ...] = ()
     usage: StepUsage = field(default_factory=StepUsage)
+    replay: tuple[Any, ...] = ()  # see Message.replay
 
 
 class ProviderError(Exception):
