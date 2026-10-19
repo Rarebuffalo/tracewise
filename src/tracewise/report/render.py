@@ -40,8 +40,8 @@ CATEGORY_LABEL = {
     Category.unknown: "Unknown",
 }
 NO_ERROR_IN_RETAINED_LOG = (
-    "no error line was found in the retained part of the log; the log was truncated, so the error may be in the part "
-    "that was not downloaded or retained"
+    "no error line was found in the retained part of the log; the log was incomplete (truncated or partly "
+    "unavailable), so the error may be in the part that is missing"
 )
 
 

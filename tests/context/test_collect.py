@@ -217,3 +217,23 @@ def test_synthetic_logs_of_several_sizes(server, ws_root, head, filler_lines, ex
         assert kept <= 2 * 1024 * 1024
         assert ev.log_truncated is expect_truncated
         assert bool(ev.prepass.primaries) is expect_primary
+
+
+def test_l2_partly_unavailable_log_without_error_line_is_reported_as_incomplete(server, ws_root, head) -> None:  # type: ignore[no-untyped-def]
+    """Phase 43: one failed job's log is gone (410); the other has no error line. The evidence is incomplete, the
+    reason code stays `no_error_line`, confidence cannot be high, and the wording never claims the log has no error."""
+    from tracewise.analysis.diagnose import diagnose
+    from tracewise.investigate.fake import ScriptedProvider
+    from tracewise.investigate.validate import ValidatedDiagnosis
+    from tracewise.report.render import check_output, render
+
+    quiet = "\n".join(f"step output {i}" for i in range(20)) + "\nProcess completed with exit code 1."
+    jobs = [api_job(301, "a", "failure", quiet), api_job(302, "b", "failure", fixture("pytest_b02.out"))]
+    _, rc, job = setup(server, head, log_status={302: 410}, jobs=jobs)
+    with collect_evidence(job, rc, fetcher=make_fetcher(server, ws_root)) as ev:
+        assert ev.status == "ok" and ev.logs_missing == [302] and ev.log_truncated
+        vd: ValidatedDiagnosis = diagnose(ev, ScriptedProvider([]))
+    d = vd.diagnosis
+    assert d.inconclusive_reason == "no_error_line" and d.limits.log_truncated and d.confidence.band.value == "low"
+    for text in (render(vd), check_output(vd, render(vd)).summary):
+        assert "the log has no error line" not in text and "incomplete" in text
