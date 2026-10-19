@@ -1,5 +1,56 @@
 # Change Log
 
+## 2026-10-19 (as): Phase 41 final local gate
+
+- Full suite (slow included) under the network guard: **699 passed, 0 failed, 0 external attempts**. Test output was scanned for all synthetic secret markers: 0 matches. Three parametrized tests had printed synthetic credentials in their **test IDs**; they now use descriptive IDs.
+- `make check`: 688 passed, 11 slow deselected (9 `test_fuzz.py`, 1 `test_envelope.py`, 1 `bench/test_integrity.py`); lint, format, mypy (91 files) and docs pass.
+- Benchmark identical; truth lock intact.
+- `git diff --check` clean; no credentials or debug output in changed lines; quarantine untouched; no leftovers.
+
+## 2026-10-19 (ar): Phases 35–40 independent hardening verification
+
+### Baseline
+
+HEAD `c6b864f`, clean, no remote; all seven reported commits are ancestors.
+
+### Fixes (regression tests written first, each failed before its fix)
+
+| ID | Fix |
+|---|---|
+| **P-5** | `short_error()` no longer copies psycopg `DETAIL` row values or pydantic `input_value`s into `job.last_error` or `publication.last_error` |
+| **L-2** | A truncated log with no error line no longer renders "the log has no error line" |
+
+### New tests
+
+- Download-cap boundaries (4).
+- The excerpt cap on the full pre-pass path (3 shapes).
+- Structural proof that no code path reaches a real model.
+
+### P-1 mutation check, re-run on a scratch backup
+
+Each mutant was caught, and `validate.py` was restored byte-identically:
+- no replacement redaction: 2 tests fail;
+- no snippet redaction: 1 test fails;
+- no excerpt redaction: 1 test fails.
+
+(A first attempt at the third mutant used a multi-line sed pattern that matched nothing, so no mutation was applied; it was re-run correctly.)
+
+### Found by the Phase 41 full gate
+
+**W-1:** the worker's graceful signal handlers were installed only after its ≈2.2 s startup, so a SIGTERM during startup killed it (exit −15). Two subprocess tests with a fixed 2 s sleep failed.
+
+Fix: handlers are installed first, and a stop during startup exits 0 without claiming. Tests now wait for events instead of sleeping, plus a new during-startup test.
+
+### Documentation
+
+DECISION-MEMOS gains:
+- the "≤2 KB" interpretation;
+- the verified log units and boundaries;
+- P-3 implications;
+- a classification of the 13 queue items.
+
+Also updated: MODEL-ADAPTER §2a (offline readiness report); SECURITY-AUDIT §7; DATA-INVENTORY (content-free error rows).
+
 ## 2026-10-19 (aq): Phase 34 final gate
 
 - Full suite (slow included) under the network guard: **688 passed, 0 external attempts**.

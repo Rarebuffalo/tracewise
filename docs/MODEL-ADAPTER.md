@@ -49,6 +49,16 @@ Then `OpenAIWire` can be written and golden-tested offline.
 
 **Until then** `LLM_PROVIDER=openai` refuses at startup (`investigate/providers.py`; `test_process_entrypoints.py`, case `LLM_PROVIDER=openai`). There is no fallback to `fake` or to any other provider.
 
+## 2a. Offline readiness report (Phase 39)
+
+| Question | Answer |
+|---|---|
+| Can a real model be reached today? | **No.** `HTTPProvider` is never constructed in product code. No vendor codec exists. `LLM_PROVIDER=openai` refuses in every environment. The fake provider is refused outside `TW_ENV=test`. The benchmark CLI offers scripted providers only. Evidence: `tests/investigate/test_providers.py` (including the structural test `test_no_code_path_can_reach_a_real_model_today`), `test_process_entrypoints.py`, and the network-guarded full suite. |
+| Reference material that needs your approval | The official OpenAI API reference pages, for the chosen API (C-1), covering: the request schema with messages and tools (C-2, C-3); the response schema with tool calls, refusals and finish reasons (C-4); structured output (C-5); usage fields (C-6); the error format and rate-limit headers (C-7); authentication and organisation/project headers (C-8); the model list, limits and prices (C-9). Recorded as dated evidence with example requests and responses. |
+| Implementable offline after that approval | `OpenAIWire` (`endpoint`, `auth_headers`, `encode`, `decode`); `providers.py` wiring for `LLM_PROVIDER=openai`; golden encode/decode tests from the recorded examples; error and rate-limit classification tests for C-7; configuration validation for C-9 |
+| Needs a key and an authorised evaluation later | One reachability smoke call (C-1); behavioural checks (tool-use compliance, refusal and truncation frequency, structured-output conformance); usage-versus-billing reconciliation (C-6, C-9); real 429 behaviour; the T-605 benchmark run, E-01 injection resistance, model choice (UD-3), latency and cost |
+| Owner-only (no code) | Account data-retention and training settings (C-8), for the privacy notice |
+
 ## 3. Steps to finish T-605 (each needs your approval)
 
 1. Record C-1 to C-8 as evidence.
