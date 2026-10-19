@@ -1,5 +1,12 @@
 # Change Log
 
+## 2026-10-20 (bb): Phase 52 final offline hardening and production-gate preparation
+
+- **Installer reports (prepass):** one npm error block, and pip's conflict report ending in `ResolutionImpossible`, each yield one primary. uv's `No solution found` is an installer error. Built against a 12-case development set. The **frozen evaluation set** (SHA-256 `45121652c5c2c829b3d1a9db85c921bd403310207701957b180646084b7ac852`, recorded before any code change and re-checked before its single run) scored **6/9 raw**: the 3 failures were mis-specified expectations about the runner `exit code` fallback, corrected and marked afterwards. Benchmark scores are unchanged; only B-06's primary count changed (2 → 1; not scored).
+- **Network guard:** permanent decision tests. The restore test now also requires the grants to equal the documented matrix.
+- **Owner-decision packet:** `docs/OWNER-DECISION-PACKET.md` (D-12, D-14 comparison and recommendation, D-11 excess grants, benchmark items, alert threshold, G-PLAT-11, the three OpenAI authorisations, signed URLs, hosting, live and legal).
+- No change to D-14 behaviour, grants, the threshold, truth or providers.
+
 ## 2026-10-20 (ba): Phase 51 production-readiness closure (offline)
 
 - **Final-attempt publication (FS-ERR-1):** a GitHub retryable error on the genuine final attempt now publishes the "could not complete" notice when no analysis row exists for the run attempt, which proves nothing reached GitHub. The partial case (a surface attempted; a 5xx or timeout may have landed) is unchanged and recorded as owner decision **D-14**.
