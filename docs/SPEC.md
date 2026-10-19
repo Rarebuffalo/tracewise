@@ -164,7 +164,7 @@ Version 2.0, 2026-10-18. Supersedes all earlier specs (see `research/README.md` 
   "root_cause": "≤300 chars",
   "why": "≤800 chars",
   "problem_location": {"path": "pkg/mod.py", "line_start": 41, "line_end": 41},
-  "problem_snippet": "≤15 lines copied by the system from the file at head_sha (FS-DX-4); never model text",
+  "problem_snippet": "≤15 lines copied by the system from the file at head_sha (FS-DX-4); never model text; the PERSISTED copy is redacted, then ≤2000 UTF-8 bytes (P-3, owner decision D-13)",
   "fix": {"description": "≤600 chars", "replacement": {"path": "pkg/mod.py", "line_start": 41, "line_end": 41, "new_text": "…"}, "size": "trivial|small|larger|n/a"},
   "next_steps": ["≤3, ≤160 chars each"],
   "files_examined": [{"path": "pkg/mod.py", "start": 1, "end": 43, "verdict": "≤140 chars"}],

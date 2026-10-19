@@ -235,6 +235,39 @@ def repository_scope(conn: Conn, repo_id: int) -> dict[str, Any] | None:
     ).fetchone()
 
 
+SNIPPET_MAX_BYTES = 2000  # P-3 (approved option A): the persisted source snippet, in UTF-8 bytes
+SNIPPET_TRUNCATED = "[truncated for storage]"
+
+
+def stored_snippet(snippet: str) -> str:
+    """The copy of `problem_snippet` that may be persisted: redacted first, then ≤SNIPPET_MAX_BYTES UTF-8 bytes,
+    whole lines where possible, never splitting a character, marked when cut (P-3). Reports are rendered from the
+    in-memory diagnosis and are unaffected."""
+    text = redact(snippet)
+    if len(text.encode("utf-8")) <= SNIPPET_MAX_BYTES:
+        return text
+    budget = SNIPPET_MAX_BYTES - len(SNIPPET_TRUNCATED.encode("utf-8")) - 1
+    kept, used = [], 0
+    for line in text.splitlines(keepends=True):
+        size = len(line.encode("utf-8"))
+        if used + size > budget:
+            break
+        kept.append(line)
+        used += size
+    head = "".join(kept) or text.encode("utf-8")[:budget].decode("utf-8", errors="ignore") + "\n"
+    if not head.endswith("\n"):
+        head += "\n"
+    return head + SNIPPET_TRUNCATED
+
+
+def _storable(diagnosis: dict[str, Any]) -> dict[str, Any]:
+    """The persistence boundary for the diagnosis document: every writer goes through upsert_analysis."""
+    snippet = diagnosis.get("problem_snippet")
+    if isinstance(snippet, str):
+        return {**diagnosis, "problem_snippet": stored_snippet(snippet)}
+    return diagnosis
+
+
 def upsert_analysis(
     conn: Conn,
     *,
@@ -266,7 +299,7 @@ def upsert_analysis(
             status,
             category,
             confidence_band,
-            Jsonb(diagnosis) if diagnosis is not None else None,
+            Jsonb(_storable(diagnosis)) if diagnosis is not None else None,
             provider,
             model,
             tokens_in,

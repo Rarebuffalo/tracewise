@@ -278,3 +278,61 @@ def test_short_error_has_no_bypass_through_primary_messages_keys_or_foreign_exce
     assert leaks == []
     assert repo.short_error(PermanentError("invalid analysis job payload")) == "invalid analysis job payload"  # ours: kept
     assert repo.short_error("cancelled_uninstalled", 200) == "cancelled_uninstalled"  # caller reason codes: kept
+
+
+@pytest.mark.parametrize(
+    "snippet",
+    [
+        "".join(f"    line_{i} = compute({'x' * 300})\n" for i in range(15)),  # ASCII, ~4.9 KB, whole lines
+        "".join(f"    s{i} = '{'日本語' * 90}'\n" for i in range(15)),  # multibyte, 3 bytes per char
+        "y" * 3990,  # one huge line: must be cut on a character boundary
+        "".join(f"    k{i} = 'ghp_{'Sn9' * 12}'  # {'é' * 120}\n" for i in range(15)),  # secrets inside the kept window
+    ],
+    ids=["ascii", "multibyte", "single-long-line", "secrets-then-cap"],
+)
+def test_p3_stored_snippet_is_redacted_then_capped_at_2000_bytes(pool, owner, snippet: str) -> None:  # type: ignore[no-untyped-def]
+    """Phase 45B (P-3 approved option A): the PERSISTED copy of `problem_snippet` is ≤2000 UTF-8 bytes, redacted
+    before the cut, never split inside a character. Checked on the value read back from the database, and on a
+    second upsert (retry path)."""
+    for attempt in (1, 2):
+        with transaction(pool) as c:
+            run_pk = _run(c)
+            repo.upsert_analysis(
+                c,
+                installation_id=9,
+                run_pk=run_pk,
+                status="diagnosed",
+                category="code_regression",
+                confidence_band="medium",
+                diagnosis={"problem_snippet": snippet, "attempt": attempt},
+            )
+        stored = owner.execute("SELECT diagnosis->>'problem_snippet', diagnosis->>'attempt' FROM analysis").fetchone()
+        raw = stored[0].encode("utf-8")
+        assert len(raw) <= 2000 and stored[1] == str(attempt)
+        assert "Sn9Sn9Sn9" not in stored[0]  # redacted before the cap
+        assert stored[0].endswith("[truncated for storage]")
+        assert stored[0][: -len("[truncated for storage]")].rstrip("\n") in redact_for_test(
+            snippet
+        )  # a prefix of the redacted text
+    assert owner.execute("SELECT count(*) FROM analysis").fetchone() == (1,)
+
+
+def test_p3_short_snippet_is_stored_unchanged(pool, owner) -> None:  # type: ignore[no-untyped-def]
+    small = "    return round(subtotal_ * TAX_RATE, 2)\n"
+    with transaction(pool) as c:
+        repo.upsert_analysis(
+            c,
+            installation_id=9,
+            run_pk=_run(c),
+            status="diagnosed",
+            category=None,
+            confidence_band=None,
+            diagnosis={"problem_snippet": small},
+        )
+    assert owner.execute("SELECT diagnosis->>'problem_snippet' FROM analysis").fetchone() == (small,)
+
+
+def redact_for_test(text: str) -> str:
+    from tracewise.prepass.sanitize import redact
+
+    return redact(text)

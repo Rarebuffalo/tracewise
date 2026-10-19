@@ -44,7 +44,7 @@ To identify the error in the logs, to investigate the related source code, and t
 When enabled, the following are sent to that provider:
 - excerpts of your logs, with secret-like values redacted;
 - the changes in the triggering commit;
-- the portions of source files the investigator reads (up to 250 lines per read), **sent as they are in your repository** [pending P-2: redaction of source before sending].
+- the portions of source files the investigator reads (up to 250 lines per read), search results and the commit's changes, **with secret-like values redacted** (pattern-based; it cannot catch every format).
 
 The model cannot run commands, change files or reach other systems. It can only request reads through four read-only tools, and its output is validated before anything is published. [Provider data-retention and training terms: to be stated once the provider contract is recorded (MODEL-ADAPTER C-8).]
 
@@ -62,7 +62,7 @@ The model cannot run commands, change files or reach other systems. It can only 
 |---|---|
 | Installation and repository identifiers and names | Until 7 days after you uninstall, then deleted, except a minimal record of the installation id and its deleted status |
 | Run identifiers and metadata | Up to 365 days |
-| The diagnosis, including redacted log excerpts (≤2 KB each), a redacted snippet of up to 15 source lines at the identified location [size limit pending P-3], and the proposed fix | The diagnosis content is cleared after 90 days; the remaining analysis metadata after 180 days |
+| The diagnosis, including redacted log excerpts (≤2 KB each), a redacted snippet of up to 15 source lines at the identified location (at most 2000 bytes stored), and the proposed fix | The diagnosis content is cleared after 90 days; the remaining analysis metadata after 180 days |
 | Error fingerprints (short, redacted messages) and usage and audit records | Up to 365 days |
 
 [These periods are pending approval: D-12.]
@@ -96,7 +96,7 @@ You can choose which repositories the App can access, suspend it, or uninstall i
 | 2 | Provider and model family (AT-SEC-13 requires both) | T-605, UD-3 |
 | 3 | Provider retention and training terms (MODEL-ADAPTER C-8) | T-605 |
 | 4 | Retention periods and tombstone/audit behaviour | D-12 |
-| 5 | Whether source sent to the provider should be redacted first (P-2) | Your decision |
+| 5 | ~~Whether source sent to the provider should be redacted first (P-2)~~: decided (redact; D-13) and implemented | — |
 | 6 | Hosting, region, backups, operator access | T-1002 |
 | 7 | Process for early deletion and access requests | Owner |
 | 8 | Pilot terms template (also part of T-1001): **not drafted**, because it is a contractual document | Owner, counsel |
