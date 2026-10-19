@@ -113,7 +113,10 @@ class OpenAIResponsesWire:
         for item in output:
             kind = item.get("type") if isinstance(item, dict) else None
             if kind == "message":  # R-11: content parts output_text / refusal
-                for part in item.get("content") or []:
+                content = item.get("content")
+                if not isinstance(content, list):
+                    raise WireError("message content is not a list")  # never iterate an unexpected type
+                for part in content:
                     ptype = part.get("type") if isinstance(part, dict) else None
                     if ptype == "output_text" and isinstance(part.get("text"), str):
                         texts.append(part["text"])
