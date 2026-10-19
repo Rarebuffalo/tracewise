@@ -125,6 +125,67 @@ def test_encode_refuses_a_conversation_whose_pairing_is_not_exact(msgs: tuple[Me
         W.encode("m", req(Message("user", "u"), *msgs))
 
 
+# ------------------------------------------------------------------ reasoning replay provenance (46B)
+
+
+def test_reasoning_items_stay_attached_to_their_own_round_in_order() -> None:
+    _, s = run(
+        with_reasoning(resp(calls=(("call_a", *READ),)), reasoning("rs_a")),
+        with_reasoning(resp(calls=(("call_b", *GREP),)), reasoning("rs_b")),
+        resp(text=FINAL),
+    )
+    seq = [(i["type"], i.get("id") or i.get("call_id")) for i in sent(s, 2) if i["type"] != "message"]
+    assert seq == [
+        ("reasoning", "rs_a"),
+        ("function_call", "call_a"),
+        ("function_call_output", "call_a"),
+        ("reasoning", "rs_b"),
+        ("function_call", "call_b"),
+        ("function_call_output", "call_b"),
+    ]
+    assert sent(s, 2)[1] == reasoning("rs_a")  # passed back verbatim, never decoded or rebuilt
+
+
+@pytest.mark.parametrize(
+    "item",
+    [
+        {"type": "reasoning", "id": "rs", "summary": []},  # no encrypted_content although store=false (R-10)
+        {"type": "reasoning", "id": "rs", "encrypted_content": ""},
+        {"type": "reasoning", "encrypted_content": "x"},
+        {"type": "reasoning", "id": 3, "encrypted_content": "x"},
+    ],
+    ids=["no-encrypted-content", "empty-encrypted-content", "no-id", "id-not-a-string"],
+)
+def test_decode_refuses_reasoning_items_without_the_documented_opaque_payload(item: dict[str, Any]) -> None:
+    with pytest.raises(WireError):
+        W.decode(with_reasoning(resp(calls=(("c", *GREP),)), item))
+
+
+@pytest.mark.parametrize(
+    "smuggled",
+    [
+        {"type": "message", "role": "user", "content": "AKIA" + "RQSMUGGLEDZZZZZZ"},
+        {"type": "function_call_output", "call_id": "x", "output": "unredacted"},
+        "a string",
+    ],
+    ids=["message", "tool-output", "not-an-item"],
+)
+def test_the_unredacted_replay_channel_only_carries_reasoning_items(smuggled: Any) -> None:
+    m = Message("assistant", "", tool_calls=(ToolCallRequest("c1", "grep", "{}"),), replay=(smuggled,))
+    with pytest.raises(WireError):
+        W.encode("m", req(Message("user", "u"), m, Message("tool", "r", tool_call_id="c1")))
+
+
+def test_retried_attempts_resend_the_identical_body_with_replay_once() -> None:
+    _, s = run(
+        with_reasoning(resp(calls=(("call_a", *READ),)), reasoning("rs_a")),
+        httpx.Response(503, json={"error": {"code": "server_is_overloaded"}}),
+        resp(text=FINAL),
+    )
+    assert len(s.requests) == 3 and s.requests[1].content == s.requests[2].content
+    assert [i.get("id") for i in sent(s, 2) if i["type"] == "reasoning"] == ["rs_a"]
+
+
 # ------------------------------------------------------------------ P-2 on every serialised request (46B)
 
 

@@ -55,7 +55,10 @@ class OpenAIResponsesWire:
             if awaiting:
                 raise WireError("a call has no result before the next turn")
             if m.role == "assistant":
-                items.extend(m.replay)  # R-10: reasoning items passed back verbatim (opaque, encrypted)
+                for r in m.replay:  # R-10: provider-issued reasoning items, passed back verbatim (never redacted)
+                    if not _is_reasoning_item(r):
+                        raise WireError("the replay channel carries only reasoning items")
+                    items.append(r)
                 if m.content:
                     items.append({"type": "message", "role": "assistant", "content": m.content})  # R-4
                 for tc in m.tool_calls:  # R-5: the model's own function_call items, arguments as a JSON string
@@ -126,6 +129,8 @@ class OpenAIResponsesWire:
                     raise WireError("duplicate call_id in one response")  # results could not be paired unambiguously
                 calls.append(ToolCallRequest(cid, name, args))  # untrusted; the investigator validates and parses
             elif kind == "reasoning":  # R-10: opaque; returned to the provider on the next turn
+                if not _is_reasoning_item(item):
+                    raise WireError("reasoning item without its opaque payload")  # store=false: R-10 says it is present
                 replay.append(item)
             else:
                 raise WireError("unexpected output item type")  # no other tools are enabled
@@ -147,3 +152,16 @@ class OpenAIResponsesWire:
             return False
         err = doc["error"]
         return err.get("code") in PERMANENT_429_CODES or err.get("type") in PERMANENT_429_TYPES
+
+
+def _is_reasoning_item(item: Any) -> bool:
+    """R-10: a provider-issued reasoning item. With `store: false` it carries `encrypted_content` (opaque; never
+    decoded, rebuilt or redacted here). Only such items may travel in the unredacted replay channel."""
+    return (
+        isinstance(item, dict)
+        and item.get("type") == "reasoning"
+        and isinstance(item.get("id"), str)
+        and bool(item["id"])
+        and isinstance(item.get("encrypted_content"), str)
+        and bool(item["encrypted_content"])
+    )
