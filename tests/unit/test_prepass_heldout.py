@@ -111,10 +111,11 @@ def test_install_failure_then_missing_module_cascade_still_one_root() -> None:
     assert len(res.primaries) == 1 and [c.module for c in res.cascades] == ["zeta"]
 
 
-# ------------------------------------------------------------------ counterexamples (not handled by the A-04 change)
+# ------------------------------------------------------------------ former counterexamples
+# Recorded as strict xfails in Phase 51. They INFORMED the Phase 52 change, so they no longer count as held-out
+# evidence for it (the frozen Phase 52 evaluation set does).
 
 
-@pytest.mark.xfail(strict=True, reason="npm prints `code ERESOLVE` and an ERESOLVE summary line: two primaries today")
 def test_npm_eresolve_block_is_one_primary() -> None:
     out = log(
         "npm error code ERESOLVE",
@@ -124,7 +125,6 @@ def test_npm_eresolve_block_is_one_primary() -> None:
     assert len(primaries(("npm ci", out))) == 1
 
 
-@pytest.mark.xfail(strict=True, reason="pip ResolutionImpossible prints its own pair of lines; not folded by A-04")
 def test_pip_resolution_impossible_pair_is_one_primary() -> None:
     out = log(
         "ERROR: Cannot install theta==1.0 and iota==2.0 because these package versions have conflicting dependencies.",
@@ -133,7 +133,8 @@ def test_pip_resolution_impossible_pair_is_one_primary() -> None:
     assert len(primaries((PIP, out))) == 1
 
 
-def test_uv_resolution_failure_is_not_recognised_as_an_installer_error() -> None:
-    """Recorded, not asserted as desired: uv's "No solution found" block yields no installer candidate."""
+def test_uv_resolution_failure_is_recognised_as_an_installer_error() -> None:
+    """Phase 51 recorded this as unrecognised; Phase 52 recognises uv's "No solution found" report."""
     out = log("  × No solution found when resolving dependencies:", "  ╰─▶ Because kappa==9 was not found, …")
-    assert all("install" not in m.lower() for m in primaries(("uv sync", out)))
+    got = primaries(("uv sync", out))
+    assert len(got) == 1 and "No solution found" in got[0]
