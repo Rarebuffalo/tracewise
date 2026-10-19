@@ -156,9 +156,12 @@ def test_usage_and_audit_are_content_free(pool) -> None:  # type: ignore[no-unty
 
 
 def test_short_error_redacts_and_caps() -> None:
-    e = RuntimeError("401 for token ghs_" + "A" * 36 + " " + "x" * 1000)
+    from tracewise.jobs.queue import RetryableError
+
+    e = RetryableError("401 for token ghs_" + "A" * 36 + " " + "x" * 1000)  # a Tracewise exception: message kept
     s = repo.short_error(e)
     assert "ghs_" not in s and len(s) == 500
+    assert repo.short_error(RuntimeError("401 for token ghs_" + "A" * 36)) == "RuntimeError"  # foreign: class only
 
 
 def test_migration_0002_roundtrip_and_new_state(pg, owner) -> None:  # type: ignore[no-untyped-def]
@@ -234,3 +237,44 @@ def test_short_error_never_copies_row_or_input_content(pg, owner) -> None:  # ty
         v_err = e
     s2 = repo.short_error(v_err)
     assert "INPUT_CONTENT_MARKER_8" not in s2 and "validation error" in s2 and "n" in s2
+
+
+def test_short_error_has_no_bypass_through_primary_messages_keys_or_foreign_exceptions(owner) -> None:  # type: ignore[no-untyped-def]
+    """Phase 43 (P-5 incomplete): PostgreSQL primary messages can quote input ('invalid input syntax for type
+    integer: "..."'), pydantic locations echo input-derived keys, and arbitrary exception text is unbounded content.
+    Stored error text must depend only on SQLSTATE/schema identifiers, pydantic's fixed error codes, or Tracewise's
+    own controlled messages."""
+    import pydantic
+
+    from tracewise.jobs.queue import PermanentError
+
+    leaks: list[str] = []
+    for sql, mark in (("SELECT %s::int", "PG_MARK_A"), ("SELECT %s::uuid", "PG_MARK_C")):
+        try:
+            owner.execute(sql, (mark,))
+        except psycopg.Error as e:
+            s = repo.short_error(e)
+            assert "sqlstate 22" in s  # still says what kind of failure it was
+            leaks += [mark] if mark in s else []
+
+    class Strict(pydantic.BaseModel):
+        model_config = pydantic.ConfigDict(extra="forbid")
+        a: int = 0
+
+    class D(pydantic.BaseModel):
+        m: dict[str, int]
+
+    for model, data, mark in ((Strict, {"KEY_MARK_D": 1}, "KEY_MARK_D"), (D, {"m": {"KEY_MARK_E": "x"}}, "KEY_MARK_E")):
+        try:
+            model.model_validate(data)
+        except pydantic.ValidationError as e:
+            s = repo.short_error(e)
+            assert "validation error" in s and ("extra_forbidden" in s or "int_parsing" in s)
+            leaks += [mark] if mark in s else []
+    for exc, mark in ((KeyError("RAW_MARK_F"), "RAW_MARK_F"), (ValueError("snippet RAW_MARK_G"), "RAW_MARK_G")):
+        s = repo.short_error(exc)
+        assert s == type(exc).__name__
+        leaks += [mark] if mark in s else []
+    assert leaks == []
+    assert repo.short_error(PermanentError("invalid analysis job payload")) == "invalid analysis job payload"  # ours: kept
+    assert repo.short_error("cancelled_uninstalled", 200) == "cancelled_uninstalled"  # caller reason codes: kept
