@@ -62,6 +62,27 @@ def failure(head_sha: str, run_id: int = 55, repo_id: int = 7, name: str = "acme
     }
 
 
+from tests.db.test_privacy_flow import ALL, NEEDLES  # noqa: E402 - synthetic secret markers
+
+
+def plant_log_secrets(w: World) -> None:
+    """Synthetic secrets on the failing assertion line of the workflow log (inside the stored excerpt window)."""
+    import re as _re
+
+    blob = _re.compile(r"^//productionresultssa1\.blob\.core\.windows\.net/logs/101\.txt$")
+    original = next(h for m, p, h in w.gh.routes if m == "GET" and p.pattern == blob.pattern)
+    w.gh.routes.insert(
+        0,
+        (
+            "GET",
+            blob,
+            lambda req: httpx.Response(
+                200, text=original(req).text.replace("E   assert 0.21 == 1.21", f"E   assert 0.21 == 1.21  {ALL}")
+            ),
+        ),
+    )
+
+
 def cli(module: str, *args: str, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(  # noqa: S603 - fixed interpreter and module
         [sys.executable, "-m", module, *args],
@@ -93,7 +114,9 @@ def tenant_audit(monkeypatch) -> Iterator[list[tuple[str, str]]]:  # type: ignor
 
 def test_local_operator_acceptance(pg, pool, tenant_pool, owner, server, tmp_path, head, tenant_audit) -> None:  # type: ignore[no-untyped-def]  # noqa: F811
     w = World(pool, owner, server, tmp_path / "ws", head)
-    model = Server(*b02_script(), *b02_script())  # two analysis attempts (the first one's publication fails)
+    plant_log_secrets(w)
+    # attempt 1: malformed model response (provider_failed → retry); attempt 2: publication fails; attempt 3: succeeds
+    model = Server(httpx.Response(200, content=b"{not json"), *b02_script(), *b02_script())
     model_client = httpx.Client(transport=httpx.MockTransport(model))
     closed: list[str] = []
 
@@ -138,15 +161,21 @@ def test_local_operator_acceptance(pg, pool, tenant_pool, owner, server, tmp_pat
 
         # 5-9. worker startup, claim, tenant-scoped evidence, diagnosis via the adapter, validation, publication,
         #      a transient publication failure, retry after a restart
-        w.state.fault("POST", "cr", 502)
         assert worker_main.main(["--once", "--worker-id", "op-1"], build=runtime) == 0
+        j1 = w.jobrow(jid)
+        assert j1["status"] == "retry_wait" and "provider_failed" in j1["last_error"] and w.state.writes == []
+        w.ready(jid)
+        w.state.fault("POST", "cr", 502)
+        assert worker_main.main(["--once", "--worker-id", "op-2"], build=runtime) == 0
         assert owner.execute("SELECT status FROM job").fetchone() == ("retry_wait",)
         w.ready(jid)
-        assert worker_main.main(["--once", "--worker-id", "op-2"], build=runtime) == 0
-        assert w.jobrow(jid)["status"] == "succeeded" and closed == ["op-1", "op-2"]
+        assert worker_main.main(["--once", "--worker-id", "op-2b"], build=runtime) == 0
+        assert w.jobrow(jid)["status"] == "succeeded" and closed == ["op-1", "op-2", "op-2b"]
         assert (w.state.count("POST", "cc"), w.state.count("POST", "cr")) == (1, 1)
         assert any(r.url.path.endswith("/actions/jobs/101/logs") for r in w.gh.requests)  # evidence stage ran
-        assert len(model.requests) == 4 and {str(r.url) for r in model.requests} == {TestWire.endpoint}
+        assert len(model.requests) == 5 and {str(r.url) for r in model.requests} == {TestWire.endpoint}
+        sent = "\n".join(r.content.decode() for r in model.requests)
+        assert [k for k, n in NEEDLES.items() if n in sent] == []  # AT-SEC-04 at the real adapter boundary
         prov, diag = owner.execute("SELECT provider, diagnosis FROM analysis").fetchone()
         assert prov == "fake" and any("assert 0.21 == 1.21" in pe["excerpt"] for pe in diag["primary_errors"])
         assert diag["status"] == "diagnosed" and diag["problem_location"]["line_start"] == 41  # validated, not abstained
@@ -157,6 +186,12 @@ def test_local_operator_acceptance(pg, pool, tenant_pool, owner, server, tmp_pat
         rep = cli("tracewise.ops", "report", env=sys_env)
         doc = json.loads(rep.stdout)
         assert rep.returncode == 0 and doc["analyses"]["by_outcome"] == {"diagnosed": 1} and doc["jobs"]["retried"] == 1
+        dump = "\n".join(
+            r[0]
+            for t in ("job", "analysis", "publication", "failure_signature", "webhook_delivery")
+            for r in owner.execute(f"SELECT to_jsonb(x)::text FROM {t} x")  # noqa: S608 - fixed table names
+        )
+        assert [k for k, n in NEEDLES.items() if n in dump + rep.stdout + rep.stderr] == []  # persistence boundary
         assert "acme" not in rep.stdout and SECRET not in rep.stdout + rep.stderr
 
         # 10. suspension and deletion through the web process
@@ -171,6 +206,7 @@ def test_local_operator_acceptance(pg, pool, tenant_pool, owner, server, tmp_pat
         # 13. graceful web shutdown and restart
         code, err = _stop(web)
         assert code in (0, -signal.SIGTERM) and "Application shutdown complete." in err and SECRET not in err
+        assert [k for k, n in NEEDLES.items() if n in err] == []  # logging boundary (web process)
         web, port = _web(sys_env)
         _wait_http(port, web)
         assert httpx.get(f"http://127.0.0.1:{port}/readyz").json() == {"status": "ready"}
