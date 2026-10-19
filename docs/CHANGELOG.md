@@ -1,5 +1,13 @@
 # Change Log
 
+## 2026-10-20 (ba): Phase 51 production-readiness closure (offline)
+
+- **Final-attempt publication (FS-ERR-1):** a GitHub retryable error on the genuine final attempt now publishes the "could not complete" notice when no analysis row exists for the run attempt, which proves nothing reached GitHub. The partial case (a surface attempted; a 5xx or timeout may have landed) is unchanged and recorded as owner decision **D-14**.
+- **A-04 held-out:** 12 independent checks pass. 2 strict-xfail counterexamples are recorded (npm ERESOLVE block, pip ResolutionImpossible pair); uv output is unrecognised. This supports the narrow pip rule only.
+- **CI:** `.github/workflows/ci.yml` is an offline gate (lint, strict typing, docs, truth lock, all non-live tests under `tests/netguard.py`). It is read-only, uses no secrets, and fails if any test is skipped. It has not run on GitHub (no remote).
+- **Operational evidence:** a pg_dump/pg_restore round trip keeps RLS, grants and isolation. The documented privilege matrix is checked against the catalogue (D-11 input; the app role's broad 0001 grants are recorded, not changed). The provisional alert rule is pinned with boundary cases.
+- LIVE-VALIDATION-PLAN: offline coverage per stage S0–S5. The benchmark is identical to Phase 50.
+
 ## 2026-10-20 (az): Phase 50 consolidated reliability, security, database and operations fixes
 
 - **A-04 (prepass):** one pip resolution failure is one primary. Benchmark-motivated, logged in BENCHMARK §8; needs a held-out case before it is quoted.
