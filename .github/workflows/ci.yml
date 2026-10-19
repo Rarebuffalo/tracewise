@@ -1,0 +1,61 @@
+# Offline quality gate (Phase 51). No secrets, no deployment, no live GitHub or model calls.
+# Runs the same gates as `make check` plus the slow tests, the network guard and the benchmark truth-lock check.
+# Live tests (`-m live`) and the OpenAI smoke harness are never run here.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      UV_PYTHON: "3.14"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Install Python and locked dependencies
+        run: |
+          uv python install 3.14
+          uv sync --locked
+
+      - name: Put the runner's PostgreSQL server binaries on PATH (the DB tests need initdb)
+        run: |
+          bin="$(ls -d /usr/lib/postgresql/*/bin | sort -V | tail -1)"
+          test -x "$bin/initdb"
+          echo "$bin" >> "$GITHUB_PATH"
+
+      - name: Lint and format
+        run: make lint
+
+      - name: Strict typing
+        run: make type
+
+      - name: Documentation consistency
+        run: make docs
+
+      - name: Benchmark truth lock
+        run: uv run python -m tracewise.bench verify
+
+      - name: Tests (slow included, live excluded) under the network guard; any skip fails the gate
+        run: |
+          set -o pipefail
+          uv run pytest -q -p no:cacheprovider -p tests.netguard -m "not live" -rs | tee pytest.out
+          if grep -Eq '[0-9]+ skipped' pytest.out; then
+            echo "tests were skipped (e.g. PostgreSQL binaries missing): the gate requires every test to run" >&2
+            exit 1
+          fi
