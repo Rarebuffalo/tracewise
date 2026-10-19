@@ -64,3 +64,14 @@ class Settings(BaseSettings):
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings()
+
+
+def invalid_fields(e: Exception) -> str:
+    """Names of the settings a validation error is about (upper-case env names), never their values."""
+    errors = getattr(e, "errors", None)
+    if callable(errors):
+        try:
+            return ", ".join(sorted({str(err.get("loc", ("?",))[0]).upper() for err in errors()})) or "unknown"
+        except Exception:
+            return "unreadable"
+    return type(e).__name__

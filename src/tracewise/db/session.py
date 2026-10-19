@@ -73,3 +73,41 @@ def require_tenant_plane(pool: ConnectionPool[Conn]) -> None:
     if row is None or row["rolsuper"] or row["rolbypassrls"] or row["owns_tables"]:
         role = row["rolname"] if row else "unknown"
         raise WrongDatabaseRole(f"tenant-plane pool uses role {role!r}, which is not subject to row-level security")
+
+
+def _role_facts(pool: ConnectionPool[Conn]) -> dict[str, object]:
+    with transaction(pool) as conn:
+        row = conn.execute(
+            """SELECT r.rolname, r.rolsuper, r.rolbypassrls,
+                      EXISTS (SELECT 1 FROM pg_class c WHERE c.relnamespace = 'public'::regnamespace
+                              AND c.relkind = 'r' AND c.relowner = r.oid) AS owns_tables
+               FROM pg_roles r WHERE r.rolname = current_user"""
+        ).fetchone()
+    return dict(row) if row else {"rolname": "unknown", "rolsuper": True, "rolbypassrls": False, "owns_tables": True}
+
+
+def require_system_plane(pool: ConnectionPool[Conn]) -> None:
+    """Fail closed if the system-plane pool is not a non-superuser, non-owner BYPASSRLS role.
+
+    With the tenant role here, row-level security would hide every job and delivery, and the worker would idle
+    silently forever. With the owner or a superuser, the process would run with more rights than it needs."""
+    f = _role_facts(pool)
+    if f["rolsuper"] or f["owns_tables"] or not f["rolbypassrls"]:
+        raise WrongDatabaseRole(f"system-plane pool uses role {f['rolname']!r}, which is not the BYPASSRLS system role")
+
+
+def schema_revision(pool: ConnectionPool[Conn]) -> str | None:
+    with transaction(pool) as conn:
+        row = conn.execute("SELECT version_num FROM alembic_version").fetchone()
+    return str(row["version_num"]) if row else None
+
+
+def require_schema_at(pool: ConnectionPool[Conn], revision: str) -> None:
+    """The process never migrates; it refuses to run on a schema other than the one it was built for."""
+    got = schema_revision(pool)
+    if got != revision:
+        raise SchemaMismatch(f"database schema is at {got!r}; this build needs {revision!r} (run migrations as the owner)")
+
+
+class SchemaMismatch(RuntimeError):
+    pass

@@ -14,6 +14,7 @@ dependencies = [
     "pyjwt[crypto]>=2.10",
     "pyyaml>=6.0",
     "sqlalchemy>=2.0",
+    "uvicorn>=0.30",
 ]
 
 [dependency-groups]

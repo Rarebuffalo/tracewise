@@ -18,12 +18,20 @@ def healthz() -> dict[str, str]:
 
 @router.get("/readyz")
 async def readyz(request: Request) -> JSONResponse:
-    def ping() -> None:
+    head = getattr(request.app.state, "schema_head", None)
+
+    def ping() -> bool:
         with transaction(request.app.state.pool, 2.0) as conn:
-            conn.execute("SELECT 1")
+            if head is None:
+                conn.execute("SELECT 1")
+                return True
+            row = conn.execute("SELECT version_num FROM alembic_version").fetchone()
+            return row is not None and row["version_num"] == head
 
     try:
-        await run_in_threadpool(ping)
+        ok = await run_in_threadpool(ping)
     except DatabaseUnavailable:
         return JSONResponse({"status": "unavailable"}, status_code=503)
+    if not ok:  # reachable, but not migrated to this build's schema: not ready (never migrates itself)
+        return JSONResponse({"status": "schema_mismatch"}, status_code=503)
     return JSONResponse({"status": "ready"})
