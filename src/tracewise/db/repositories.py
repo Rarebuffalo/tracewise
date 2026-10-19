@@ -205,12 +205,13 @@ def insert_workflow_run(
     event: str,
     conclusion: str,
 ) -> int:
-    """Idempotent on (repo, run, attempt); returns the row id either way."""
+    """Idempotent on (installation, repo, run, attempt) (0010: per installation, so a transferred repository's new
+    installation gets its own row); returns the row id either way."""
     row = conn.execute(
         """INSERT INTO workflow_run (installation_id, repo_id, github_run_id, run_attempt, workflow_id, head_sha,
                                      head_branch, head_repo_id, event, conclusion)
            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-           ON CONFLICT (repo_id, github_run_id, run_attempt) DO UPDATE SET conclusion = workflow_run.conclusion
+           ON CONFLICT (installation_id, repo_id, github_run_id, run_attempt) DO UPDATE SET conclusion = workflow_run.conclusion
            RETURNING id""",
         (installation_id, repo_id, run_id, attempt, workflow_id, head_sha, head_branch, head_repo_id, event, conclusion),
     ).fetchone()
@@ -218,10 +219,12 @@ def insert_workflow_run(
     return int(row["id"])
 
 
-def find_workflow_run(conn: Conn, repo_id: int, run_id: int, attempt: int) -> int | None:
+def find_workflow_run(conn: Conn, installation_id: int, repo_id: int, run_id: int, attempt: int) -> int | None:
+    """The installation's own row. Explicit even under RLS, so a system-plane caller can never pick up another
+    installation's row for the same run after a repository transfer."""
     row = conn.execute(
-        "SELECT id FROM workflow_run WHERE repo_id = %s AND github_run_id = %s AND run_attempt = %s",
-        (repo_id, run_id, attempt),
+        "SELECT id FROM workflow_run WHERE installation_id = %s AND repo_id = %s AND github_run_id = %s AND run_attempt = %s",
+        (installation_id, repo_id, run_id, attempt),
     ).fetchone()
     return int(row["id"]) if row else None
 
@@ -335,6 +338,11 @@ def check_run_key(repo_id: int, run_id: int) -> str:
     return f"{repo_id}:{run_id}"
 
 
+class PublicationNotVisible(Exception):
+    """The reservation exists but this transaction cannot see it (it should be impossible with per-installation
+    keys). A permanent condition for the job, never a retry loop and never an AssertionError."""
+
+
 def reserve_publication(
     conn: Conn, *, installation_id: int, analysis_id: int, surface: Surface, target_key: str
 ) -> dict[str, Any]:
@@ -345,13 +353,15 @@ def reserve_publication(
     """
     conn.execute(
         """INSERT INTO publication (installation_id, analysis_id, surface, target_key) VALUES (%s, %s, %s, %s)
-           ON CONFLICT (surface, target_key) DO NOTHING""",
+           ON CONFLICT (installation_id, surface, target_key) DO NOTHING""",
         (installation_id, analysis_id, surface, target_key),
     )
     row = conn.execute(
-        "SELECT * FROM publication WHERE surface = %s AND target_key = %s FOR UPDATE", (surface, target_key)
+        "SELECT * FROM publication WHERE installation_id = %s AND surface = %s AND target_key = %s FOR UPDATE",
+        (installation_id, surface, target_key),
     ).fetchone()
-    assert row is not None
+    if row is None:
+        raise PublicationNotVisible(surface)
     return row
 
 
@@ -402,7 +412,7 @@ def record_signature(
         """INSERT INTO failure_signature
                (repo_id, fingerprint, installation_id, normalized_message, first_seen_run, last_seen_run)
            VALUES (%s, %s, %s, %s, %s, %s)
-           ON CONFLICT (repo_id, fingerprint) DO UPDATE SET
+           ON CONFLICT (installation_id, repo_id, fingerprint) DO UPDATE SET
                occurrences = failure_signature.occurrences
                    + CASE WHEN failure_signature.last_seen_run = EXCLUDED.last_seen_run THEN 0 ELSE 1 END,
                last_seen_run = EXCLUDED.last_seen_run, last_seen_at = now()
