@@ -1,5 +1,13 @@
 # Change Log
 
+## 2026-10-19 (aj): Phase 23 T-1001 privacy notice draft and data inventory
+
+- `docs/DATA-INVENTORY.md`: what enters the system, what is persisted (field by field, with bounds, redaction and retention), what leaves it (GitHub surfaces, the model provider, logs), and what is never stored. Each row names its code and tests. Retention marked *(D-12)* is pending.
+- `docs/PRIVACY-NOTICE-DRAFT.md`: a **draft** that describes only implemented behaviour. It has placeholders for the owner, contact, legal basis and hosting, and no invented commitments. Open items: provider and model family (AT-SEC-13 unmet), provider terms (C-8), D-12, P-2, hosting, the request process, and the pilot terms template (not drafted).
+- **P-1 fixed (defect found by the inventory):** `problem_snippet` and `fix.replacement.new_text` were stored unredacted. Both are now redacted at validation, with a regression test that failed before the fix.
+- **P-2** (source sent to the provider unredacted) and **P-3** (4000-char snippet vs the 2 KB excerpt rule) are recorded for review.
+- T-1001 is now **partial: draft only**.
+
 ## 2026-10-19 (ai): Phase 21 final offline release-readiness audit
 
 - Re-audit recorded in SECURITY-AUDIT §4. No new defects.

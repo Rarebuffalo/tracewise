@@ -296,3 +296,38 @@ def test_validated_diagnosis_detects_alteration() -> None:
         vd.verify()
     with pytest.raises(Exception):  # noqa: B017 - pydantic frozen model
         vd.diagnosis.root_cause = "x"  # type: ignore[misc]
+
+
+def test_stored_snippet_and_replacement_are_redacted() -> None:
+    """Phase 23 privacy audit (P-1): the system-copied source snippet and the model's replacement text are part of
+    the persisted diagnosis; FS-SEC-3 allows only redacted excerpts, so a credential on the cited lines must not
+    survive into the stored document (the rendered report was already redacted)."""
+    import json as _json
+
+    from tests.investigate.factory import B02_ANSWER, B02_FILES, PRICING, answer, evidence, tool
+    from tracewise.analysis.diagnose import diagnose
+    from tracewise.investigate.fake import ScriptedProvider
+
+    planted = "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+    lines = PRICING.splitlines(keepends=True)
+    lines[39] = lines[39].rstrip("\n") + f"  # token {planted}\n"  # line 40, inside the cited window 40-41
+    files = {**B02_FILES, "coffee_shop/pricing.py": "".join(lines)}
+    ans = {
+        **B02_ANSWER,
+        "problem_location": {"path": "coffee_shop/pricing.py", "line_start": 40, "line_end": 41},
+        "fix": {
+            **B02_ANSWER["fix"],
+            "replacement": {
+                **B02_ANSWER["fix"]["replacement"],
+                "new_text": f"    return round(subtotal_ * (1 + TAX_RATE), 2)  # {planted}",
+            },
+        },
+    }
+    vd = diagnose(
+        evidence(files=files),
+        ScriptedProvider([tool("read_file", path="coffee_shop/pricing.py", start=30, end=41), answer(**ans)]),
+    )
+    d = vd.diagnosis
+    assert d.problem_snippet is not None and "return round" in d.problem_snippet  # the snippet is still there ...
+    stored = _json.dumps(d.model_dump(mode="json"))
+    assert planted not in stored  # ... but never with the credential
