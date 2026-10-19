@@ -1,5 +1,11 @@
 # Change Log
 
+## 2026-10-19 (au): Phase 44 decision gate (no approvals recorded)
+
+- **B-02 resolved (documentation only):** the catalogue row keeps doc-04's literal, which `scripts/check_docs.py` enforces, and now points to §7, where the replica's `1.21` is recorded. The earlier advice to edit the literal was withdrawn, because it would have broken the fidelity check. No benchmark behaviour, truth or fixture changed.
+- **B-04 wording corrected:** the canonical sources share a floor (no *high* without attempt metadata) but differ on the replacement (≤ medium in BENCHMARK §2; inconclusive in AT-DX-11). Owner choice needed; no behaviour change.
+- `docs/DECISION-IMPLEMENTATION-PLAN.md`: a conditional per-decision plan (files, tests, behaviour change, commit boundary).
+
 ## 2026-10-19 (at): Phase 43 final independent review
 
 - **P-5b fixed:** stored error text could still carry input through PostgreSQL primary messages, pydantic locations, or foreign exception text. It now depends only on SQLSTATE and schema identifiers, fixed pydantic codes, Tracewise's own messages, or the class name.
