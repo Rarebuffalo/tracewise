@@ -1,5 +1,31 @@
 # Change Log
 
+## 2026-10-19 (ap): Phases 29–33 privacy audit, specification reconciliation and provider boundary
+
+### P-1 independently verified
+
+`tests/db/test_privacy_flow.py` plants 8 secret formats at every entry point and asserts on database, logs and GitHub bodies. A mutation check confirmed the test catches a regression.
+
+### Fixes (regression tests written first)
+
+| ID | Fix |
+|---|---|
+| X-1 | Log excerpts are capped at 2000 UTF-8 bytes (FS-SEC-3 "≤2 KB"; previously 2048 characters) |
+| L-1 | A download cut by the 512 MB cap is now flagged `log_truncated` (FS-LOG-4) |
+| C-CFG-1 | `LOG_MAX_BYTES_PER_JOB` is wired as the per-job retention budget |
+
+### New tests
+
+- `test_model_input_privacy.py`: AT-SEC-04 provider half; P-2 behaviour pinned.
+- `test_providers.py`: fake refused in local, staging and prod; openai refused in every environment; no fallback.
+
+### Documentation
+
+- `docs/DECISION-MEMOS.md`: P-2 options; P-3 (the log-excerpt half resolved, the snippet half open); C-CFG-1 resolution.
+- `docs/DATA-INVENTORY.md` §5: the stage-by-stage privacy data flow.
+- Reconciled: OPERATIONS §9 (no longer claims "no source stored"), the DEPLOYMENT-BLUEPRINT environment inventory, IMPLEMENTATION-PLAN, and the privacy notice (P-3 pending).
+- MODEL-ADAPTER: no C-item is established by repository evidence.
+
 ## 2026-10-19 (ao): Phase 28 final offline gate
 
 - Full suite (slow included) under the network guard: **670 passed, 0 external attempts**.

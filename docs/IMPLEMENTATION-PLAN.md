@@ -79,7 +79,7 @@ tracewise/                       repo root (~/tracewise)
 | `OPENAI_API_KEY` | Only when `LLM_PROVIDER=openai` (T-605 onward); local env only | no (offline) |
 | `LLM_MODEL` | Chosen by T-605 | no (offline) |
 | `LLM_PRICE_INPUT_PER_MTOK`, `LLM_PRICE_OUTPUT_PER_MTOK` | USD per million tokens, for `analysis.cost_usd` (T-706). Unset → cost NULL ("unpriced"); set from T-605 | no |
-| `INVESTIGATION_MAX_TOOL_CALLS` (12), `INVESTIGATION_TIMEOUT_S` (120), `LOG_MAX_BYTES_PER_JOB` (2 MB; **currently not wired**: C-CFG-1), `REPORT_MAX_CHARS` (60000) | Limits | no |
+| `INVESTIGATION_MAX_TOOL_CALLS` (12), `INVESTIGATION_TIMEOUT_S` (120), `LOG_MAX_BYTES_PER_JOB` (2 MB: FS-LOG-4 bytes **retained** per job; the download itself is capped separately at 512 MB per log and flagged `log_truncated` when cut), `REPORT_MAX_CHARS` (60000) | Limits | no |
 
 **Removed vs S1:** `GITHUB_TOKEN_LAB` (personal PAT) and all `gh` CLI usage.
 

@@ -36,6 +36,8 @@ Nothing below is assumed. Each item must come from the **official API reference*
 | C-8 | Auth header format; organisation/project headers; data-retention and training settings, and any zero-retention option, needed by the privacy notice | `WireCodec.auth_headers`; privacy notice §4 | Header golden test; key never logged (exists) | Yes (format only) | Account-level settings are configuration, not code: the owner confirms them |
 | C-9 | Model identifier (UD-3); per-token prices; context and output limits | `LLM_MODEL`; `AdapterConfig`; `LLM_PRICE_*`; `InvestigationLimits` | Configuration validation; the cost computation test (exists) | Yes | Prices and limits for the chosen model are confirmed at evaluation time (T-605) |
 
+**Repository evidence check (Phase 32):** none of C-1 to C-9 is established by repository evidence. The recorded documentation under `research/` is GitHub-only, and nothing about OpenAI is recorded. Every item still needs the official reference. Items C-1 to C-7 can then be tested offline with a fake transport against recorded examples. C-8 (account settings) and C-9 (prices and limits) need the owner's confirmation, and their real-world behaviour needs the authorised T-605 calls.
+
 **What unblocks the codec (no API key needed):**
 1. Your approval to obtain the official OpenAI API reference pages for the chosen API.
 2. Record them under `research/` as dated evidence, including example requests and responses for text, tool calls, refusals, errors and usage.
