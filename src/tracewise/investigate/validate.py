@@ -58,6 +58,18 @@ from tracewise.investigate.schema import ModelDraft
 from tracewise.prepass.sanitize import redact
 
 MAX_EXCERPT_LINES = 15
+EXCERPT_MAX_BYTES = 2000  # FS-SEC-3 "redacted excerpts ≤2 KB": bytes, ≤2 KB under the 1000 and the 1024 reading
+
+
+def excerpt_of(text: str) -> str:
+    """Redact, then cut to EXCERPT_MAX_BYTES of UTF-8 without splitting a character (Phase 30)."""
+    out = redact(text)
+    raw = out.encode("utf-8")
+    if len(raw) <= EXCERPT_MAX_BYTES:
+        return out
+    return raw[:EXCERPT_MAX_BYTES].decode("utf-8", errors="ignore")
+
+
 MAX_SNIPPET_LINES = 15
 _URL = re.compile(r"(?i)\b(?:https?|ftp|file|javascript|data|vbscript):[^\s<>\"')\]]*|\bwww\.[^\s<>\"')\]]+")
 _MD_LINK = re.compile(r"\[([^\]\n]{0,200})\]\([^)\n]{0,2000}\)")
@@ -189,7 +201,7 @@ def _primary_errors(ev: Evidence, flags: list[str]) -> list[PrimaryError]:
         if text is None or (log is not None and text != log.text(start, end)):
             flags.append("primary_error_unresolved")
             continue
-        excerpt = redact(text)[:2048]
+        excerpt = excerpt_of(text)
         out.append(
             PrimaryError(
                 log_ref=LogRef(job_id=c.job_id, line_start=start, line_end=end),
