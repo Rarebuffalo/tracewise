@@ -104,6 +104,7 @@ def build_from_settings(st: Settings, worker_id: str) -> Runtime:
             fetcher_factory=lambda: GitFetcher(),
             limits=InvestigationLimits.from_settings(st),
             report_max_chars=st.report_max_chars,
+            log_max_bytes=st.log_max_bytes_per_job,
             price_input_per_mtok=st.llm_price_input_per_mtok,
             price_output_per_mtok=st.llm_price_output_per_mtok,
         )

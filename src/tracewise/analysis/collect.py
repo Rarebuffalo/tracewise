@@ -28,7 +28,7 @@ from tracewise.context.trigger import TriggerDiff, compute_trigger_diff
 from tracewise.contracts import AnalysisJob
 from tracewise.github import errors as gh_err
 from tracewise.github.client import RepoClient
-from tracewise.prepass.envelope import JobInfo
+from tracewise.prepass.envelope import DEFAULT_MAX_BYTES, JobInfo
 from tracewise.prepass.primary import PrepassResult, run_prepass
 
 log = logging.getLogger(__name__)
@@ -71,6 +71,7 @@ class _LogStream:
 
     def __init__(self, rc: RepoClient, job_id: int) -> None:
         self.rc, self.job_id = rc, job_id
+        self.truncated = False
         self.error: Exception | None = None
         self.lines: Iterator[str] | None = None
 
@@ -81,6 +82,7 @@ class _LogStream:
         assert self.lines is not None
         try:
             yield from self.lines
+            self.truncated = bool(getattr(self.lines, "truncated", False))
         except (gh_err.NotFound, gh_err.Gone, gh_err.GitHubRetryable, gh_err.UnsafeRedirect) as e:
             self.error = e
 
@@ -95,6 +97,7 @@ def collect_evidence(
     max_jobs: int = MAX_JOBS,
     code_limits: Limits | None = None,
     tool_limits: ToolLimits | None = None,
+    log_max_bytes: int = DEFAULT_MAX_BYTES,
 ) -> Iterator[Evidence]:
     if rc.scope != "analysis" or rc.repo_id != job.repo_id:
         raise ValueError("evidence collection needs the analysis-scope client of the run's repository")
@@ -119,7 +122,10 @@ def collect_evidence(
         streams.append((j, s))
     prepass: PrepassResult | None = None
     if status == "ok" and streams:
-        prepass = run_prepass((j, s) for j, s in streams)
+        prepass = run_prepass(((j, s) for j, s in streams), max_bytes=log_max_bytes)  # FS-LOG-4 retention budget
+        for _, s in streams:  # FS-LOG-4: a download cut by the cap must be flagged, whatever was retained
+            if s.truncated and s.job_id in prepass.logs:
+                prepass.logs[s.job_id].truncated = True
         missing += [s.job_id for _, s in streams if s.error is not None]
     if status == "ok" and len(missing) == len(selected) and selected:
         status, prepass = "logs_unavailable", None  # metadata only; never a guessed cause (FS-LOG-3)

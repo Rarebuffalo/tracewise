@@ -173,3 +173,47 @@ def test_no_failed_jobs_and_scope_guard(server, ws_root, head) -> None:  # type:
     other = RepoClient(http, gh.provider(http), installation_id=9, repo_id=8, full_name="acme/other", scope="analysis")
     with pytest.raises(ValueError), collect_evidence(job, other, fetcher=None):
         pass
+
+
+def test_download_cap_truncation_is_reported_as_log_truncated(server, ws_root, head) -> None:  # type: ignore[no-untyped-def]
+    """Phase 31 (FS-LOG-4 'set log_truncated'): a log cut by the DOWNLOAD cap must never look complete, even when
+    everything that was received fits the retention budget."""
+    gh, _, job = setup(server, head)
+    full = "\n".join(api_job(101, "Tests (Python 3.11)", "failure", fixture("pytest_b02.out"))[1]).encode()
+    http = gh.http(max_log_bytes=int(len(full) * 0.7))  # the download stops 70% of the way through
+    rc = RepoClient(http, gh.provider(http), installation_id=9, repo_id=7, full_name="acme/coffee", scope="analysis")
+    with collect_evidence(job, rc, fetcher=make_fetcher(server, ws_root)) as ev:
+        assert ev.status == "ok" and ev.prepass is not None
+        assert ev.log_truncated  # was False: the cut was invisible to the pre-pass
+
+
+def test_retention_budget_per_job_is_configurable(server, ws_root, head) -> None:  # type: ignore[no-untyped-def]
+    """Phase 31 (C-CFG-1): LOG_MAX_BYTES_PER_JOB is FS-LOG-4's '≤2 MB per job' retention budget."""
+    _, rc, job = setup(server, head)
+    with collect_evidence(job, rc, fetcher=make_fetcher(server, ws_root), log_max_bytes=1024) as ev:
+        assert ev.prepass is not None
+        kept = sum(len(t.encode()) + 1 for r in ev.prepass.logs.values() for t in r.lines.values())
+        assert kept <= 1024 and ev.log_truncated
+
+
+@pytest.mark.parametrize(
+    ("filler_lines", "expect_truncated", "expect_primary"),
+    [
+        (100, False, True),  # ~10 KB: complete
+        (40_000, True, True),  # ~3 MB: under the 8 MB download cap, over the 2 MB retention budget; error still kept
+        (270_000, True, False),  # ~20 MB: the 8 MB download cap cuts before the error
+    ],
+)
+def test_synthetic_logs_of_several_sizes(server, ws_root, head, filler_lines, expect_truncated, expect_primary) -> None:  # type: ignore[no-untyped-def]
+    """Phase 34: bounded handling at the real collection path (download cap 8 MB here; retention 2 MB per job)."""
+    filler = "".join(f"progress {i:07d} building module {'x' * 52}\n" for i in range(filler_lines))
+    out = filler + fixture("pytest_b02.out")
+    gh, _, job = setup(server, head, jobs=[api_job(101, "Tests (Python 3.11)", "failure", out)])
+    http = gh.http(max_log_bytes=8 * 1024 * 1024)
+    rc = RepoClient(http, gh.provider(http), installation_id=9, repo_id=7, full_name="acme/coffee", scope="analysis")
+    with collect_evidence(job, rc, fetcher=make_fetcher(server, ws_root)) as ev:
+        assert ev.status == "ok" and ev.prepass is not None
+        kept = sum(len(t.encode()) + 1 for r in ev.prepass.logs.values() for t in r.lines.values())
+        assert kept <= 2 * 1024 * 1024
+        assert ev.log_truncated is expect_truncated
+        assert bool(ev.prepass.primaries) is expect_primary
