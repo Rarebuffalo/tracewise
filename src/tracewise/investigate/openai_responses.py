@@ -103,7 +103,7 @@ class OpenAIResponsesWire:
             raise WireError("not a response object")
         status = doc.get("status")
         if status != "completed":  # R-11 statuses; R-13 incomplete (e.g. max_output_tokens): fail closed
-            raise WireError(f"response status {str(status)[:20]!r}")
+            raise WireError("response status is not completed")  # never quote the document (WireError contract)
         output = doc.get("output")
         if not isinstance(output, list):
             raise WireError("output is not a list")

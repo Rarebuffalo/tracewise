@@ -17,9 +17,9 @@ What this module guarantees, independent of any vendor (all verified offline wit
 * Error redaction: messages carry the provider, the HTTP status and an error class — never the response body,
   request content, headers or the key.
 
-The vendor wire format lives in a `WireCodec`. **No OpenAI codec ships**: the repository holds no recorded
-OpenAI API contract, and guessing one would be unverifiable (docs/MODEL-ADAPTER.md lists exactly what must be
-recorded before it is written). `LLM_PROVIDER=openai` therefore still refuses to start.
+The vendor wire format lives in a `WireCodec`. The only vendor codec is `openai_responses.OpenAIResponsesWire`,
+written against the recorded contract and tested offline only. Product code never constructs `HTTPProvider`, and
+`LLM_PROVIDER=openai` still refuses to start (docs/MODEL-ADAPTER.md §2b).
 """
 
 from __future__ import annotations
