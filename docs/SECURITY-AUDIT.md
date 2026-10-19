@@ -70,3 +70,18 @@ No change was made to the file.
 | Grant dump on a freshly migrated disposable cluster | SA-1 found |
 | `pytest tests/db/test_db_security.py tests/db/test_rls.py tests/db/test_schema_repositories.py` | All pass |
 | Full suite plus `make check` | See the CHANGELOG entry for this audit |
+
+## 4. Phase 21 re-audit (2026-10-19, after the runnable runtime and model adapter core)
+
+| Check | Result |
+|---|---|
+| SECURITY DEFINER purge: `search_path = pg_catalog, public, pg_temp`; guard over every definer function; EXECUTE only for the owner and the system role | Pass (`test_db_security.py`, `test_fresh_install.py`, `test_retention.py::test_definer_function_ignores_caller_temp_tables`) |
+| Role template hardening (no TEMP, no CREATE for PUBLIC); fresh install; full downgrade and upgrade with an identical catalogue | Pass (`test_fresh_install.py`) |
+| Tenant role cannot bypass RLS. The system role is confined: the worker refuses a non-BYPASSRLS system URL, and the web process and worker refuse wrong roles. | Pass (`test_rls.py`, `test_process_entrypoints.py`) |
+| Scrubbing: nested fields, encoded URLs, Authorization, Bearer, cookies, signature parameters | Pass (`test_logging.py`) |
+| No secret in errors from startup, worker, provider, recovery and purge | Pass (`test_process_entrypoints.py`, `test_http_adapter.py`, `test_cli_entrypoints.py`) |
+| **No external network:** the whole suite (664 tests, including slow) was run under a session-wide socket guard that refuses any non-loopback, non-Unix connection | **0 attempts**. The guard was shown to fire on a probe. Subprocesses do not inherit it, but they reach only the database socket and loopback. |
+| New tracked secrets | None. The only credential-shaped literals are labelled test placeholders. |
+| Live validation plan | Not executed: there are no live-marked tests, and no request to github.com or a model vendor (guard above) |
+
+No new defects were found in Phase 21. The Phase 18–20 findings are recorded in the CHANGELOG: the test-harness token issue and the network-guard allowlist entry for the adapter.
