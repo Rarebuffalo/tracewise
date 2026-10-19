@@ -3,6 +3,7 @@ transaction boundaries belong to the caller so multi-table writes are atomic (FS
 
 from __future__ import annotations
 
+import re
 from decimal import Decimal
 from typing import Any, Literal
 
@@ -28,8 +29,15 @@ Surface = Literal["commit_comment", "pr_comment", "check_run"]
 def short_error(err: object, limit: int = 500) -> str:
     """Errors are stored redacted and capped; they must never carry tokens or log content.
 
-    Database and validation errors embed the offending data in their text (psycopg: `DETAIL: Failing row contains
-    (...)`; pydantic: `input_value=...`), so only their class-level message is kept (P-5)."""
+    Stored text depends only on things input cannot control (P-5, completed in Phase 43):
+    * database errors: class, SQLSTATE and schema identifiers (table, column, constraint). The primary message is
+      NOT kept: PostgreSQL quotes input in some of them ('invalid input syntax for type integer: "..."'), and
+      `DETAIL` carries failing-row values;
+    * validation errors: count, model name and pydantic's fixed error codes. Locations are NOT kept: extra keys and
+      dict keys come from the input;
+    * Tracewise's own exceptions: their message, which the code controls;
+    * plain strings: kept (callers pass their own reason codes);
+    * anything else: the class name only (an arbitrary exception's text is unbounded content)."""
     return redact(_content_free(err))[:limit]
 
 
@@ -37,13 +45,25 @@ def _content_free(err: object) -> str:
     import psycopg
     from pydantic import ValidationError
 
+    if isinstance(err, str):  # a reason code chosen by the caller (e.g. "cancelled_uninstalled"), not exception text
+        return err
     if isinstance(err, psycopg.Error):
-        primary = err.diag.message_primary if err.diag is not None else None
-        return f"{primary or type(err).__name__} [sqlstate {err.sqlstate or '?'}]"
+        d = err.diag
+        ids = [
+            f"{k}={v}"
+            for k, v in (("table", d.table_name), ("column", d.column_name), ("constraint", d.constraint_name))
+            if v and _IDENT.fullmatch(v)
+        ]
+        return f"{type(err).__name__} [sqlstate {err.sqlstate or '?'}]" + (f" {' '.join(ids)}" if ids else "")
     if isinstance(err, ValidationError):
-        fields = sorted({".".join(str(p) for p in e.get("loc", ())) for e in err.errors(include_input=False)})[:10]
-        return f"{err.error_count()} validation error(s) for {err.title}: {', '.join(fields)}"
-    return str(err)
+        kinds = sorted({str(e.get("type", "?")) for e in err.errors(include_input=False)})[:10]
+        return f"{err.error_count()} validation error(s) for {err.title}: {', '.join(kinds)}"
+    if type(err).__module__.startswith("tracewise."):
+        return str(err)
+    return type(err).__name__
+
+
+_IDENT = re.compile(r"[a-z_][a-z0-9_]{0,62}")
 
 
 # ------------------------------------------------------------------ deliveries
