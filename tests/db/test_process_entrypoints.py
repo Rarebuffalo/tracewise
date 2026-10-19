@@ -218,6 +218,29 @@ def _worker(env: dict[str, str], *args: str) -> subprocess.Popen[str]:
     )
 
 
+def _worker_to_file(env: dict[str, str], log_path: Any, *args: str) -> subprocess.Popen[str]:
+    f = open(log_path, "w")
+    return subprocess.Popen(  # noqa: S603
+        [sys.executable, "-m", "tracewise.worker", "--idle-sleep", "0.1", *args],
+        cwd=ROOT,
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=f,
+        text=True,
+    )
+
+
+def _wait_event(p: subprocess.Popen[str], log_path: Any, name: str, timeout: float = 30.0) -> None:
+    end = time.time() + timeout
+    while time.time() < end:
+        if f'"event": "{name}"' in Path(log_path).read_text():
+            return
+        if p.poll() is not None:
+            raise AssertionError(f"worker exited ({p.returncode}) before {name}")
+        time.sleep(0.05)
+    raise AssertionError(f"no {name} within {timeout}s")
+
+
 def _events(err: str) -> list[str]:
     out = []
     for line in err.splitlines():
@@ -268,16 +291,31 @@ def test_worker_with_unreachable_database_exits_1_without_leaking(pg, key_path, 
     assert p.returncode == 1 and "database unavailable" in err and "pw-should-not-leak" not in err
 
 
-def test_worker_starts_idles_and_stops_gracefully(pg, owner, key_path) -> None:  # type: ignore[no-untyped-def]
+def test_worker_starts_idles_and_stops_gracefully(pg, owner, key_path, tmp_path) -> None:  # type: ignore[no-untyped-def]
     before = _counts(owner)
-    p = _worker(_worker_env(pg, key_path))
-    time.sleep(2.0)
-    assert p.poll() is None, p.communicate()[1][-800:]
+    log_path = tmp_path / "worker.log"
+    p = _worker_to_file(_worker_env(pg, key_path), log_path)
+    _wait_event(p, log_path, "worker.started")
+    time.sleep(0.5)  # idle a few loops
+    assert p.poll() is None
     assert _counts(owner) == before  # idle: no writes
-    code, err = _stop(p, signal.SIGTERM)
-    assert code == 0, err[-800:]
-    ev = _events(err)
-    assert ev.index("worker.started") < ev.index("worker.stopping") < ev.index("worker.stopped")
+    p.send_signal(signal.SIGTERM)
+    assert p.wait(timeout=20) == 0
+    ev = _events(Path(log_path).read_text())
+    assert ev.index("worker.starting") < ev.index("worker.started") < ev.index("worker.stopping") < ev.index("worker.stopped")
+
+
+def test_sigterm_during_startup_is_graceful(pg, owner, key_path, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """Phase 41: handlers are installed before connecting/validating, so an early stop exits 0 without claiming."""
+    owner.execute("INSERT INTO job (kind, installation_id, dedupe_key, payload) VALUES ('no_such_kind', 9, 'early', '{}')")
+    log_path = tmp_path / "worker.log"
+    p = _worker_to_file(_worker_env(pg, key_path), log_path)
+    _wait_event(p, log_path, "worker.starting")
+    p.send_signal(signal.SIGTERM)  # while it is still validating roles, schema and keys
+    assert p.wait(timeout=30) == 0
+    ev = _events(Path(log_path).read_text())
+    assert "worker.stopped" in ev and "job.claimed" not in ev
+    assert owner.execute("SELECT status, attempts FROM job").fetchone() == ("queued", 0)  # nothing was claimed
 
 
 def test_worker_records_a_permanent_failure_once_and_does_not_spin(pg, owner, key_path) -> None:  # type: ignore[no-untyped-def]

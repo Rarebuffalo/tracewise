@@ -18,7 +18,6 @@ import re
 import signal
 import subprocess
 import sys
-import time
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -27,7 +26,7 @@ import psycopg
 import pytest
 
 from tests.db.test_fresh_install import SCRIPT, Cluster
-from tests.db.test_process_entrypoints import ROOT, _env, _stop, _wait_http, _web
+from tests.db.test_process_entrypoints import ROOT, _env, _stop, _wait_event, _wait_http, _web, _worker_to_file
 from tests.github_fake import test_key_pem as _key_pem
 from tracewise.config import Settings
 from tracewise.db.migrate import upgrade
@@ -102,18 +101,11 @@ def test_documented_workflow_on_a_clean_environment(clean, tmp_path) -> None:  #
     )
 
     # Worker: role validation passes on the template's roles; idle; graceful stop.
-    w = subprocess.Popen(
-        [sys.executable, "-m", "tracewise.worker", "--idle-sleep", "0.1"],
-        cwd=ROOT,
-        env=worker_env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    time.sleep(2.0)
-    assert w.poll() is None, w.communicate()[1][-600:]
-    code, err = _stop(w, signal.SIGTERM)
-    assert code == 0 and '"worker.stopped"' in err
+    wlog = tmp_path / "worker.log"
+    w = _worker_to_file(worker_env, wlog)
+    _wait_event(w, wlog, "worker.started")  # role validation passed on the template's roles
+    w.send_signal(signal.SIGTERM)
+    assert w.wait(timeout=20) == 0 and '"worker.stopped"' in wlog.read_text()
     # Invalid role assignment on the clean install: refused, no credential in the output.
     bad = subprocess.run(
         [sys.executable, "-m", "tracewise.worker", "--once"],
