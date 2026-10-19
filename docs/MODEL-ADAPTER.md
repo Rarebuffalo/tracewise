@@ -109,6 +109,28 @@ secret-shaped value in a source file and checks the serialised bytes. Pattern-ba
 change `providers.py` to construct `HTTPProvider(OpenAIResponsesWire(), …)` and update the structural test
 `test_no_code_path_can_reach_a_real_model_today` deliberately; then the T-605 evaluation. There is no fallback to `fake`.
 
+## 2c. Phase 47: gap classification and the smoke harness
+
+Each open question is classified using only the recorded contract. "Fails closed" means the investigator reports
+`provider_failed` (inconclusive), never a diagnosis.
+
+| Gap or item | Requirement (recorded) | Implementation | Test | Class | What the smoke run must establish |
+|---|---|---|---|---|---|
+| G-1 incomplete reasons | R-13: `incomplete_details.reason`; only `max_output_tokens` named | Any status other than `completed` → `WireError` | `test_decode_fails_closed_*[incomplete]`; harness `incomplete` | Safe by failing closed; full list needs observation | Records `incomplete_reason` if one occurs |
+| G-2 error body | R-12: `error.code`, `error.type`, `error.param` named, no example | Tolerant read; documented quota codes and types → `ProviderQuotaError` (never retried); anything else on 429/5xx retryable within bounds; 401/403 permanent | `test_quota_429_*`, `test_rate_limit_429_*`, `test_overload_503_*`; harness `quota`, `rate_limited`, `auth` | Safe by failing closed; shape needs observation | Records error key names, `code` and `type` (no message) only if an error occurs |
+| G-3 / G-8 reasoning items | R-10: pass back reasoning items; with `store: false` they carry `encrypted_content` by default | Only reasoning items with `id` and `encrypted_content` are kept and replayed verbatim; otherwise fail closed | `test_reasoning_*`, `test_decode_refuses_reasoning_*`; harness `missing_encrypted_content` | Needs observation | Step 2: whether reasoning items appear, and whether `encrypted_content` is present |
+| G-5 call ids | R-5/R-6: pairing by `call_id`; no length documented | Exact ids; duplicate, missing or unpaired → fail closed | `test_ids_*`, `test_encode_refuses_*`; harness `pass` (an id longer than 64 characters) | Resolved offline for our side; real lengths need observation | Step 2: call id length; step 3: the pairing is accepted |
+| G-7 tools omitted on the final step | Not documented; R-9 offers `tool_choice: "none"` | `tools` omitted when `allow_tools` is false | harness `pass`, `final_step_rejects_without_tools` | Needs observation | Step 3 accepted (exit 0) or 400 (exit 7). If 400, fix in the codec with tests before T-605. |
+| `store: false` | R-3: `store` defaults to true | Always `false` | `test_encode_maps_*`; harness requests record `store` | Resolved (decision); account-level retention is C-8 | Nothing in code; the owner confirms account settings (A-4) |
+| Quota versus rate limit | R-12, R-14 | See G-2 | See G-2 | Resolved offline from R-12 | Only if it occurs |
+| Bounded rounds, time, retries | Ours (FS-DX-3) | `InvestigationLimits`; adapter `max_retries` ≤3 and deadline; the harness uses 0 retries and at most 3 requests | `test_loop*`, `test_http_adapter*`, harness budget test | Resolved offline | Nothing |
+| G-4 reachability | n/a | n/a | n/a | Needs observation | Exit 0 |
+| G-6 / C-9 model, limits, prices | not recorded | Configuration only | n/a | Owner decision and model information | Not established by the smoke run, except token usage for the cost record |
+
+**No code change was needed for 47B.** Every gap the contract leaves open already fails closed. The remaining ones can only be closed by the smoke observation or an owner decision.
+
+**Smoke harness:** `scripts/openai_smoke.py`, with its procedure, limits, evidence policy and authorisation checklist in [SMOKE-RUNBOOK.md](SMOKE-RUNBOOK.md). It is not part of the product: `providers.py` still refuses `LLM_PROVIDER=openai`.
+
 ## 3. Steps to finish T-605 (each needs your approval)
 
 1. ~~Record C-1 to C-8 as evidence.~~ Done (Phase 45, §2b).
