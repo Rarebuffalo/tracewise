@@ -2,6 +2,18 @@
 
 Plain-language summary of what is waiting on you. Detail and evidence are in [DECISION-MEMOS.md](DECISION-MEMOS.md), [BENCHMARK-REVIEW-QUEUE.md](BENCHMARK-REVIEW-QUEUE.md), [MODEL-ADAPTER.md](MODEL-ADAPTER.md) and [LIVE-VALIDATION-PLAN.md](LIVE-VALIDATION-PLAN.md). Nothing here is decided in code.
 
+## Phase 45: approved and implemented (DECISIONS D-13)
+
+| # | Approval | Implemented in | Status |
+|---|---|---|---|
+| 1 | P-2, option A | `investigate/loop.py` `provider_view`; `test_model_input_privacy.py`, `test_openai_responses.py` | **Done.** Pattern-based redaction is still not complete secret detection (P-4). |
+| 2 | P-3, option A | `db/repositories.py` `stored_snippet`; `test_schema_repositories.py::test_p3_*` | **Done.** ≤2000 UTF-8 bytes, redacted first; published reports unchanged. |
+| 3 | C-CFG-1, option A | no change (512 MB kept) | **Done** (decision recorded only) |
+| 4 | D-10 (a) and (b): explicit retry | `jobs/handlers/analyze.py` `_recheck` before every surface; `tests/db/test_d10.py` | **Done.** No state-machine change was needed for (b). |
+| 9 | OpenAI reference | `research/openai-api-reference-2026-10-19/`; `investigate/openai_responses.py` | **Codec done offline.** `LLM_PROVIDER=openai` still refuses: see MODEL-ADAPTER §2b. |
+
+Items 5–8 and 10 remain open below.
+
 ## Already settled by the spec (no decision needed)
 
 | Item | Settled by | Status |

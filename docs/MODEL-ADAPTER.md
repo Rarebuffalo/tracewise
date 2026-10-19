@@ -36,7 +36,7 @@ Nothing below is assumed. Each item must come from the **official API reference*
 | C-8 | Auth header format; organisation/project headers; data-retention and training settings, and any zero-retention option, needed by the privacy notice | `WireCodec.auth_headers`; privacy notice §4 | Header golden test; key never logged (exists) | Yes (format only) | Account-level settings are configuration, not code: the owner confirms them |
 | C-9 | Model identifier (UD-3); per-token prices; context and output limits | `LLM_MODEL`; `AdapterConfig`; `LLM_PRICE_*`; `InvestigationLimits` | Configuration validation; the cost computation test (exists) | Yes | Prices and limits for the chosen model are confirmed at evaluation time (T-605) |
 
-**Repository evidence check (Phase 32):** none of C-1 to C-9 is established by repository evidence. The recorded documentation under `research/` is GitHub-only, and nothing about OpenAI is recorded. Every item still needs the official reference. Items C-1 to C-7 can then be tested offline with a fake transport against recorded examples. C-8 (account settings) and C-9 (prices and limits) need the owner's confirmation, and their real-world behaviour needs the authorised T-605 calls.
+**Repository evidence check (Phase 32; superseded by §2b):** none of C-1 to C-9 is established by repository evidence. The recorded documentation under `research/` is GitHub-only, and nothing about OpenAI is recorded. Every item still needs the official reference. Items C-1 to C-7 can then be tested offline with a fake transport against recorded examples. C-8 (account settings) and C-9 (prices and limits) need the owner's confirmation, and their real-world behaviour needs the authorised T-605 calls.
 
 **What unblocks the codec (no API key needed):**
 1. Your approval to obtain the official OpenAI API reference pages for the chosen API.
@@ -59,10 +59,50 @@ Then `OpenAIWire` can be written and golden-tested offline.
 | Needs a key and an authorised evaluation later | One reachability smoke call (C-1); behavioural checks (tool-use compliance, refusal and truncation frequency, structured-output conformance); usage-versus-billing reconciliation (C-6, C-9); real 429 behaviour; the T-605 benchmark run, E-01 injection resistance, model choice (UD-3), latency and cost |
 | Owner-only (no code) | Account data-retention and training settings (C-8), for the privacy notice |
 
+## 2b. Phase 45D status: Responses codec implemented offline; selection still refused
+
+The owner approved retrieving the official reference (Phase 45). It is recorded in
+[research/openai-api-reference-2026-10-19/README.md](../research/openai-api-reference-2026-10-19/README.md):
+sources S-1 to S-6 on `developers.openai.com`, retrieved 2026-10-19, with facts R-1 to R-14 and gaps G-1 to G-6. The
+pages state no API version string. `platform.openai.com` returned 403, so only `developers.openai.com` was used.
+
+**API chosen (C-1):** Responses (`POST /v1/responses`). The codec is `OpenAIResponsesWire` in
+`src/tracewise/investigate/openai_responses.py`; its tests are in `tests/investigate/test_openai_responses.py`
+(synthetic fixtures built to the recorded field names, `httpx.MockTransport`, no network, no real key).
+
+| Item | Status | Contract | Implementation and test |
+|---|---|---|---|
+| C-1 | **Offline done**; reachability open (G-4) | R-1 | `ENDPOINT`; each request goes only to it (`test_full_investigation_*`, `test_overload_503_*`) |
+| C-2 | **Offline done** | R-3, R-4, R-6, R-10 | System messages → `instructions`; tool results → `function_call_output` paired by `call_id`; reasoning items replayed verbatim (`Message.replay`); `store: false` (`test_encode_maps_*`) |
+| C-3 | **Offline done** | R-7, R-8, R-9 | The 4 read-only tools only, `strict: false` (our specs have optional fields, R-8); tools and `tool_choice` omitted on the final step (`test_encode_without_tools_*`). The loop still refuses tool calls on that step. |
+| C-4 | **Offline done**; real frequency open (G-1, G-4) | R-5, R-11, R-13 | Any status other than `completed`, refusal, unknown item or content part, malformed call → `WireError` → `provider_failed`, never a diagnosis (`test_decode_fails_closed_*`) |
+| C-5 | **Decided: not used** | R-3 | No `text.format`; the investigator's own JSON validation and repair path stays authoritative. `json_schema` is a possible later improvement. |
+| C-6 | **Offline done**; billing reconciliation open | R-11 | `input_tokens`/`output_tokens` required integers; missing usage → `WireError` (never invented) |
+| C-7 | **Offline done**; error-body example missing (G-2) | R-12, R-14 | Quota/billing 429 (`credit_balance_exhausted`, spend/usage limit codes, `insufficient_quota`) → `ProviderQuotaError`, not retried; rate-limit 429 and 503 retried within the existing bounds honouring `Retry-After`; 401 not retried, key never in the error (`test_quota_429_*`, `test_rate_limit_429_*`, `test_overload_503_*`) |
+| C-8 | **Format done**; account settings owner-only | R-2 | `Authorization: Bearer`; no organisation/project headers sent. Data-retention and training settings of the account are for the owner to confirm (privacy notice §4). |
+| C-9 | **Open** (G-6) | none | Model id, limits and prices are not taken from the pages; they stay configuration (`LLM_MODEL`, `LLM_PRICE_*`) for T-605/UD-3 |
+
+**Integration decisions (ours, recorded in the evidence file):** `store: false`; `max_output_tokens` receives the
+existing `max_output_chars` cap as an upper bound (characters ≥ tokens for this content, so it never loosens the cap);
+call ids are capped at 64 characters on both sides (G-5); a refusal is never a diagnosis.
+
+**P-2 on the real codec:** the redacted `provider_view` is what the codec serialises; the end-to-end test plants a
+secret-shaped value in a source file and checks the serialised bytes. Pattern-based redaction remains incomplete (P-4).
+
+**Why `LLM_PROVIDER=openai` still refuses** (`investigate/providers.py`; `test_providers.py`):
+1. Nothing has been observed from the real endpoint (G-4). The fixtures prove the codec follows the recorded
+   contract, not that the service behaves as recorded.
+2. Real-model evaluation (T-605), the key (O-2) and the model choice (UD-3, C-9) are not authorised.
+3. G-1 to G-3 are handled by failing closed, which needs one real observation to confirm it is not over-strict.
+
+**To enable (each needs your approval):** one authorised smoke call (G-4) with a project-scoped key held locally; then
+change `providers.py` to construct `HTTPProvider(OpenAIResponsesWire(), …)` and update the structural test
+`test_no_code_path_can_reach_a_real_model_today` deliberately; then the T-605 evaluation. There is no fallback to `fake`.
+
 ## 3. Steps to finish T-605 (each needs your approval)
 
-1. Record C-1 to C-8 as evidence.
-2. Write `OpenAIWire` (codec only; the core is done). Contract-test it against recorded request and response examples.
-3. Wire `LLM_PROVIDER=openai` in `investigate/providers.py`.
+1. ~~Record C-1 to C-8 as evidence.~~ Done (Phase 45, §2b).
+2. ~~Write the codec and contract-test it offline.~~ Done (`OpenAIResponsesWire`, §2b).
+3. After the smoke call (G-4), wire `LLM_PROVIDER=openai` in `investigate/providers.py`.
 4. Provide a key **locally** (O-2). Run the benchmark with `--provider` set to the real model. Measure accuracy, cost (C-9) and latency, with at most 3 prompt/model iterations (TASKS rule 4). Run E-01 for injection resistance.
 5. Choose the model (UD-3). Write the privacy notice (T-1001).

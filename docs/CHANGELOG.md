@@ -1,5 +1,13 @@
 # Change Log
 
+## 2026-10-19 (av): Phase 45 approved privacy decisions and offline OpenAI adapter
+
+- **P-2 (A):** everything sent to a model provider passes through `provider_view`, which redacts message text and tool-call arguments (source windows, grep, diffs, listings). Opaque provider reasoning items are passed through unmodified.
+- **P-3 (A):** the stored `problem_snippet` is redacted, then capped at 2000 UTF-8 bytes on whole characters, at `upsert_analysis`. Published reports are unchanged.
+- **D-10:** authorisation is re-checked before every publication surface; runs cancelled by a suspension stay cancelled until an explicit GitHub re-run.
+- **OpenAI:** the official Responses reference is recorded (`research/openai-api-reference-2026-10-19/`); `OpenAIResponsesWire` and `ProviderQuotaError` (quota 429 not retried) are implemented and tested offline. `LLM_PROVIDER=openai` still refuses (MODEL-ADAPTER §2b).
+- The 512 MB log download cap is kept (C-CFG-1, A).
+
 ## 2026-10-19 (au): Phase 44 decision gate (no approvals recorded)
 
 - **B-02 resolved (documentation only):** the catalogue row keeps doc-04's literal, which `scripts/check_docs.py` enforces, and now points to §7, where the replica's `1.21` is recorded. The earlier advice to edit the literal was withdrawn, because it would have broken the fidelity check. No benchmark behaviour, truth or fixture changed.
