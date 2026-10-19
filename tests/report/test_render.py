@@ -175,4 +175,4 @@ def test_truncated_log_without_error_line_never_claims_the_log_has_no_error() ->
     assert "the log has no error line" in render(complete)  # a complete log may say so
     for text in (render(truncated), check_output(truncated, render(truncated)).summary):
         assert "the log has no error line" not in text
-        assert "retained" in text  # it says what was actually checked
+        assert "retained" in text and "incomplete" in text  # it says what was actually checked
