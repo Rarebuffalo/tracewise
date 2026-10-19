@@ -106,6 +106,7 @@ def provider_view(messages: list[Message]) -> tuple[Message, ...]:
             redact(m.content),
             tool_call_id=m.tool_call_id,
             tool_calls=tuple(ToolCallRequest(tc.id, tc.name, _redact_args(tc.arguments)) for tc in m.tool_calls),
+            replay=m.replay,  # opaque provider-originated items (encrypted); redaction would corrupt them
         )
         for m in messages
     )
@@ -225,7 +226,7 @@ def investigate(
         if resp.tool_calls:
             if not allow_tools or calls + len(resp.tool_calls) > lim.max_tool_calls:
                 return result("budget_exhausted")  # the model tried to exceed its budget (FS-DX-8)
-            messages.append(Message("assistant", resp.text or "", tool_calls=resp.tool_calls))
+            messages.append(Message("assistant", resp.text or "", tool_calls=resp.tool_calls, replay=resp.replay))
             productive = False
             for tc in resp.tool_calls:
                 calls += 1
