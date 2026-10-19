@@ -1,5 +1,9 @@
 # Change Log
 
+## 2026-10-19 (an): Phase 27 security and release gate
+
+The gate suite (259 tests) passes with 0 external connection attempts. The mapping of each gate item to its evidence is in SECURITY-AUDIT §5. There are no credentials in new files, and no new defects beyond P-1, which was fixed in Phase 23.
+
 ## 2026-10-19 (am): Phase 26 local operator reproducibility
 
 `tests/db/test_reproducibility.py` (3 tests):
