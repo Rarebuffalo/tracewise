@@ -1,6 +1,6 @@
 # Implementation plan after owner decisions (conditional; nothing approved)
 
-**Status:** every step below is **pending approval**. No decision has been recorded as approved: see OWNER-DECISION-SHEET.md. Each step is one commit, or a small group, with no unrelated behaviour bundled. "Validation" means focused tests, then the full suite under the network guard, `make check`, the benchmark (truth lock unchanged unless the step says otherwise) and the secret-output scan.
+**Status (Phase 45):** §1 P-2 (A), §2 P-3 (A), §3 D-10 (a) and (b, explicit retry) and the offline part of §5 (OpenAI codec) are **approved and implemented**; the 512 MB log cap was kept. Enabling `LLM_PROVIDER=openai` and everything else below remain **pending approval**. See OWNER-DECISION-SHEET.md and DECISIONS D-13. Each step is one commit, or a small group, with no unrelated behaviour bundled. "Validation" means focused tests, then the full suite under the network guard, `make check`, the benchmark (truth lock unchanged unless the step says otherwise) and the secret-output scan.
 
 ## 1. P-2: redact repository content before model calls (if A or C is approved)
 
