@@ -1,5 +1,17 @@
 # Change Log
 
+## 2026-10-20 (az): Phase 50 consolidated reliability, security, database and operations fixes
+
+- **A-04 (prepass):** one pip resolution failure is one primary. Benchmark-motivated, logged in BENCHMARK §8; needs a held-out case before it is quoted.
+- **A1:** a provider failure whose retry cannot fit before the 10-minute deadline is the final attempt and publishes "could not complete". A job that already ran and waited past its deadline gets one notice-only attempt, then ends dead.
+- **A2:** a redelivery skipped only for its cooldown holds the delivery high-water mark, so it can no longer fall out of the window below the attempt cap.
+- **A3:** links right after a digit or `_` are removed, and esc() breaks any remaining autolink.
+- **A4:** only an exact first-line marker identifies a report; a marker printed in a log can no longer redirect another workflow's publication.
+- **Migration 0010:** run, publication and failure-signature keys are per installation. A transferred repository's new installation publishes normally. The downgrade refuses rather than delete data.
+- **C:** the web process refuses a reachable wrong database role at startup, and `/readyz` reports `wrong_database_role`.
+- **D:** `ops report|alerts` under a wrong role exits 1 with `wrong_database_role`, never `insufficient_data` with exit 0.
+- Benchmark (oracle, 3 reps, slow included): only A-04 changed (primaries now pass; Track A extraction 6/8 → 7/8). Truth lock unchanged.
+
 ## 2026-10-19 (ay): Phase 49 smoke-harness hardening (still not run against OpenAI)
 
 - **D-48-1 fixed:** the harness's response recorder checks every JSON type before iterating or measuring it. Valid JSON with an unrecorded structure is `unsupported_response` (exit 8), with fixed `schema_violations` codes and no content. Unexpected harness errors are contained as `harness_error` (exit 1), with no traceback.
