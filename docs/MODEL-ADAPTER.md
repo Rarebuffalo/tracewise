@@ -20,21 +20,32 @@ These are **adapter contract tests**. They use a wire format defined in the test
 
 **Usage and cost:** token counts come only from the provider's response (the codec decodes them). Cost is computed only from configured prices (`LLM_PRICE_*`); otherwise it is `NULL`/"unpriced". Nothing is estimated. There is no fallback provider, so customer data never goes anywhere else.
 
-## 2. What must be recorded before an OpenAI codec is written
+## 2. OpenAI contract checklist (C-1 to C-9): blocker for the codec
 
-The repository's recorded evidence (`research/final-evidence-review/evidence/docs/`) covers GitHub only. None of the following is recorded. Each needs the official API reference captured as evidence (like the GitHub docs, with fetch date and URL) or observed in the first approved call:
+Nothing below is assumed. Each item must come from the **official API reference**, recorded as evidence with its URL and fetch date (as the GitHub docs were), or, where marked, from an approved live call.
 
-| ID | Unresolved detail |
-|---|---|
-| C-1 | Which API: Chat Completions or Responses. Endpoint URL and API version. |
-| C-2 | The request schema for system/user/assistant/tool messages, including how tool results reference a tool-call id |
-| C-3 | The function-tool declaration schema, and how to forbid tool calls on the final step |
-| C-4 | The response schema for text versus tool calls (arguments as a JSON string or an object), finish/stop reasons, and refusals |
-| C-5 | The structured-output or JSON-mode option used for the final answer |
-| C-6 | Field names for usage (input and output tokens) |
-| C-7 | The error-body shape, and the rate-limit headers (`retry-after` and others) |
-| C-8 | Auth header format, organisation/project headers, and a data-retention setting if the privacy notice (T-1001) requires one |
-| C-9 | The model identifier (UD-3) and per-token prices for the cost record |
+| ID | Must be established from the official contract | Code that depends on it | Tests that will verify it | Offline with a fake transport? | Needs a real call |
+|---|---|---|---|---|---|
+| C-1 | Which API (Chat Completions or Responses); exact endpoint URL; API version or date header | `WireCodec.endpoint`; `HTTPProvider` endpoint validation | Codec unit test that the request goes to the recorded URL; the existing endpoint-confinement test | Yes | One smoke call to confirm reachability and version |
+| C-2 | Request schema: roles; how tool results reference a tool-call id; how the conversation is replayed | `WireCodec.encode` | Golden test: a `StepRequest` encodes byte-for-byte to the recorded example request | Yes, against recorded examples | No |
+| C-3 | Function-tool declaration schema (name, description, JSON-schema parameters); how to forbid tools on the final step | `encode` (tools, `allow_tools`) | Golden tests with and without tools; `test_tool_calls_where_none_are_allowed_are_refused` (exists) | Yes | Whether the model honours "no tools" (behavioural) |
+| C-4 | Response schema: text versus tool calls; whether arguments are a JSON string or an object; finish/stop reasons; refusal and content-filter shapes; truncation indicators | `WireCodec.decode` | Decode tests from recorded responses: text, tool calls, refusal, truncated or `length` stop, filter. Every unknown shape → `WireError` (pattern exists in `test_malformed_*`) | Yes | Observe the real refusal and truncation frequency |
+| C-5 | The structured-output or JSON-mode option for the final answer, and its failure mode | `encode` (final-step options); `decode` | Golden test; schema-violation → existing repair → inconclusive path | Yes | Whether outputs conform in practice (feeds T-605) |
+| C-6 | Usage field names (input, output and any cached or reasoning tokens) and whether they are always present | `decode` → `StepUsage` | Decode test; missing usage → `WireError` or explicit zero (decide from the contract) | Yes | Confirm counts against billing for the cost record |
+| C-7 | Error body shape; HTTP status semantics (429 versus quota exhaustion, 5xx); rate-limit headers (`retry-after` or vendor-specific) | `HTTPProvider` error classes; `_retry_after` | Classification tests exist (`test_permanent_*`, `test_server_errors_*`, `test_rate_limit_*`). Add vendor headers and quota-vs-rate-limit tests. | Yes | Real 429 behaviour under load (optional) |
+| C-8 | Auth header format; organisation/project headers; data-retention and training settings, and any zero-retention option, needed by the privacy notice | `WireCodec.auth_headers`; privacy notice §4 | Header golden test; key never logged (exists) | Yes (format only) | Account-level settings are configuration, not code: the owner confirms them |
+| C-9 | Model identifier (UD-3); per-token prices; context and output limits | `LLM_MODEL`; `AdapterConfig`; `LLM_PRICE_*`; `InvestigationLimits` | Configuration validation; the cost computation test (exists) | Yes | Prices and limits for the chosen model are confirmed at evaluation time (T-605) |
+
+**What unblocks the codec (no API key needed):**
+1. Your approval to obtain the official OpenAI API reference pages for the chosen API.
+2. Record them under `research/` as dated evidence, including example requests and responses for text, tool calls, refusals, errors and usage.
+3. Your choice of API (C-1); recommended: whichever the recorded reference documents most completely for tool calls and structured output.
+
+Then `OpenAIWire` can be written and golden-tested offline.
+
+**A key is needed only later**, for the separately authorised T-605 evaluation.
+
+**Until then** `LLM_PROVIDER=openai` refuses at startup (`investigate/providers.py`; `test_process_entrypoints.py`, case `LLM_PROVIDER=openai`). There is no fallback to `fake` or to any other provider.
 
 ## 3. Steps to finish T-605 (each needs your approval)
 

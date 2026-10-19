@@ -337,3 +337,28 @@ def test_prompt_injection_in_repository_and_log_cannot_grant_capabilities() -> N
     assert len(rejected) == 3  # run_shell, write_file and fetch were never dispatched
     rendered = json.dumps(vd.diagnosis.model_dump(mode="json"))
     assert "evil.invalid" not in rendered and "| sh" not in rendered
+
+
+# ------------------------------------------------------------------ Phase 24: gaps in the contract tests
+
+
+def test_token_budget_is_enforced_from_adapter_reported_usage() -> None:
+    """The investigator's token cap applies to what the provider reports, so an expensive answer stops the loop."""
+    huge = StepResponse(
+        tool_calls=(ToolCallRequest("c1", "read_file", {"path": "coffee_shop/pricing.py", "start": 1, "end": 5}),),
+        usage=StepUsage(250_000, 10),
+    )
+    vd, s = run_pipeline(huge, answer(**B02_ANSWER))
+    assert vd.diagnosis.status is Status.inconclusive and vd.diagnosis.inconclusive_reason == "budget_exhausted"
+    assert len(s.requests) == 1  # no further model call after the budget was exceeded
+
+
+def test_adapter_pipeline_logs_carry_no_prompt_log_or_source_content(caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+
+    caplog.set_level(logging.DEBUG)
+    run_pipeline(tool("read_file", path="coffee_shop/pricing.py", start=30, end=41), httpx.Response(503), answer(**B02_ANSWER))
+    run_pipeline(httpx.Response(401, json={"error": "nope"}))
+    text = caplog.text + json.dumps([getattr(r, "tw", None) for r in caplog.records], default=str)
+    for needle in (KEY, "subtotal_", "assert 0.21 == 1.21", "UNTRUSTED", "TAX_RATE", "Bearer"):
+        assert needle not in text, needle
