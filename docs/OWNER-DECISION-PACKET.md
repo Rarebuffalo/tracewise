@@ -1,0 +1,120 @@
+# Owner decision packet (Phase 52)
+
+One page of what is still waiting on you, rechecked against the repository at the end of Phase 52. Every item
+lists what is decided in code today, the question, the choices and their consequences. Nothing here is decided by
+the implementation. Detail lives in [DECISIONS.md](DECISIONS.md), [OWNER-DECISION-SHEET.md](OWNER-DECISION-SHEET.md),
+[SMOKE-RUNBOOK.md](SMOKE-RUNBOOK.md), [GITHUB-CONTRACT-AUDIT.md](GITHUB-CONTRACT-AUDIT.md) and
+[DEPLOYMENT-BLUEPRINT.md](DEPLOYMENT-BLUEPRINT.md).
+
+**Independent of every item below:** the offline implementation is complete for everything specified. Each item
+blocks only the work named in its last line.
+
+## 1. D-12 retention: accept or change four implemented interpretations
+
+The purge mechanics are implemented and tested: `tracewise_purge()` (migrations 0008/0009) and `python -m
+tracewise.retention`, which is unscheduled. Four interpretations are built in:
+
+| | Interpretation as implemented | If you change it |
+|---|---|---|
+| (a) | The whole diagnosis document counts as an "excerpt" and is cleared at 90 days | Narrower: keep the non-text fields longer; wider: clear sooner |
+| (b) | 365 days for jobs, runs, usage and redelivery bookkeeping, where the spec states no period | Any other period needs a new migration that replaces the purge function |
+| (c) | Audit rows are kept after a tenant purge, until their own 365 days | Deleting them at purge time removes the evidence of the purge itself |
+| (d) | A minimal installation tombstone with no expiry, so a deleted installation cannot be re-activated | Expiring it allows reuse after the period; GitHub never reuses ids |
+
+**Approval needed:** "accept (a)–(d)", or name the change. **Blocks:** PRIVACY-NOTICE-DRAFT §5, and scheduling retention.
+
+## 2. D-14: report surfaces that may or may not have been published on the final attempt
+
+**Implemented (decided by FS-ERR-1):** if nothing could have reached GitHub (no analysis row for the run attempt),
+the final attempt publishes the "could not complete" notice. **Open:** a surface was attempted and GitHub answered
+5xx or timed out. A publication row records `pending`/`failed`, which cannot prove absence. Today there is no
+notice, the job ends `dead`, and the rows show each surface's state.
+
+| Option | Correctness | Duplicate risk | Latency | Recovery |
+|---|---|---|---|---|
+| (a) keep | Never contradicts a visible report; a surface may stay silently missing | None | None | Operator sees `dead` plus the rows; a GitHub re-run fixes it |
+| (b) reconcile first: list the PR/commit comments and check runs (the code already does this on retries), then notify only surfaces proven absent, worded "report partly published" | Correct whenever the listing succeeds; if the listing also fails, falls back to (a) | Low (adopts what it finds) | 1–3 extra GET calls on the final attempt only | Same as (a) when GitHub is down |
+| (c) one deferred publication-only retry after the deadline | Most complete; re-uses the existing idempotent publisher | Low | Minutes | Needs a new job kind or claim rule; the most code |
+
+**Recommendation:** (b). The publisher's reconciliation (`_find_comment`, `_find_check_run`) already proves
+presence by app identity and first-line marker, so it adds no new state. Not implemented until you approve.
+**Blocks:** nothing else.
+
+## 3. D-11: database roles and credentials
+
+The current grants are in the privilege matrix (DEPLOYMENT-BLUEPRINT §6, checked against the live catalogue by
+`tests/db/test_privilege_matrix.py`).
+
+- **Excess found:** the tenant role (`tracewise_app`) still holds the 0001 grants on system-plane tables: S/I/U/D on
+  `job`, `webhook_delivery`, `usage_event` and `failure_signature`. RLS confines those rows to the current tenant,
+  and its code paths do not use them.
+- **Proposed least privilege:** a migration that revokes `job`, `webhook_delivery` and DELETE on `usage_event` and
+  `failure_signature` from `tracewise_app`. It affects no tenant-plane operation (the analyze handler and publisher
+  do not touch them). The migration would be reversible.
+- **Also needed:** separate credentials per role from your secret store; the PUBLIC revoke template
+  (`scripts/db/provision_roles.sql`) applied to the real database.
+
+**Approval needed:** the revoke migration (yes/no), and who provisions the credentials. **Blocks:** any real
+deployment.
+
+## 4. Benchmark items (never changed to make scores pass)
+
+| Item | Evidence | Question | Supported choices and consequences |
+|---|---|---|---|
+| B-04 | C1 rated `high_confidence_wrong`: `flaky_suspect` at high confidence without attempt metadata | BENCHMARK §2 says "≤ medium"; AT-DX-11 says `flaky_suspect` "only with attempt metadata; otherwise inconclusive is accepted" | **Cap at medium:** keeps the label and meets §2, but not the strict AT-DX-11 reading. **Inconclusive:** meets both, but loses the hint |
+| A-05 | AT-LOG-04 is met (error kept, truncation flagged); the truth also expects `first_error` | Correct the truth (a new lock), or keep it | Correcting changes the frozen truth (needs your sign-off); keeping leaves a known failure |
+| B-12 | Citing a file deleted by the push is "invalid evidence" (validator rule 4) | Allow evidence paths deleted in the trigger diff? | Allow: more complete explanations; Keep: stricter, safer. Decide with D-5 |
+| D-5 | Compiler points at a different file → the correct answer is rated low | Relax the conflict rule? | Keep strict until real-model data exists (recommended) |
+| E-01 | Prompt-injection resistance cannot be shown with fake providers | — | Measured in T-605 only |
+
+## 5. Alert threshold
+
+The rule fires at (dead + could-not-complete) ÷ finished ≥ **0.2** over 1 h, with at least 10 jobs. It is pinned by
+`tests/db/test_alert_boundaries.py` and the main alert test (exactly 0.2 fires, 0.1 is ok, 9 jobs is
+insufficient). **Evidence needed:** the baseline failure rate from staging traffic. **Choice:** confirm 0.2, or set
+the observed baseline plus a margin. Unchanged until you decide.
+
+## 6. G-PLAT-11 / F-1: one refused publish token blocks every surface
+
+One bundled `publish` token (Contents read, Pull requests write, Checks write) is used for all surfaces. Under a
+simulated refusal of that token, nothing is published, which is contrary to AT-REL-05.
+
+| Option | Effect |
+|---|---|
+| (a) per-surface tokens | Narrowest privileges; three token mints per job; changes ADR-16 |
+| (b) on refusal, re-mint without `pull_requests` | Smaller change; Check Run and commit comment still publish |
+| (c) keep | Only safe if GitHub never refuses the bundled mint |
+
+**Recommendation in the audit:** (a), but only if live stage S2 shows GitHub really refuses. **Blocks:** nothing
+offline; decide after S2.
+
+## 7. OpenAI: three separate authorisations
+
+1. **Smoke call** (SMOKE-RUNBOOK §1):
+   - A-1: written authorisation for one run of at most 3 requests;
+   - A-2: the model id and its source;
+   - A-3: a project-scoped key in a `chmod 600` file outside the repository;
+   - A-4: the account's data-retention and training settings;
+   - A-5: approval of the synthetic content;
+   - A-6: approval of the command;
+   - A-7: prices for the cost bound (under 4,500 input and 6,144 output tokens).
+2. **Provider activation** (`LLM_PROVIDER=openai` in `providers.py`): only after a passing smoke run.
+3. **T-605 evaluation** (benchmark with the real model, E-01, cost and latency): separately.
+
+Approving 1 does not approve 2 or 3.
+
+## 8. Signed URLs in `marketplace.html`
+
+The file holds AWS signed-URL query strings (expired 2026-10-17). It was not opened. **Choice:** redact the query
+strings (recommended before any push) or leave as is. It is an evidence file, so editing it needs your approval.
+
+## 9. Hosting, live GitHub validation and legal review (external)
+
+- **T-1002 hosting** (DEPLOYMENT-BLUEPRINT): the platform; TLS and a public webhook URL; the secret store; process
+  supervision; schedules for recovery, retention and alerts; alert routing; a staging soak (T-1003).
+- **Live GitHub:** a test organisation and a development App to run LIVE-VALIDATION-PLAN S0–S5. Offline coverage
+  per stage is listed there.
+- **Supply chain:** CI references `actions/checkout@v4` and `astral-sh/setup-uv@v6` by tag. Pinning them to commit
+  SHAs needs the exact upstream revisions, which cannot be verified offline. Do it when a remote exists.
+- **Legal:** PRIVACY-NOTICE-DRAFT (owner, contact, legal basis, provider terms) and the pilot terms need counsel's
+  review. Nothing in the repository is legal approval.

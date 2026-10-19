@@ -18,6 +18,8 @@ from typing import Any
 import psycopg
 import pytest
 
+from tests.db.test_privilege_matrix import documented
+from tests.db.test_privilege_matrix import live as live_privileges
 from tests.pg import APP, OWNER, SYSTEM, _bin, ephemeral
 from tracewise.db import repositories as repo
 from tracewise.db.migrate import head_revision, upgrade
@@ -89,6 +91,8 @@ def test_a_pg_dump_backup_restores_a_working_isolated_database(clusters, tmp_pat
     )
 
     assert counts(dst.url(OWNER)) == counts(src.url(OWNER))
+    with psycopg.connect(src.url(OWNER)) as a, psycopg.connect(dst.url(OWNER)) as b:
+        assert live_privileges(b) == live_privileges(a) == documented()  # grants survive, exactly as documented
     with psycopg.connect(dst.url(OWNER)) as k:
         assert k.execute("SELECT version_num FROM alembic_version").fetchone() == (head_revision(),)
         rls = {r[0] for r in k.execute("SELECT relname FROM pg_class WHERE relrowsecurity AND relkind = 'r'")}
