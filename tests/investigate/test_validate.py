@@ -331,3 +331,19 @@ def test_stored_snippet_and_replacement_are_redacted() -> None:
     assert d.problem_snippet is not None and "return round" in d.problem_snippet  # the snippet is still there ...
     stored = _json.dumps(d.model_dump(mode="json"))
     assert planted not in stored  # ... but never with the credential
+
+
+def test_log_excerpts_are_at_most_2kb_in_bytes_even_for_multibyte_text() -> None:
+    """Phase 30 (FS-SEC-3, AT-SEC-12: 'excerpts ≤2 KB'). KB is a byte unit; the cap was 2048 *characters*, so
+    non-ASCII log text could reach ~8 KB. Capped at 2000 UTF-8 bytes (≤2 KB under both the 1000- and the 1024-byte
+    reading), redacted first, never splitting a character."""
+    from tracewise.investigate.validate import EXCERPT_MAX_BYTES, excerpt_of
+
+    assert EXCERPT_MAX_BYTES == 2000
+    for text in ("日本語のエラー" * 400, "é" * 3000, "a" * 5000, "x" * 1999 + "日", "🚀" * 900):
+        out = excerpt_of(text)
+        raw = out.encode("utf-8")
+        assert len(raw) <= 2000 and text.startswith(out)  # a prefix, whole characters only
+        assert len(raw) > 1990 or len(text.encode()) <= 2000  # not cut shorter than needed
+    secret = "ghp_" + "Kq7" * 12
+    assert "Kq7Kq7Kq7" not in excerpt_of("é" * 600 + " " + secret)  # redaction happens before the cut
