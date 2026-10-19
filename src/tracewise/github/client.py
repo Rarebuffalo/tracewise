@@ -59,6 +59,20 @@ class Limits:
     connect_timeout_s: float = 5.0
 
 
+class LogLines:
+    """Iterator over a streamed job log. `truncated` is True once the download cap cut it."""
+
+    def __init__(self) -> None:
+        self.truncated = False
+        self._it: Iterator[str] = iter(())
+
+    def __iter__(self) -> LogLines:
+        return self
+
+    def __next__(self) -> str:
+        return next(self._it)
+
+
 class GitHubHTTP:
     """Transport + error policy. Holds no credentials itself; tokens are passed per call."""
 
@@ -144,8 +158,16 @@ class GitHubHTTP:
             yield from items
             url = self._next_link(resp)
 
-    def stream_log(self, location: str) -> Iterator[str]:
-        """Stream a signed log URL without credentials, line by line, capped at `max_log_bytes`."""
+    def stream_log(self, location: str) -> LogLines:
+        """Stream a signed log URL without credentials, line by line, capped at `max_log_bytes`.
+
+        The returned iterator's `.truncated` becomes True when the cap cut the download (FS-LOG-4), so a partial
+        log can never be taken for a complete one."""
+        out = LogLines()
+        out._it = self._stream_log(location, out)
+        return out
+
+    def _stream_log(self, location: str, owner: LogLines) -> Iterator[str]:
         self._check_log_url(location)
         with self._client.stream("GET", location, headers={"User-Agent": USER_AGENT}, follow_redirects=False) as resp:
             if resp.status_code in (404, 410):
@@ -170,6 +192,7 @@ class GitHubHTTP:
             if pending and not truncated:
                 yield pending
             if truncated:
+                owner.truncated = True
                 log.warning("log download truncated at cap", extra={"tw": {"cap_bytes": self.limits.max_log_bytes}})
 
     # -------------------------------------------------------------- internals
@@ -406,7 +429,7 @@ class RepoClient:
         """FS-LOG-1: only failed/timed-out jobs are considered for log download."""
         return [j for j in self.list_jobs(run_id, attempt) if j.get("conclusion") in ("failure", "timed_out")]
 
-    def job_log_lines(self, job_id: int) -> Iterator[str]:
+    def job_log_lines(self, job_id: int) -> LogLines:
         """FS-LOG-1: 302 → signed URL (valid ~1 min), fetched immediately without the token."""
         ep = ENDPOINTS["download_job_logs"]
         path = self._path(ep, job_id=job_id)

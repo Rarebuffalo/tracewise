@@ -114,3 +114,33 @@ def test_unexpected_error_in_the_loop_stops_with_exit_1(pool, owner, server, tmp
     closed: list[int] = []
     assert worker_main.main(["--idle-sleep", "0.01"], build=_runtime(w, closed)) == 1
     assert calls["n"] == 1 and closed == [1]  # stops on the first unexpected error: no spinning
+
+
+def test_worker_wires_the_log_retention_setting_into_the_analysis(pg, owner, monkeypatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """Phase 31 (C-CFG-1): LOG_MAX_BYTES_PER_JOB reaches the analyze handler through the real build path."""
+    from pydantic import SecretStr
+
+    from tests.github_fake import test_key_pem as _key_pem
+    from tests.pg import APP, SYSTEM
+    from tracewise.config import Settings
+    from tracewise.jobs.handlers import analyze as a
+
+    key = tmp_path / "k.pem"
+    key.write_bytes(_key_pem())
+    seen: list[Any] = []
+    real = a.make_analyze_handler
+    monkeypatch.setattr(a, "make_analyze_handler", lambda deps: seen.append(deps) or real(deps))
+    st = Settings(
+        tw_env="test",
+        llm_provider="fake",
+        database_url=SecretStr(pg.url(APP)),
+        database_url_system=SecretStr(pg.url(SYSTEM)),
+        github_app_id=1,
+        github_app_private_key_path=key,
+        log_max_bytes_per_job=12345,
+    )
+    rt = worker_main.build_from_settings(st, "wiring")
+    try:
+        assert seen and seen[0].log_max_bytes == 12345
+    finally:
+        rt.close()

@@ -50,6 +50,7 @@ from tracewise.investigate.validate import ValidatedDiagnosis
 from tracewise.jobs.queue import JobCancelled, PermanentError, RetryableError
 from tracewise.jobs.worker import Handler, JobContext, LeaseLost
 from tracewise.observe import Stages, bind, event
+from tracewise.prepass.envelope import DEFAULT_MAX_BYTES as DEFAULT_LOG_RETAIN_BYTES
 from tracewise.report.render import (
     DEFAULT_MAX_CHARS,
     CheckOutput,
@@ -76,6 +77,7 @@ class AnalyzeDeps:
     bot_login: str | None = None
     price_input_per_mtok: Decimal | None = None  # T-706: unset → cost_usd NULL ("unpriced")
     price_output_per_mtok: Decimal | None = None
+    log_max_bytes: int = DEFAULT_LOG_RETAIN_BYTES  # FS-LOG-4 per-job retention budget (LOG_MAX_BYTES_PER_JOB)
 
 
 def cost_usd(deps: AnalyzeDeps, tokens_in: int, tokens_out: int) -> Decimal | None:
@@ -187,7 +189,7 @@ def _run(
 ) -> dict[str, Any]:
     stages = Stages()
     t0 = time.monotonic()
-    with collect_evidence(job, rc_a, fetcher=deps.fetcher_factory()) as ev:
+    with collect_evidence(job, rc_a, fetcher=deps.fetcher_factory(), log_max_bytes=deps.log_max_bytes) as ev:
         stages.ms["collect"] = int((time.monotonic() - t0) * 1000)
         ctx.check()
         with stages.time("associate"):
