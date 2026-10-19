@@ -13,6 +13,7 @@
 | [VALIDATION-PLAN.md](VALIDATION-PLAN.md) | Commercial gate G-0 (interviews, metadata-only G-2) |
 | [DECISIONS.md](DECISIONS.md) | Closed decisions (Q1–Q6), applied defaults (D-1…D-3), open items |
 | [DOC-CHANGE-PLAN.md](DOC-CHANGE-PLAN.md) | The 15 blocking corrections and the cleanup plan (change record) |
+| [OWNER-DECISION-SHEET.md](OWNER-DECISION-SHEET.md) | Plain-language list of decisions waiting on the owner, with recommendations |
 | [DECISION-MEMOS.md](DECISION-MEMOS.md) | P-2, P-3, C-CFG-1: canonical text, current behaviour, options and tests |
 | [PRIVACY-NOTICE-DRAFT.md](PRIVACY-NOTICE-DRAFT.md) | T-1001 privacy notice **draft** (not approved), with its open items |
 | [DATA-INVENTORY.md](DATA-INVENTORY.md) | Every data category: source, purpose, storage, retention, evidence |

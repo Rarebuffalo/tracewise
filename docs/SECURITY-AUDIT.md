@@ -146,3 +146,11 @@ P-2 and P-3 (snippet part) remain open: see DECISION-MEMOS.md.
 Notes:
 - `safe_error_text` in `github/client.py` is unused (dead code; no sink).
 - The P-1 mutation check was re-run on a scratch copy and the source restored (see CHANGELOG).
+
+## 8. Phase 43 final review (2026-10-19)
+
+| ID | Severity | Finding | Fix | Test |
+|---|---|---|---|---|
+| P-5b | **Medium** (privacy; completes P-5) | The P-5 fix kept PostgreSQL's *primary* message, the pydantic field locations, and `str(err)` for any other exception. Probes showed all three can carry input: `invalid input syntax for type integer: "<value>"`, extra and dict keys in locations, `KeyError("<content>")`. | Stored error text now depends only on uncontrollable parts: SQLSTATE plus schema identifiers; pydantic error count, model name and fixed error codes; Tracewise's own exception messages and callers' plain reason-code strings, which the code controls; otherwise the class name only. A first version also reduced plain reason strings to `str`, which broke 8 cancellation tests; the full gate caught it and it was corrected. The existing redact-and-cap test was moved to a Tracewise exception, and a class-only assertion added for foreign ones. | `test_schema_repositories.py::test_short_error_has_no_bypass_*` (failed before) |
+| L-2b | Low (wording) | The L-2 wording said "the log was truncated" also when a job's log was **unavailable** | "incomplete (truncated or partly unavailable)" | `test_collect.py::test_l2_partly_unavailable_*` |
+| W-1b | Coverage | The window between `worker.started` and the first claim was untested | — | `test_worker_main.py::test_signal_after_startup_but_before_the_loop_*` |
