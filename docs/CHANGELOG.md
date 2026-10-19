@@ -1,5 +1,18 @@
 # Change Log
 
+## 2026-10-19 (al): Phase 25 T-1002 deployment blueprint (design only)
+
+- `docs/DEPLOYMENT-BLUEPRINT.md` is vendor-neutral, because no hosting environment is evidenced (ADR-09 is open). It covers:
+  - done versus remaining work;
+  - process table: web, worker, and the migrate, recovery, retention and alerts jobs, with exact commands and shutdown semantics (worker grace ≥600 s);
+  - ingress (25 MB, ≥10 s, HMAC as the control);
+  - secret separation per process, and an environment-variable inventory with placeholders;
+  - database roles, minimum grants and connection budget, with a pooler caveat marked **unverified**;
+  - backups, alert sources, and the staging validation gate.
+
+  Nothing is deployed or scheduled.
+- **C-CFG-1 found:** `LOG_MAX_BYTES_PER_JOB` is documented but unused. The effective cap is 512 MB per log, as AT-LOG-04 requires. The Phase 23 inventory's 2 MB claim was corrected. Recorded for review; behaviour unchanged.
+
 ## 2026-10-19 (ak): Phase 24 model adapter contract readiness
 
 - Two contract-test gaps closed:
