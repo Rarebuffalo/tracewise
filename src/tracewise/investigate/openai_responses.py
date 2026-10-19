@@ -41,22 +41,35 @@ class OpenAIResponsesWire:
     def encode(self, model: str, request: StepRequest) -> dict[str, Any]:
         instructions = "\n\n".join(m.content for m in request.messages if m.role == "system")  # R-3 `instructions`
         items: list[dict[str, Any]] = []
+        issued: set[str] = set()  # every call_id sent so far: provider-issued ids must stay unique (R-6 pairing)
+        awaiting: list[str] = []  # calls whose output has not been sent yet
         for m in request.messages:
             if m.role == "system":
                 continue
             if m.role == "tool":  # R-6: function_call_output with the matching call_id; output is a string
-                items.append({"type": "function_call_output", "call_id": m.tool_call_id or "", "output": m.content})
+                if m.tool_call_id not in awaiting:
+                    raise WireError("tool result does not answer exactly one pending call")
+                awaiting.remove(m.tool_call_id)
+                items.append({"type": "function_call_output", "call_id": m.tool_call_id, "output": m.content})
                 continue
+            if awaiting:
+                raise WireError("a call has no result before the next turn")
             if m.role == "assistant":
                 items.extend(m.replay)  # R-10: reasoning items passed back verbatim (opaque, encrypted)
                 if m.content:
                     items.append({"type": "message", "role": "assistant", "content": m.content})  # R-4
                 for tc in m.tool_calls:  # R-5: the model's own function_call items, arguments as a JSON string
+                    # G-5: no documented length limit, so the provider-issued id is sent back exactly as received.
+                    if not (isinstance(tc.id, str) and tc.id) or tc.id in issued:
+                        raise WireError("call ids must be present and unique")
+                    issued.add(tc.id)
+                    awaiting.append(tc.id)
                     args = tc.arguments if isinstance(tc.arguments, str) else json.dumps(tc.arguments)
-                    # the loop stores tool results under tc.id[:64]; use the same id so outputs pair with calls (gap G-5)
-                    items.append({"type": "function_call", "call_id": tc.id[:64], "name": tc.name, "arguments": args})
+                    items.append({"type": "function_call", "call_id": tc.id, "name": tc.name, "arguments": args})
                 continue
             items.append({"type": "message", "role": "user", "content": m.content})  # R-4
+        if awaiting:
+            raise WireError("a call has no result")
         body: dict[str, Any] = {
             "model": model,  # R-3
             "input": items,  # R-4
@@ -109,6 +122,8 @@ class OpenAIResponsesWire:
                 cid, name, args = item.get("call_id"), item.get("name"), item.get("arguments")
                 if not (isinstance(cid, str) and cid and isinstance(name, str) and isinstance(args, str)):
                     raise WireError("malformed function_call")
+                if any(c.id == cid for c in calls):
+                    raise WireError("duplicate call_id in one response")  # results could not be paired unambiguously
                 calls.append(ToolCallRequest(cid, name, args))  # untrusted; the investigator validates and parses
             elif kind == "reasoning":  # R-10: opaque; returned to the provider on the next turn
                 replay.append(item)

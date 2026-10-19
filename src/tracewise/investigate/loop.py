@@ -245,7 +245,7 @@ def investigate(
                         seen[key] = res
                         productive = productive or res.ok
                         content = d.wrap(f"tool {name}", res.content)
-                messages.append(Message("tool", content, tool_call_id=tc.id[:64]))
+                messages.append(Message("tool", content, tool_call_id=tc.id))  # exact id: pairing must never collide
             unproductive = 0 if productive else unproductive + 1
             if unproductive >= lim.max_unproductive_steps:
                 return result("unproductive")
