@@ -208,3 +208,14 @@ def test_p2_holds_on_every_request_the_real_codec_serialises(monkeypatch) -> Non
     for ordinary in ("return round(subtotal_ * TAX_RATE, 2)", "coffee_shop/pricing.py", "TAX_RATE"):
         assert ordinary in wire  # ordinary source context still reaches the model
     assert KEY not in wire
+
+
+# ------------------------------------------------------------------ error text (46D)
+
+
+def test_wire_errors_never_quote_the_provider_document() -> None:
+    marker = "AKIA" + "RQSTATUSQUOTEZZZ"
+    for doc in ({**resp(text="x"), "status": marker}, {**resp(text="x"), "object": marker}):
+        with pytest.raises(WireError) as e:
+            W.decode(doc)
+        assert marker not in str(e.value) and "RQSTATUS" not in str(e.value)
