@@ -49,7 +49,7 @@ All three use the same bundled publish token, even though the commit comment nee
   - (c) keep as is.
 - **Live check:** decline the `pull_requests` upgrade on the test installation, then mint the publish scope.
 
-### F-2 (medium): no scope re-check between publication surfaces (D-10 as implemented)
+### F-2 (medium): no scope re-check between publication surfaces: **CLOSED** (Phase 45, D-10(a) decided; re-checked before every surface; `test_d10.py`)
 
 Scope is re-checked after diagnosis and before persisting. It is not re-checked between the commit comment or PR comment and the Check Run.
 
@@ -57,7 +57,7 @@ Scope is re-checked after diagnosis and before persisting. It is not re-checked 
 
 Not changed, because it is a D-10 semantics decision. Adding `_recheck` before each surface would cost one extra query per surface.
 
-### F-3 (observation, D-9/D-10): runs cancelled while suspended are never re-analysed
+### F-3 (observation, D-9/D-10): runs cancelled while suspended are never re-analysed: **DECIDED** (D-10(b): stay cancelled; explicit re-run only; `test_d10.py`)
 
 `test_run_cancelled_by_suspension_is_not_reanalysed_after_unsuspend`: run deduplication (repo, run, attempt) turns a later delivery of the same run into `duplicate_run`. After `unsuspend`, failures that happened during the suspension stay unanalysed unless they are re-run on GitHub (new attempt). This is consistent with "controlled no-op" (D-9), but not stated anywhere. It is a product decision.
 

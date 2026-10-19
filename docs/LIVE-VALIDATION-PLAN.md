@@ -88,11 +88,11 @@
 
 1. **Suspend during publication.** Use a slow fake provider, or a CI failure with a large log, so there is time. Suspend the installation in the window between the commit comment and the Check Run.
    - **Unknown:** whether GitHub refuses the Check Run write from the already-minted token (F-2).
-   - **Expect today:** the Check Run still publishes if GitHub accepts it. Record which happens.
+   - **Expect (D-10(a) decided):** Tracewise re-checks before the Check Run, so it does **not** publish. The job ends `cancelled` `installation_suspended`. Separately, record whether GitHub would have refused the write anyway.
 2. **Suspend, then cause a failure, then unsuspend.**
-   - **Expect:** the job is cancelled `installation_suspended`. After unsuspend, the run stays `duplicate_run` (F-3, pending D-10) unless it is re-run on GitHub (new attempt).
+   - **Expect:** the job is cancelled `installation_suspended`. After unsuspend, the run stays `duplicate_run` (D-10(b) decided: only an explicit re-run analyses it) unless it is re-run on GitHub (new attempt).
 3. **Remove `tw-push` from the installation mid-job.**
-   - **Expect:** before publication → `cancelled` `repo_not_in_scope`, zero writes; after the first surface → the Check Run is still attempted (pending D-10).
+   - **Expect:** before publication → `cancelled` `repo_not_in_scope`, zero writes; after the first surface → no further surface (D-10(a)); `cancelled` `repo_not_in_scope`.
 4. **Re-add `tw-push`.**
    - **Expect:** `repository_added` (`removed_at` cleared, `enabled` kept); new failures are analysed.
 5. **Uninstall during a job.**

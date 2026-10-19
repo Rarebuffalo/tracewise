@@ -131,9 +131,9 @@ def test_two_workers_racing_for_one_job_publish_once(world: World) -> None:
     assert world.jobrow(jid)["status"] == "succeeded" and side_effects(world) == (1, 1, 1, 1)
 
 
-def test_repository_removed_during_publication_pending_d10(world: World) -> None:
-    """PENDING D-10 (documents current behaviour, not a decision): scope is not re-checked between surfaces,
-    so a removal that lands after the commit comment does not stop the Check Run (cf. GITHUB-CONTRACT-AUDIT F-2)."""
+def test_repository_removed_during_publication_stops_the_remaining_surfaces(world: World) -> None:
+    """D-10(a), decided (DECISIONS D-13): a repository removed after the commit comment was accepted gets no Check
+    Run; the job ends `cancelled` with a content-free reason (F-2 closed)."""
     cc = re.compile(r"^/repos/acme/coffee/commits/[0-9a-f]{40}/comments$")
 
     def remove_after(req: httpx.Request) -> httpx.Response:
@@ -148,7 +148,8 @@ def test_repository_removed_during_publication_pending_d10(world: World) -> None
     world.gh.routes.insert(0, ("POST", cc, remove_after))
     jid = world.enqueue()
     world.run()
-    assert world.jobrow(jid)["status"] == "succeeded" and side_effects(world) == (1, 1, 1, 1)
+    assert (world.jobrow(jid)["status"], world.jobrow(jid)["last_error"]) == ("cancelled", "repo_not_in_scope")
+    assert side_effects(world) == (1, 1, 0, 0)  # commit comment stays; no Check Run after the removal
     assert world.owner.execute("SELECT removed_at IS NOT NULL FROM repository WHERE id = 7").fetchone() == (True,)
 
 
