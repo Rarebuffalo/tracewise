@@ -26,8 +26,24 @@ Surface = Literal["commit_comment", "pr_comment", "check_run"]
 
 
 def short_error(err: object, limit: int = 500) -> str:
-    """Errors are stored redacted and capped; they must never carry tokens or log content."""
-    return redact(str(err))[:limit]
+    """Errors are stored redacted and capped; they must never carry tokens or log content.
+
+    Database and validation errors embed the offending data in their text (psycopg: `DETAIL: Failing row contains
+    (...)`; pydantic: `input_value=...`), so only their class-level message is kept (P-5)."""
+    return redact(_content_free(err))[:limit]
+
+
+def _content_free(err: object) -> str:
+    import psycopg
+    from pydantic import ValidationError
+
+    if isinstance(err, psycopg.Error):
+        primary = err.diag.message_primary if err.diag is not None else None
+        return f"{primary or type(err).__name__} [sqlstate {err.sqlstate or '?'}]"
+    if isinstance(err, ValidationError):
+        fields = sorted({".".join(str(p) for p in e.get("loc", ())) for e in err.errors(include_input=False)})[:10]
+        return f"{err.error_count()} validation error(s) for {err.title}: {', '.join(fields)}"
+    return str(err)
 
 
 # ------------------------------------------------------------------ deliveries
