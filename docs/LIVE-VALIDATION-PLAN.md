@@ -4,6 +4,18 @@
 
 **Nothing here has been run.** Each step lists its expected observation and the evidence to capture. Where GitHub's behaviour is unknown, the plan says so instead of predicting.
 
+## Offline coverage per stage (Phase 51; mocks and local fixtures only, never live verification)
+
+| Stage | Implemented and tested offline | Main tests | GitHub permissions involved | Still needs the live run |
+|---|---|---|---|---|
+| S0 install, baseline | Signature check, ingest, push publication (commit comment and Check Run), re-run update in place | `test_webhook.py`, `test_analyze_worker.py::test_01`, `test_pub05` | Actions read, Contents read, Checks write, Metadata read | G-PLAT-5 (commit comment with Contents read), G-PLAT-2 (one delivery per attempt), G-PLAT-10 (app ids on objects) |
+| S1 duplicates, redelivery, sweep | Dedupe on delivery and on run attempt; redelivery pass with cooldown, attempt cap and held high-water mark; failed-run sweep | `test_recovery.py`, `test_recovery_faults.py`, `test_phase50_reliability.py` (A2) | App JWT: hook deliveries; Actions read | G-PLAT-12: real filter, cursor and GUID semantics |
+| S2 declined permission | 403 on a write recorded as `unpublished_permission`; bundled-token refusal **simulated** | `test_10b`, `test_github_contracts.py::test_g_plat_11_*` | Pull requests write (declined) | G-PLAT-7 and G-PLAT-11; the fix for F-1 needs the owner |
+| S3 suspension, removal, transfer, uninstall | Re-check before every surface (D-10), explicit-retry rule, repository transfer (0010), deletion tombstone | `test_d10.py`, `test_lifecycle.py`, `test_phase50_transfer.py` | Installation lifecycle events | G-PLAT-6: GitHub's refusal of writes from a suspended installation's token |
+| S4 forks, limits, startup failure | Fork PR lookup by `head=`, renderer cap, redirect host allowlist, `git fetch` against a local `http-backend` | `test_pub06`, `report/test_render.py`, `unit/test_github_client.py`, `context/test_gitfetch.py` | Pull requests read/write, Contents read | G-PLAT-1, -3, -4, -8, -9 |
+| S5 closing checks | `ops report`/`alerts` (role-checked), retention purge, token and URL scrubbing, network guard | `test_observability.py`, `test_phase50_roles.py`, `test_retention.py`, `unit/test_logging.py` | none | Test-org traffic and the measured p50/p95 |
+| Final-attempt notice (FS-ERR-1) | Notice when nothing can be visible; the partial case is D-14 | `test_phase51_final_publication.py` | Checks write, Pull requests write | Whether GitHub applies 5xx-answered writes (it shapes D-14) |
+
 ## Preconditions (all needed; any missing = do not start)
 
 - [ ] You approve a dedicated **test organisation** and a **dev GitHub App** (T-801):

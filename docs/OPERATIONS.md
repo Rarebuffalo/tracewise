@@ -178,6 +178,8 @@ Expired leases are reaped at the next claim (`queue.lease_expired`). Handlers ar
 
 ## 8. Backup, rollback and incident response
 
+**Verified offline (Phase 51, `tests/db/test_backup_restore.py`):** a `pg_dump -Fc` taken as the owner, restored with `pg_restore` into a fresh cluster that already has the three roles, gives the same rows and revision, keeps RLS, the grants and the purge function's pinned `search_path`, satisfies both runtime role checks, and still isolates tenants. The roles must exist before the restore. Not verified: platform point-in-time recovery, restore time at production size.
+
 | Situation | Action |
 |---|---|
 | Before any migration | Back up the database (operator tool, e.g. `pg_dump`). Migrations are reversible (`downgrade`), but **never downgrade below 0005 with tenant data present**: that removes RLS. |
