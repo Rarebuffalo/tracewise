@@ -1,5 +1,56 @@
 # Change Log
 
+## 2026-10-19 (af): Phase 18 runnable web and worker entry points
+
+### Dependency
+
+`uvicorn>=0.30`, installed **offline from the local uv cache** (0.54.0 and click; no network).
+
+### Code
+
+| File | Change |
+|---|---|
+| `web/asgi.py` | `create_runtime_app` factory. Validates settings (names only in errors; secret ≥16 characters). Uses the system pool. Never migrates. Closes the pool on shutdown. |
+| `web/app.py`, `web/health.py` | Lifespan hook. `/readyz` also needs the schema at this build's head (`schema_mismatch` → 503). |
+| `worker.py` | `python -m tracewise.worker` (exit codes in OPERATIONS §1a) |
+| `db/session.py` | `require_system_plane`, `require_schema_at` |
+| `db/migrate.py` | `head_revision` |
+| `investigate/providers.py` | Explicit provider selection: `fake` only with `TW_ENV=test`; no fallback |
+| `config.py` | `invalid_fields` |
+| `logging.py` | `alembic` added to the quiet loggers |
+
+**What the worker refuses (exit 2):**
+- a missing setting;
+- the same URL for both roles;
+- wrong roles (system or owner as tenant; tenant or owner as system);
+- a schema not at head;
+- an unreadable key;
+- the fake provider outside test.
+
+**Signals:** the first SIGTERM or SIGINT is graceful; a second aborts. Startup sweeps stale workspaces.
+
+### Tests
+
+- **`tests/db/test_process_entrypoints.py`** (19, real `uvicorn` and `python -m tracewise.worker` subprocesses):
+  - web refuses missing or short secrets;
+  - web serves health, readiness, signed and forged pings, and no docs routes;
+  - no database writes at startup and no migration;
+  - graceful shutdown;
+  - an unreachable database gives readiness 503 without crashing or leaking;
+  - schema-mismatch readiness;
+  - the worker refuses 10 unsafe configurations;
+  - an unreachable database gives exit 1 without leaking;
+  - idle start, then SIGTERM, then exit 0 with no writes;
+  - a permanent failure is recorded once and never re-claimed.
+- **`tests/db/test_worker_main.py`** (3, real signals in-process with fake GitHub):
+  - SIGTERM mid-job finishes the job, with exactly one write per surface;
+  - a second SIGINT aborts, then a restart recovers the job with exactly one write per surface;
+  - an unexpected loop error gives exit 1 after a single attempt.
+
+### Not done
+
+Hosting, credentials, schedules (gated). T-1002 is partial.
+
 ## 2026-10-19 (ae): Phase 16 offline release-readiness package
 
 - `docs/OPERATIONS.md`: covers

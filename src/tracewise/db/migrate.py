@@ -25,3 +25,13 @@ def upgrade(owner_url: str, revision: str = "head") -> None:
 
 def downgrade(owner_url: str, revision: str = "base") -> None:
     command.downgrade(alembic_config(owner_url), revision)
+
+
+def head_revision() -> str:
+    """The migration head this build expects (read from the bundled scripts; no database access)."""
+    from alembic.script import ScriptDirectory
+
+    head = ScriptDirectory.from_config(alembic_config("postgresql://unused@/unused")).get_current_head()
+    if head is None:
+        raise RuntimeError("no migration head found")
+    return head

@@ -6,7 +6,8 @@ This document prepares a **later, approved** pilot. Nothing here has been deploy
 
 | Ready (verified offline) | Not ready |
 |---|---|
-| Schema, migrations 0001–0009, roles, RLS, the purge function (`tests/db/test_fresh_install.py`) | **No process entry point for the web server or the worker.** `create_app()` and `Worker` exist; wiring them into processes is T-1002. |
+| Schema, migrations 0001–0009, roles, RLS, the purge function (`tests/db/test_fresh_install.py`) | Hosting, process supervision, TLS and ingress for the webhook URL (T-1002, gated) |
+| **Process entry points** (Phase 18): web via uvicorn, worker via `python -m tracewise.worker` (§1a) | |
 | Webhook intake, queue, worker, publisher, recovery, retention and observability (offline suites) | **No real model adapter** (D-7). The only provider is `fake`. A real one is T-605. |
 | CLIs: `python -m tracewise.{recovery,ops,retention,bench}` | Credential provisioning (D-11), schedules, alert routing (T-1002) |
 
@@ -24,6 +25,61 @@ This document prepares a **later, approved** pilot. Nothing here has been deploy
    - every tenant table has RLS and its policy;
    - every other table is declared system-only;
    - any SECURITY DEFINER function pins `pg_temp` last.
+
+## 1a. Running the processes locally
+
+Placeholders only; use non-production roles on a disposable database. Neither process migrates, so run the migrations first (§1).
+
+**Environment variables:**
+
+| Variable | Web | Worker | Notes |
+|---|---|---|---|
+| `DATABASE_URL_SYSTEM` | required | required | `tracewise_system` (BYPASSRLS) |
+| `DATABASE_URL` | — | required | `tracewise_app` (RLS); must be a different role |
+| `GITHUB_WEBHOOK_SECRET` | required (≥16 characters) | — | Same value as in the App settings |
+| `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY_PATH` | — | required | Project App only; the key file is RSA PEM with mode 0600 |
+| `LLM_PROVIDER` | — | required | `openai` (with `OPENAI_API_KEY`, `LLM_MODEL`), or `fake`, which is accepted **only** with `TW_ENV=test` |
+| `TW_ENV` | optional | optional | `local`, `test`, `staging` or `prod` |
+
+**Web** (ASGI factory; nothing runs at import):
+
+```
+DATABASE_URL_SYSTEM=postgresql://tracewise_system@/tracewise?host=<socket-dir> \
+GITHUB_WEBHOOK_SECRET=<webhook-secret> \
+uv run uvicorn --factory tracewise.web.asgi:create_runtime_app --host 127.0.0.1 --port 8000
+```
+
+- `/healthz` is liveness and never touches the database.
+- `/readyz` returns 200 only when the database is reachable **and** at this build's schema revision; otherwise 503 with `unavailable` or `schema_mismatch`.
+- A missing or invalid setting stops startup with its **name** only.
+- SIGTERM shuts down gracefully, closing the pool. uvicorn then re-raises the signal, so the exit status is −15 after "Application shutdown complete."
+
+**Worker:**
+
+```
+DATABASE_URL=postgresql://tracewise_app@/tracewise?host=<socket-dir> \
+DATABASE_URL_SYSTEM=postgresql://tracewise_system@/tracewise?host=<socket-dir> \
+GITHUB_APP_ID=<app-id> GITHUB_APP_PRIVATE_KEY_PATH=<path-to-pem> LLM_PROVIDER=openai OPENAI_API_KEY=<key> LLM_MODEL=<model> \
+uv run python -m tracewise.worker [--worker-id ID] [--once] [--idle-sleep 1.0]
+```
+
+The worker refuses to start (exit 2) when:
+- a setting is missing;
+- the same URL is used for both roles;
+- the tenant URL is not an RLS-restricted role (system, owner or superuser);
+- the system URL is not the BYPASSRLS role;
+- the schema is not at this build's head;
+- the key is unreadable;
+- the fake provider is configured outside `TW_ENV=test`.
+
+An unreachable database at startup gives exit 1. At startup it sweeps workspaces left by a killed process.
+
+| Signal | Effect |
+|---|---|
+| First SIGTERM or SIGINT | Stop claiming, finish the current job, close the pools, exit 0 |
+| Second signal | Immediate abort. The job's lease expires and another worker reclaims it, publishing once (tested). |
+
+An unexpected error in the loop exits 1 instead of spinning.
 
 ## 2. Roles and credential separation
 

@@ -36,7 +36,7 @@ _SECRET_PARAM_RE = re.compile(
     r"=[^&\s\"'<>]+"
 )
 # Third-party loggers that print full request URLs at INFO (httpx: "HTTP Request: GET <url>").
-QUIET_LOGGERS = ("httpx", "httpcore", "urllib3")
+QUIET_LOGGERS = ("httpx", "httpcore", "urllib3", "alembic")
 
 
 class SecretFilter(logging.Filter):
