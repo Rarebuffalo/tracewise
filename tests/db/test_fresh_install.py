@@ -264,6 +264,7 @@ def test_schema_guard_fails_on_an_unprotected_tenant_table(fresh) -> None:  # ty
         "postgresql://tracewise_app:supersecretpw@/tracewise?host=/nonexistent-dir&port=5433",
         "postgresql://nosuchrole@/tracewise?host={sock}&port=5433",
     ],
+    ids=["malformed", "password-in-unreachable-url", "unknown-role"],  # never print the URL in test ids
 )
 def test_bad_urls_fail_safely_without_leaking_credentials(fresh, url) -> None:  # type: ignore[no-untyped-def]
     from tracewise.db.session import DatabaseUnavailable

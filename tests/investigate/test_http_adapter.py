@@ -258,6 +258,18 @@ def test_never_exceeds_the_investigation_time_budget() -> None:
         (KEY, {}, "https://user:pw@model.invalid/v1"),
         (KEY, {"allow_loopback_http": True}, "http://10.0.0.1/v1"),
     ],
+    ids=[
+        "no-key",
+        "empty-key",
+        "short-key",
+        "key-with-space",
+        "empty-model",
+        "bad-model",
+        "too-many-retries",
+        "http-endpoint",
+        "credentials-in-url",
+        "non-loopback-http",
+    ],  # ids never echo the synthetic key
 )
 def test_missing_or_invalid_configuration_is_refused(key: str | None, cfg: dict[str, Any], endpoint: str) -> None:
     w = TestWire()
