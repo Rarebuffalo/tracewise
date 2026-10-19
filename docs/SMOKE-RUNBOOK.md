@@ -87,10 +87,39 @@ Every request uses the product's codec and adapter unchanged, with `store: false
 | Request size | 32 KiB |
 | Response size | 256 KiB |
 | `max_output_tokens` | 2,048 per request |
-| Time | 30 s per step; 90 s overall |
+| Time | **Wall-clock deadlines:** 30 s per step and 90 s for the whole run (the overall deadline is fixed at the start and never restarts; each step's deadline is the earlier of the two). See §4a. |
 | Host | only `POST https://api.openai.com/v1/responses`; any other URL is refused in-process; no redirects; proxy environment ignored |
 
 **Cost bound:** at most 3 requests × (under 1,500 input tokens + at most 2,048 output tokens), so under 4,500 input and 6,144 output tokens in total. The prices are not recorded (G-6). The owner multiplies these bounds by the approved model's prices (A-7).
+
+## 4a. How the deadlines are enforced (Phase 49)
+
+The deadline is a monotonic clock value shared by the run, the guarded transport and the live socket layer. Live
+mode uses httpx's own transport with its connection pool rebuilt on a custom httpcore network backend
+(`DeadlineBackend`). httpcore ships with httpx, so this adds no new dependency.
+
+| Phase of an exchange | Enforcement |
+|---|---|
+| Before a step or request | Refused once the deadline has passed (nothing is sent) |
+| Name resolution | Runs in a worker thread that is abandoned at the deadline (`getaddrinfo` has no timeout of its own) |
+| Connect, TLS handshake, every read and every write | Each socket operation's timeout is clamped to the time left |
+| An operation already blocked in the kernel (multi-step TLS handshake, a write split into several sends, a trickling or silent peer) | A watchdog thread shuts down the open socket when the wall clock passes the deadline; the blocked call returns with an error |
+| Response body | Checked against the deadline after every chunk, as well as by the socket layer |
+
+**Bound:** an exchange ends no later than the deadline plus the watchdog interval (20 ms) plus scheduling jitter.
+The streams and connections are closed on every exit path. The outcome is `deadline` (exit 10): the exchange is
+recorded as `deadline_exceeded: true`, with no response shape and no claim of completion.
+
+**Covered by tests** (`tests/investigate/test_openai_smoke_hardening.py`):
+- clamping of every socket operation, using a fake clock;
+- a trickling mock body cut off and closed;
+- no request started after the deadline;
+- the overall deadline does not restart across steps;
+- real loopback sockets, both a trickling peer and a silent peer, stopped at about 0.5 s although httpx was configured for 60 s;
+- slow name resolution bounded;
+- the watchdog interrupting a read blocked with a 10 s socket timeout. Removing the shutdown makes this test fail.
+
+**Not covered:** real TLS against the real endpoint, and the OS scheduler. The test bounds are generous (under 1–1.5 s for a 0.3–0.5 s deadline).
 
 ## 5. Evidence: recorded and discarded
 
@@ -108,19 +137,29 @@ Enum-like values are recorded only if they match `[a-z0-9_.]{1,64}`; anything el
 
 **Never recorded:** the key or any header value, prompts, response text, tool arguments, call ids, reasoning items, `encrypted_content`, error messages, request bodies. Reasoning items stay in memory for step 3 only. If the serialised evidence would contain the key, the harness writes nothing and exits 2.
 
+**Failures:** the evidence is always one JSON document. `failure` gives the class and the exception type; `detail` is set only for the harness's own fixed refusal messages, never for provider text. Each exchange records whatever was actually received:
+- a content-free response shape;
+- `schema_violations`: fixed codes such as `output_not_list`, `summary_not_list` or `content_not_list`, never the offending value;
+- `deadline_exceeded`;
+- or `transport_error` with the exception type only.
+
+An exchange that did not complete is never recorded with a response shape.
+
 ## 6. Outcome classes and success criteria
 
 | Exit | Class | Meaning |
 |---|---|---|
 | 0 | `pass` | All 3 steps were accepted and decoded under the recorded contract, and steps 1 and 3 returned text |
 | 2 | `refused` | Configuration or safety refusal; nothing (more) was sent |
-| 3 | `transport` | Connection failure or timeout. Says nothing about the contract. |
+| 1 | `harness_error` | An unexpected defect in the harness itself. Contained: no traceback, no content, never a pass. |
+| 3 | `transport` | Connection failure, or a provider-side timeout before our deadline. Says nothing about the contract. |
 | 4 | `auth` | 401/403 |
 | 5 | `quota` | A documented quota or billing 429; never retried |
 | 6 | `unavailable` | Rate-limit 429 or 5xx; not retried in the smoke run |
 | 7 | `request_refused` | Other 4xx. At step 3 this would mean the answer to G-7 is "no". |
-| 8 | `unsupported_response` | Malformed, incomplete, refusal, unknown shape or too large. The contract record or codec needs review. |
+| 8 | `unsupported_response` | Malformed JSON, valid JSON whose structure is not the recorded one (`schema_violations`), incomplete, refusal, unknown item, or too large. Never treated as completed. The contract record or codec needs review. |
 | 9 | `observation_missing` | The contract held, but the model did not call the tool, so G-5, G-7 and G-8 were not exercised |
+| 10 | `deadline` | The per-step or overall wall-clock deadline ended an exchange (§4a). Nothing is claimed for that exchange. |
 
 **Success:**
 - exit 0;

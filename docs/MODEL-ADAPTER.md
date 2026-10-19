@@ -129,7 +129,7 @@ Each open question is classified using only the recorded contract. "Fails closed
 
 **No code change was needed for 47B.** Every gap the contract leaves open already fails closed. The remaining ones can only be closed by the smoke observation or an owner decision.
 
-**Smoke harness:** `scripts/openai_smoke.py`, with its procedure, limits, evidence policy and authorisation checklist in [SMOKE-RUNBOOK.md](SMOKE-RUNBOOK.md). It is not part of the product: `providers.py` still refuses `LLM_PROVIDER=openai`.
+**Smoke harness:** `scripts/openai_smoke.py`, with its procedure, limits, evidence policy and authorisation checklist in [SMOKE-RUNBOOK.md](SMOKE-RUNBOOK.md). Phase 49 hardened it: unexpected JSON structures are `unsupported_response` (exit 8); the per-step and overall limits are wall-clock deadlines enforced at the socket layer (exit 10, runbook §4a); and decode now rejects a message whose `content` is not a list as a `WireError`. It is not part of the product: `providers.py` still refuses `LLM_PROVIDER=openai`.
 
 ## 3. Steps to finish T-605 (each needs your approval)
 

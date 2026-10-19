@@ -1,5 +1,12 @@
 # Change Log
 
+## 2026-10-19 (ay): Phase 49 smoke-harness hardening (still not run against OpenAI)
+
+- **D-48-1 fixed:** the harness's response recorder checks every JSON type before iterating or measuring it. Valid JSON with an unrecorded structure is `unsupported_response` (exit 8), with fixed `schema_violations` codes and no content. Unexpected harness errors are contained as `harness_error` (exit 1), with no traceback.
+- **Codec:** a message whose `content` is not a list is now a `WireError`; it previously raised `TypeError`, which the investigator already contained as `provider_failed`.
+- **D-48-2 fixed:** the per-step (30 s) and overall (90 s) limits are wall-clock deadlines, covering name resolution, connect, TLS, writes and the complete body. They are enforced by a deadline-aware httpcore backend (clamped socket operations, plus a watchdog that shuts down blocked sockets). The outcome is `deadline` (exit 10). No new dependency.
+- SMOKE-RUNBOOK §4a, §5 and §6 updated.
+
 ## 2026-10-19 (ax): Phase 47 smoke evaluation prepared (not run)
 
 - `scripts/openai_smoke.py`: an isolated harness, outside product code, for one authorised Responses API compatibility check. It runs 3 fixed synthetic requests through the product's codec and adapter, behind a guarded transport (one endpoint, size caps, at most 3 requests, no retries, 90 s) and records content-free evidence. Live mode needs a model id, a key file (owner-only, outside the repository; never from the environment) and an authorisation reference, and is refused under pytest or CI. 15 offline scenarios cover the exit classes.
