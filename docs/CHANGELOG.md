@@ -1,5 +1,12 @@
 # Change Log
 
+## 2026-10-19 (at): Phase 43 final independent review
+
+- **P-5b fixed:** stored error text could still carry input through PostgreSQL primary messages, pydantic locations, or foreign exception text. It now depends only on SQLSTATE and schema identifiers, fixed pydantic codes, Tracewise's own messages, or the class name.
+- L-2 wording now covers partly unavailable logs as well as truncated ones.
+- W-1: a test for the window between start-up and the first claim.
+- `docs/OWNER-DECISION-SHEET.md`: a plain-language decision list, with spec-settled items cited.
+
 ## 2026-10-19 (as): Phase 41 final local gate
 
 - Full suite (slow included) under the network guard: **699 passed, 0 failed, 0 external attempts**. Test output was scanned for all synthetic secret markers: 0 matches. Three parametrized tests had printed synthetic credentials in their **test IDs**; they now use descriptive IDs.
