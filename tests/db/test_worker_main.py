@@ -144,3 +144,23 @@ def test_worker_wires_the_log_retention_setting_into_the_analysis(pg, owner, mon
         assert seen and seen[0].log_max_bytes == 12345
     finally:
         rt.close()
+
+
+def test_signal_after_startup_but_before_the_loop_claims_nothing(pool, owner, server, tmp_path, head) -> None:  # type: ignore[no-untyped-def]  # noqa: F811
+    """Phase 43 (W-1): the window between 'worker.started' and the first claim. The handler stops the runtime that
+    already exists, so the loop exits at once and the queued job is untouched."""
+    from tracewise.jobs.worker import Worker
+
+    w = World(pool, owner, server, tmp_path / "ws", head)
+    jid = w.enqueue()
+
+    class SignalsFirst(Worker):
+        def run_forever(self, idle_sleep_s: float = 1.0, max_db_backoff_s: float = 30.0) -> None:
+            os.kill(os.getpid(), signal.SIGTERM)  # arrives after start-up, before any claim
+            super().run_forever(idle_sleep_s, max_db_backoff_s)
+
+    base = w.worker("pre")
+    closed: list[int] = []
+    rt = worker_main.Runtime(SignalsFirst(base.pool, base.handlers, "pre"), lambda: closed.append(1))
+    assert worker_main.main(["--idle-sleep", "0.05"], build=lambda st, wid: rt) == 0
+    assert closed == [1] and w.jobrow(jid)["status"] == "queued" and w.state.writes == []
