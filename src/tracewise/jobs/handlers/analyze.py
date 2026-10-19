@@ -115,7 +115,8 @@ def _check_scope(scope: dict[str, Any]) -> None:
 
 
 def _recheck(deps: AnalyzeDeps, job: AnalysisJob) -> None:
-    """T-701: authorisation may change while a job runs; re-read it right before any persistence or GitHub write."""
+    """T-701 / D-10(a): authorisation may change while a job runs; re-read it right before persisting and before
+    EVERY publication surface. Revocation raises JobCancelled: earlier surfaces stay, later ones never start."""
     with transaction(deps.pool, tenant=job.installation_id) as conn:  # T-705: tenant plane
         scope = repo.repository_scope(conn, job.repo_id)
     if scope is None or scope["installation_id"] != job.installation_id:
@@ -236,12 +237,14 @@ def _run(
     completed = outcome in ("diagnosed", "inconclusive")
 
     if pr_number is not None:
+        _recheck(deps, job)  # D-10(a): before EVERY publication surface
         r = publisher.pr_comment(
             t, analysis_id, render(vd, max_chars=deps.report_max_chars, marker=marker("pr_comment", job.workflow_id))
         )
         _note(results, missing, r)
     elif completed:
         # Push (or D-4: ambiguous/errored association) → the one write-once commit comment (FS-PUB-1).
+        _recheck(deps, job)  # D-10(a)
         r = publisher.commit_comment(
             t, analysis_id, render(vd, max_chars=deps.report_max_chars, marker=marker("commit_comment", job.workflow_id))
         )
@@ -250,6 +253,7 @@ def _run(
         missing["pr_comment"] = assoc_permission
         results["pr_comment"] = "unpublished_permission"
     text = publication_notes(render(vd, max_chars=deps.report_max_chars), missing)
+    _recheck(deps, job)  # D-10(a)
     r = publisher.check_run(t, analysis_id, check_output(vd, text))
     _note(results, missing, r)
     stages.ms["publish"] = int((time.monotonic() - t_pub) * 1000)
@@ -339,8 +343,10 @@ def _publish_notice(
     t = target
     if assoc.outcome == "matched" and assoc.number is not None:
         t = dataclasses.replace(target, pr_number=assoc.number)
+        _recheck(deps, job)  # D-10(a)
         _note(results, missing, publisher.pr_comment(t, analysis_id, body(marker("pr_comment", job.workflow_id))))
     title = "Missing permission" if status == "permission_denied" else "Could not complete the analysis"
+    _recheck(deps, job)  # D-10(a)
     _note(
         results,
         missing,

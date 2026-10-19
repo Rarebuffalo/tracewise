@@ -109,10 +109,10 @@ def test_repository_removed_mid_job_cancels_without_any_publication(pool, owner,
     assert w.state.writes == []
 
 
-def test_suspend_between_surfaces_does_not_stop_remaining_writes_today(pool, owner, server, tmp_path, head) -> None:  # type: ignore[no-untyped-def]  # noqa: F811
-    """Documents D-10: scope is re-checked before persisting, not between publication surfaces. A suspension that
-    lands after the commit comment was accepted does not stop the Check Run; the cached publish token is used.
-    Whether GitHub refuses that write for a suspended installation is a live gate (G-PLAT-6)."""
+def test_suspend_between_surfaces_stops_the_remaining_writes(pool, owner, server, tmp_path, head) -> None:  # type: ignore[no-untyped-def]  # noqa: F811
+    """D-10(a), decided (DECISIONS D-13): scope is re-checked before EVERY publication surface. A suspension that
+    lands after the commit comment was accepted stops the Check Run (F-2 closed). Whether GitHub itself refuses
+    writes for a suspended installation remains a live gate (G-PLAT-6)."""
     w = World(pool, owner, server, tmp_path / "ws", head)
     cc = re.compile(r"^/repos/acme/coffee/commits/[0-9a-f]{40}/comments$")
 
@@ -124,13 +124,13 @@ def test_suspend_between_surfaces_does_not_stop_remaining_writes_today(pool, own
     w.gh.routes.insert(0, ("POST", cc, suspend_after_comment))
     jid = w.enqueue()
     w.run()
-    assert w.jobrow(jid)["status"] == "succeeded"
-    assert (len(w.all_ccs()), len(w.state.check_runs)) == (1, 1)
+    assert (w.jobrow(jid)["status"], w.jobrow(jid)["last_error"]) == ("cancelled", "installation_suspended")
+    assert (len(w.all_ccs()), len(w.state.check_runs)) == (1, 0)
     assert owner.execute("SELECT status FROM installation WHERE id = 9").fetchone() == ("suspended",)
 
 
 def test_run_cancelled_by_suspension_is_not_reanalysed_after_unsuspend(pool, owner, server, tmp_path, head) -> None:  # type: ignore[no-untyped-def]  # noqa: F811
-    """PENDING D-10 (documents current behaviour; not a decision).
+    """D-10(b), decided (DECISIONS D-13): suspension-cancelled runs stay cancelled; only an explicit retry re-runs.
     A consequence of D-9/D-10 for review: run deduplication (repo, run, attempt) also blocks a
     re-analysis of a run whose job was cancelled while the installation was suspended."""
     from tests.db.test_lifecycle import failure
