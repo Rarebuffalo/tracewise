@@ -51,7 +51,9 @@ uv run uvicorn --factory tracewise.web.asgi:create_runtime_app --host 127.0.0.1 
 ```
 
 - `/healthz` is liveness and never touches the database.
-- `/readyz` returns 200 only when the database is reachable **and** at this build's schema revision; otherwise 503 with `unavailable` or `schema_mismatch`.
+- `/readyz` returns 200 only when the database is reachable, `DATABASE_URL_SYSTEM` connects as the BYPASSRLS system role, **and** the schema is at this build's revision. Otherwise it returns 503 with `unavailable`, `wrong_database_role` or `schema_mismatch`.
+- The web process refuses to start (non-zero exit; the message names the setting and the role, never the URL) when `DATABASE_URL_SYSTEM` is reachable but uses the tenant role, the owner or a superuser. This is the same contract as the worker. An unreachable database does not block startup; readiness reports it.
+- `python -m tracewise.ops report|alerts` checks the same role first. A wrong role prints `{"error": "wrong_database_role"}` and exits 1, like `database_unavailable`. Under RLS the tenant role would see no rows, and that must never be reported as `insufficient_data`. Exit 2 still means a firing alert.
 - A missing or invalid setting stops startup with its **name** only.
 - SIGTERM shuts down gracefully, closing the pool. uvicorn then re-raises the signal, so the exit status is −15 after "Application shutdown complete."
 

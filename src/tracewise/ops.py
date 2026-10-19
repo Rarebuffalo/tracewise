@@ -25,7 +25,7 @@ from typing import Any
 
 from psycopg_pool import ConnectionPool
 
-from tracewise.db.session import Conn, DatabaseUnavailable, transaction
+from tracewise.db.session import Conn, DatabaseUnavailable, WrongDatabaseRole, require_system_plane, transaction
 from tracewise.observe import event
 
 log = logging.getLogger(__name__)
@@ -194,7 +194,12 @@ def main(argv: list[str] | None = None, build: Callable[[], ConnectionPool[Conn]
     a = ap.parse_args(argv)
     pool = build()
     try:
+        require_system_plane(pool)  # under RLS the tenant role sees no rows: never report that as "no data"
         return _run(a, pool)
+    except WrongDatabaseRole as e:
+        event(log, "ops.failed", logging.ERROR, error_type=type(e).__name__, command=a.command)
+        print(json.dumps({"error": "wrong_database_role", "command": a.command}))
+        return 1
     except DatabaseUnavailable as e:
         event(log, "ops.failed", logging.ERROR, error_type=type(e).__name__, command=a.command)
         print(json.dumps({"error": "database_unavailable", "command": a.command}))
