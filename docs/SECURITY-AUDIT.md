@@ -92,3 +92,29 @@ No new defects were found in Phase 21. The Phase 18–20 findings are recorded i
 - **P-2:** investigator tool results sent to a model provider (source windows, grep lines, the trigger diff) are not redacted; only logs are. The spec does not require it. Redacting them would limit what a third party receives, but it is a data-sharing decision, so it is left for your review. The privacy draft discloses it.
 - **P-3 (spec conflict):** `problem_snippet` may be up to 4000 characters, while FS-SEC-3 says excerpts are ≤2 KB. It is now redacted, but its size limit is not aligned. Decide whether the 2 KB rule applies to source snippets.
 - **C-CFG-1 (config/spec conflict, Phase 25):** `LOG_MAX_BYTES_PER_JOB` (Settings, default 2 MB; listed in IMPLEMENTATION-PLAN §4 and `.env.example`) is **not used** by any code. The effective cap is `Limits.max_log_bytes` = 512 MB per log, streamed in bounded memory. Wiring the 2 MB value would break AT-LOG-04, which requires a 200 MB log. Decide whether to remove the setting or to wire it with a value compatible with AT-LOG-04. Nothing was changed.
+
+## 5. Phase 27 security and release gate (2026-10-19)
+
+The gate suite was run as one group (259 tests) under the session-wide network guard, with **0 external connection attempts**.
+
+| Gate item | Evidence (local tests and repository) | Result |
+|---|---|---|
+| SECURITY DEFINER: fixed `search_path`, `pg_temp` last; not executable by PUBLIC | `test_db_security.py::test_every_security_definer_function_pins_pg_temp_last_and_is_not_public`, `test_retention.py::test_definer_function_ignores_caller_temp_tables`, `test_fresh_install.py` | Pass |
+| Runtime roles cannot alter `alembic_version` or create objects | `test_db_security.py`, `test_fresh_install.py::test_runtime_paths_work_on_the_clean_install` | Pass |
+| Every tenant table has RLS and `tenant_isolation`; no undeclared table | `test_db_security.py` (schema guard, mutation-checked), `test_fresh_install.py` | Pass |
+| Analysis and publication use the tenant role with tenant context | `test_full_chain.py` and `test_operator_acceptance.py` (per-transaction audit) | Pass |
+| System operations use the system role, and wrong roles are refused | `test_process_entrypoints.py`, `test_reproducibility.py`, `test_db_security.py` | Pass |
+| Scrubbing covers nested values, encoded URLs, Authorization, Bearer, cookies, signature and token parameters | `test_logging.py` | Pass |
+| Startup failures of web, worker and CLIs do not leak secrets | `test_process_entrypoints.py`, `test_cli_entrypoints.py`, `test_fresh_install.py::test_bad_urls_*` | Pass |
+| Recovery is bounded and restart-safe | `test_recovery.py`, `test_recovery_faults.py` | Pass |
+| The purge never deletes in-flight work | `test_retention.py`, `test_adversarial.py::test_purge_alongside_jobs_in_every_state` | Pass |
+| Model output cannot invoke shell, write, network or patch tools | `test_loop.py` (read-only registry; rejection before dispatch), `test_http_adapter.py::test_prompt_injection_*`, `test_github_client.py` (network confinement) | Pass |
+| Stored diagnosis text is redacted (P-1) | `test_validate.py::test_stored_snippet_and_replacement_are_redacted` | Pass (fixed in Phase 23) |
+| No credentials or signed URLs in new tracked files | Pattern scan of every line added since `890e806` | 0 matches |
+
+**Not claimed:**
+- The TEMP and CREATE revocation exists in the role template and is verified on disposable clusters. It has **not** been applied to any real database.
+- No real credential has been provisioned (D-11).
+- No live exploitation testing was done.
+
+**Open review items from this run:** P-2, P-3, C-CFG-1 (§3 and §4 above).
