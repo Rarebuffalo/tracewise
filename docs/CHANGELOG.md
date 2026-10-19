@@ -1,5 +1,12 @@
 # Change Log
 
+## 2026-10-19 (ax): Phase 47 smoke evaluation prepared (not run)
+
+- `scripts/openai_smoke.py`: an isolated harness, outside product code, for one authorised Responses API compatibility check. It runs 3 fixed synthetic requests through the product's codec and adapter, behind a guarded transport (one endpoint, size caps, at most 3 requests, no retries, 90 s) and records content-free evidence. Live mode needs a model id, a key file (owner-only, outside the repository; never from the environment) and an authorisation reference, and is refused under pytest or CI. 15 offline scenarios cover the exit classes.
+- `docs/SMOKE-RUNBOOK.md`: procedure, limits, evidence policy, success criteria, and the owner authorisation checklist (A-1 to A-7).
+- MODEL-ADAPTER §2c: gap classification. No codec change was needed.
+- `make lint`/`make type` now include `scripts/` (strict mypy).
+
 ## 2026-10-19 (aw): Phase 46 independent verification of Phase 45
 
 - **Fixed (identifiers):** tool results and `function_call` items used `id[:64]`, which no recorded contract requires; two distinct ids sharing 64 characters collapsed into one, so a result could be paired with the wrong call. Ids are now exact; ambiguous pairing fails closed before sending.
