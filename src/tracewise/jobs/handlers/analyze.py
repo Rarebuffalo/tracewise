@@ -181,7 +181,19 @@ def _handle(ctx: JobContext, deps: AnalyzeDeps, job: AnalysisJob) -> dict[str, A
         # (e.g. Actions: read missing): say so on the remaining surfaces, do not retry (FS-ERR-3).
         res = _publish_notice(deps, job, target, publisher, rc_p, "permission_denied", e.permission)
         return {"outcome": "permission_denied", "publications": res}
-    except (LeaseLost, JobCancelled, PermanentError, RetryableError):
+    except RetryableError:
+        # A GitHub retryable error (or similar) on the genuine final attempt. FS-ERR-1 asks for a notice, but only
+        # when nothing could already be visible: once a surface was attempted, a 5xx/timeout may have been applied
+        # and a notice could contradict a published report (owner decision D-14 for that partial case).
+        if is_final() and not _analysis_recorded(deps, job):
+            try:
+                _publish_notice(deps, job, target, publisher, rc_p, "could_not_complete", None)
+            except (LeaseLost, JobCancelled):
+                raise
+            except Exception:
+                event(log, "analysis.notice_failed", logging.WARNING)
+        raise
+    except (LeaseLost, JobCancelled, PermanentError):
         raise
     except Exception:
         if is_final():  # FS-ERR-1: tell the user, then still fail the job (never reported as success)
@@ -191,6 +203,11 @@ def _handle(ctx: JobContext, deps: AnalyzeDeps, job: AnalysisJob) -> dict[str, A
                 # Best effort only: the original error is what gets recorded and retried/failed.
                 event(log, "analysis.notice_failed", logging.WARNING)
         raise
+
+
+def _analysis_recorded(deps: AnalyzeDeps, job: AnalysisJob) -> bool:
+    with transaction(deps.pool, tenant=job.installation_id) as conn:  # T-705: tenant plane
+        return repo.analysis_recorded(conn, job.installation_id, job.repo_id, job.run_id, job.attempt)
 
 
 def _run(
