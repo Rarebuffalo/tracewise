@@ -1,0 +1,30 @@
+name: Feature request
+description: Propose a change or a new capability.
+title: "feature: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what makes it hard today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behaviour
+      description: What should Tracewise do? Include what it must NOT do (e.g. stay read-only, stay inconclusive without evidence).
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: Who benefits, and any effect on security, tenant isolation, GitHub permissions, privacy or cost.
+    validations:
+      required: true

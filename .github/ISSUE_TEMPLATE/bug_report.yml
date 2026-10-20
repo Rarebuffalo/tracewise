@@ -1,0 +1,59 @@
+name: Bug report
+description: Something in Tracewise behaves incorrectly.
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Security vulnerabilities do not belong here.** Report them privately as described in SECURITY.md.
+        Remove tokens, keys, signed URLs, private code and private CI logs before posting.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What went wrong, in one or two sentences.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps, ideally a failing test or a synthetic log. Use synthetic data only.
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Commit (git rev-parse HEAD), Python version, PostgreSQL version, OS, and how you ran it (tests, local processes, benchmark).
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output (sanitised)
+      description: Error messages, event lines or test output, with secrets and private data removed.
+      render: text
+  - type: checkboxes
+    id: sanitised
+    attributes:
+      label: Confirmation
+      options:
+        - label: I removed secrets, tokens, signed URLs, private code and private logs from this report.
+          required: true
