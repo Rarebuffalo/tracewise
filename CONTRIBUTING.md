@@ -40,7 +40,8 @@ The database tests start their own disposable PostgreSQL clusters; you do not ne
 
 ## Before you open a pull request
 
-Run, and make sure all of these pass:
+The quickest way is `make ci`, which runs exactly what CI runs. Equivalently, run each of these and make sure
+they all pass:
 
 ```bash
 make check

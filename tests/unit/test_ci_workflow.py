@@ -46,3 +46,21 @@ def test_ci_cannot_pass_by_skipping_the_database_tests() -> None:
 def test_ci_never_runs_live_tests_or_the_model_smoke_harness() -> None:
     runs = run_lines()
     assert "-m live" not in runs and "openai_smoke" not in WF.read_text() and "OPENAI" not in WF.read_text()
+
+
+def test_make_ci_reproduces_the_workflow_test_gate() -> None:
+    """`make ci` must run the same pytest arguments, the same skip rule and the same gates as the workflow."""
+    make = (ROOT / "Makefile").read_text()
+    target = make.split("\nci:", 1)[1]
+    pytest_line = next(line for line in run_lines().splitlines() if "uv run pytest" in line)
+    args = pytest_line.split("uv run pytest", 1)[1].split("|", 1)[0].strip()
+    assert args in target
+    for gate in (
+        "lint",
+        "type",
+        "docs",
+        "tracewise.bench verify",
+        "skipped",
+        "set -eo pipefail",
+    ):  # errexit: a failure is never masked
+        assert gate in target, gate

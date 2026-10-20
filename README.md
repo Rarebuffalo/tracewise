@@ -167,6 +167,7 @@ All settings come from environment variables. [`.env.example`](.env.example) lis
 |---|---|
 | `make check` | ruff (lint + format check), mypy strict, pytest without slow and live tests, docs check |
 | `make test-all` | All non-live tests, slow included |
+| `make ci` | Everything the CI workflow runs (gates, truth lock, all non-live tests under the network guard, no skips) |
 | `PYTHONPATH=. uv run pytest -p tests.netguard -m "not live"` | The CI test command: everything non-live under the network guard |
 | `uv run python -m tracewise.bench verify` | Confirms the benchmark truth set matches its lock |
 
