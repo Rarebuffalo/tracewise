@@ -1,5 +1,8 @@
 # Change Log
 
+> **Commit hashes in this file before 2026-10-20 (bb) are pre-rewrite hashes.** The history was rewritten once to
+> redact signed URLs before the first push; map them with [HISTORY-REWRITE.md](HISTORY-REWRITE.md).
+
 ## 2026-10-20 (bb): Phase 52 final offline hardening and production-gate preparation
 
 - **Installer reports (prepass):** one npm error block, and pip's conflict report ending in `ResolutionImpossible`, each yield one primary. uv's `No solution found` is an installer error. Built against a 12-case development set. The **frozen evaluation set** (SHA-256 `45121652c5c2c829b3d1a9db85c921bd403310207701957b180646084b7ac852`, recorded before any code change and re-checked before its single run) scored **6/9 raw**: the 3 failures were mis-specified expectations about the runner `exit code` fallback, corrected and marked afterwards. Benchmark scores are unchanged; only B-06's primary count changed (2 → 1; not scored).
