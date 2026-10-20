@@ -116,9 +116,22 @@ class ToolBox:
             end if end is not None and end >= start else start + self.limits.max_read_lines - 1,
             start + self.limits.max_read_lines - 1,
         )
-        body = "\n".join(f"{n}: {lines[n - 1]}" for n in range(start, stop + 1))
-        header = f"{r.path} lines {start}-{stop} of {len(lines)}" + (f" (via symlink {path})" if r.path != path else "")
-        return ToolResult(True, f"{header}\n{body}"), (r.path, start, stop)
+        via = f" (via symlink {path})" if r.path != path else ""
+        # Whole lines only, within the output budget, so the recorded examined range (rule 2) is exactly what the
+        # model receives; _cap would otherwise cut the text but leave the full range recorded (Phase 57, F1).
+        budget = self.limits.max_output_chars - len(f"{r.path} lines {start}-{stop} of {len(lines)}{via}") - 80
+        rows: list[str] = []
+        used = 0
+        for n in range(start, stop + 1):
+            row = f"{n}: {lines[n - 1]}"
+            if rows and used + len(row) + 1 > budget:
+                break
+            rows.append(row[: max(1, budget)] if not rows else row)
+            used += len(rows[-1]) + 1
+        requested_stop, stop = stop, start + len(rows) - 1
+        more = f" (output limit reached; request lines {stop + 1}+ to continue)" if stop < requested_stop else ""
+        header = f"{r.path} lines {start}-{stop} of {len(lines)}{via}{more}"
+        return ToolResult(True, header + "\n" + "\n".join(rows)), (r.path, start, stop)
 
     def _list_dir(self, path: str = "") -> tuple[ToolResult, None]:
         try:
