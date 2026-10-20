@@ -25,3 +25,6 @@ research/final-audit/evidence/
 
 # Benchmark output (never product state, never committed)
 .bench-results/
+
+# Website build output and local email files (web/dev.py)
+.waitlist-mail/
