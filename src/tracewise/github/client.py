@@ -56,6 +56,10 @@ class Limits:
     secondary_default_wait_s: float = 60.0
     max_json_bytes: int = 10 * 1024 * 1024
     max_log_bytes: int = 512 * 1024 * 1024
+    # Total wall-clock budget for one log download. httpx's read timeout is per read, so a server trickling bytes
+    # could otherwise hold a worker indefinitely; at the budget the log is kept so far and flagged truncated, like
+    # the byte cap (Phase 57). Half the 10-minute job deadline (FS-ERR-2).
+    max_log_seconds: float = 300.0
     max_pages: int = 20
     read_timeout_s: float = 30.0
     connect_timeout_s: float = 5.0
@@ -85,6 +89,7 @@ class GitHubHTTP:
         limits: Limits | None = None,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.time,
+        monotonic: Callable[[], float] = time.monotonic,
         log_host_suffixes: tuple[str, ...] = DEFAULT_LOG_HOST_SUFFIXES,
         rnd: random.Random | None = None,
     ) -> None:
@@ -92,7 +97,7 @@ class GitHubHTTP:
         self._client = client or httpx.Client(
             timeout=httpx.Timeout(self.limits.read_timeout_s, connect=self.limits.connect_timeout_s)
         )
-        self._sleep, self._clock = sleep, clock
+        self._sleep, self._clock, self._monotonic = sleep, clock, monotonic
         self._log_hosts = log_host_suffixes
         self._rnd = rnd or random.Random()  # noqa: S311 - jitter only
 
@@ -180,6 +185,7 @@ class GitHubHTTP:
                 raise err.GitHubRetryable(f"log download failed ({resp.status_code})")
             size = 0
             truncated = False
+            started = self._monotonic()
             pending = ""  # the current unterminated line, at most _LINE_KEEP characters
             for chunk in resp.iter_text():
                 room = self.limits.max_log_bytes - size
@@ -195,13 +201,19 @@ class GitHubHTTP:
                 for part in parts[1:]:
                     yield pending
                     pending = part[:_LINE_KEEP]
+                if not truncated and self._monotonic() - started > self.limits.max_log_seconds:
+                    truncated = True  # out of time: keep the complete lines, drop the partial tail (as at the cap)
+                    log.warning(
+                        "log download stopped at its time budget", extra={"tw": {"budget_s": self.limits.max_log_seconds}}
+                    )
                 if truncated:
                     break
             if pending and not truncated:
                 yield pending
             if truncated:
                 owner.truncated = True
-                log.warning("log download truncated at cap", extra={"tw": {"cap_bytes": self.limits.max_log_bytes}})
+                if size >= self.limits.max_log_bytes:
+                    log.warning("log download truncated at cap", extra={"tw": {"cap_bytes": self.limits.max_log_bytes}})
 
     # -------------------------------------------------------------- internals
 
