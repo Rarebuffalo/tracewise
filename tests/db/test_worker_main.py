@@ -82,7 +82,11 @@ def test_second_signal_aborts_and_the_job_is_recovered_exactly_once(pool, owner,
     def send_twice() -> None:
         assert started.wait(30)
         os.kill(os.getpid(), signal.SIGINT)  # graceful stop requested
-        time.sleep(0.3)
+        # Wait until the worker has HANDLED the first signal (its handler swaps SIGINT to the default). Two SIGINTs
+        # delivered before Python runs the handler coalesce into one, which made this test flaky under load.
+        deadline = time.monotonic() + 10
+        while signal.getsignal(signal.SIGINT) is not signal.default_int_handler and time.monotonic() < deadline:
+            time.sleep(0.01)
         os.kill(os.getpid(), signal.SIGINT)  # impatient operator: abort now
 
     _later(send_twice)
