@@ -38,15 +38,21 @@ def changed_lines(diff: TriggerDiff) -> dict[str, set[int]]:
             continue
         lines: set[int] = set()
         new_no = 0
+        in_hunk = False
         for raw in f.patch.splitlines():
             m = _HUNK.match(raw)
             if m:
                 new_no = int(m.group(1))
+                in_hunk = True
                 continue
-            if raw.startswith("+") and not raw.startswith("+++"):
+            if not in_hunk:
+                continue  # file headers (`--- a/x`, `+++ b/x`) only occur before the first hunk
+            # Inside a hunk the first character alone is the marker: a removed `---` (YAML) or an added `++i` is
+            # still a change (Phase 57, F4).
+            if raw.startswith("+"):
                 lines.add(new_no)
                 new_no += 1
-            elif raw.startswith("-") and not raw.startswith("---"):
+            elif raw.startswith("-"):
                 lines.add(new_no)  # deletion point counts as a change at that position
             elif raw.startswith("\\"):
                 continue  # "\ No newline at end of file"
