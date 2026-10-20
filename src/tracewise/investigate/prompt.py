@@ -103,8 +103,20 @@ def system_prompt(max_calls: int) -> str:
     return SYSTEM_POLICY.format(max_calls=max_calls)
 
 
+_SAFE_PATH = re.compile(r"^[\w./@+-]{1,300}$")
+_SAFE_CODE = re.compile(r"^[\w.:-]{1,64}$")
+
+
+def _fact(value: object, pattern: re.Pattern[str]) -> str:
+    """A log-derived value shown in the trusted part only if it matches a strict shape; otherwise withheld."""
+    text = "" if value is None else str(value)
+    return text if text and pattern.match(text) else "unknown"
+
+
 def render_bundle(ev: Evidence, d: Delimiter) -> str:
-    """Bounded, structured view of the evidence. Facts from the jobs API are trusted; text is not."""
+    """Bounded, structured view of the evidence. Ids, numbers and statuses from the jobs API are trusted. Names
+    authored in the repository (jobs, steps, files) and anything extracted from logs are not: they are wrapped in
+    the untrusted delimiter, or shown only when they match a strict shape (Phase 57, F2)."""
     parts = [
         f"Repository: {ev.job.repo}  commit: {ev.job.head_sha}  event: {ev.job.event}  "
         f"run: {ev.job.run_id} attempt {ev.job.attempt}  conclusion: {ev.job.conclusion}"
@@ -112,7 +124,8 @@ def render_bundle(ev: Evidence, d: Delimiter) -> str:
     pre = ev.prepass
     for f in pre.failed if pre else []:
         parts.append(
-            f"Failed job (from the jobs API): {f.job} | step: {f.step} | command (from the log header): "
+            f"Failed job (from the jobs API): {d.wrap('job and step names', f'{f.job} | step: {f.step}')}"
+            + " | command (from the log header): "
             + (d.wrap("command", f.command) if f.command else "unknown")
         )
     for i, g in enumerate(pre.primaries if pre else [], 1):
@@ -123,7 +136,8 @@ def render_bundle(ev: Evidence, d: Delimiter) -> str:
             lines = [(n, t) for n, t in log.ordered() if c.log_line - 10 <= n <= c.log_line + 30][:MAX_CONTEXT_LINES]
             context = "\n".join(f"{n}: {t}" for n, t in lines)
         meta = (
-            f"Primary error {i}: tool={c.tool} kind={c.kind} code={c.code} location_in_log={c.path}:{c.line} "
+            f"Primary error {i}: tool={c.tool} kind={c.kind} code={_fact(c.code, _SAFE_CODE)} "
+            f"location_in_log={_fact(c.path, _SAFE_PATH)}:{c.line} "
             f"log_lines={c.span[0]}-{c.span[1]} siblings={len(g.members) - 1}"
         )
         parts.append(meta + "\n" + d.wrap(f"log job={c.job_id}", context or c.message))
@@ -131,7 +145,11 @@ def render_bundle(ev: Evidence, d: Delimiter) -> str:
         parts.append(f"{len(pre.cascades)} downstream (cascade) errors were set aside as secondary.")
     parts.append(
         "Changed files in the triggering push: "
-        + (", ".join(sorted(ev.trigger.changed_paths())[:50]) if ev.trigger.known else f"unknown ({ev.trigger.reason})")
+        + (
+            d.wrap("changed file names", ", ".join(sorted(ev.trigger.changed_paths())[:50]))
+            if ev.trigger.known
+            else f"unknown ({ev.trigger.reason})"  # Tracewise's own fixed wording, not untrusted text
+        )
     )
     if not ev.source.available:
         parts.append("Repository source is UNAVAILABLE for this run; tools will report it.")
