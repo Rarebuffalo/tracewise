@@ -132,7 +132,10 @@ def test_call_budget_output_cap_and_diff() -> None:
     b = box(max_calls=3, max_output_chars=100)
     assert b.call("get_diff", {}).status == "unavailable"
     long = b.call("read_file", {"path": "coffee_shop/pricing.py"})
-    assert long.content.endswith("(output truncated)") and len(long.content) < 130
+    # Phase 57 (F1): read_file returns whole lines within the cap and records exactly those lines as examined,
+    # instead of cutting the text while recording the full range.
+    assert len(long.content) <= 100 and "output limit reached" in long.content
+    assert b.files_examined()[-1]["end"] < 41
     b.call("list_dir", {})
     assert b.call("list_dir", {}).status == "budget_exhausted" and b.budget_exhausted
     assert len(b.log) == 3
