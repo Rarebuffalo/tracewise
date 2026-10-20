@@ -66,6 +66,10 @@ GITHUB_APP_ID=<app-id> GITHUB_APP_PRIVATE_KEY_PATH=<path-to-pem> LLM_PROVIDER=op
 uv run python -m tracewise.worker [--worker-id ID] [--once] [--idle-sleep 1.0]
 ```
 
+Note: `LLM_PROVIDER=openai` **currently refuses to start** (the adapter is validated offline only; see
+[MODEL-ADAPTER.md](MODEL-ADAPTER.md) §2b). The example shows the intended production shape. For local process
+checks use `TW_ENV=test LLM_PROVIDER=fake` ([DEVELOPMENT.md](DEVELOPMENT.md) §4).
+
 The worker refuses to start (exit 2) when:
 - a setting is missing;
 - the same URL is used for both roles;

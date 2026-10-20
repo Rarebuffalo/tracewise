@@ -26,6 +26,16 @@
 | [GITHUB-CONTRACT-AUDIT.md](GITHUB-CONTRACT-AUDIT.md) | G-PLAT gates versus recorded evidence and tests; findings F-1 to F-3 |
 | [BENCHMARK-REVIEW-QUEUE.md](BENCHMARK-REVIEW-QUEUE.md) | Benchmark review items (proposals only; truth unchanged) |
 | [CHANGELOG.md](CHANGELOG.md) | What changed, with validation results |
+| [DEVELOPMENT.md](DEVELOPMENT.md) | Local setup, running the processes, troubleshooting, glossary |
+| [CONFIGURATION.md](CONFIGURATION.md) | Every environment variable, defaults, which process needs what |
+| [TESTING.md](TESTING.md) | Test commands, markers, layout, offline guarantees (network guard, no skips) |
+| [OWNER-DECISION-PACKET.md](OWNER-DECISION-PACKET.md) | The consolidated list of open owner decisions |
+| [SMOKE-RUNBOOK.md](SMOKE-RUNBOOK.md) | The prepared (not executed) OpenAI smoke evaluation and its authorisation checklist |
+| [HISTORY-REWRITE.md](HISTORY-REWRITE.md) | The 2026-10-20 redaction rewrite and the old → new commit hash map |
+
+Project-level files: [../README.md](../README.md), [../CONTRIBUTING.md](../CONTRIBUTING.md),
+[../SECURITY.md](../SECURITY.md), [../CODE_OF_CONDUCT.md](../CODE_OF_CONDUCT.md).
+**Commit hashes quoted in dated records are pre-rewrite** where they predate 2026-10-20; see HISTORY-REWRITE.md.
 
 **Rules that apply everywhere:**
 
