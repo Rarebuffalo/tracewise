@@ -1,9 +1,30 @@
-# Tracewise
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/tracewise-logo-tagline-on-dark.svg">
+    <img src="docs/assets/tracewise-logo-tagline-on-light.svg" alt="Tracewise — Trace failures. Find answers." width="560">
+  </picture>
+</p>
 
-**Trace failures. Find answers.**
+<p align="center">
+  <strong>Evidence-backed diagnosis for failed GitHub Actions runs.</strong>
+</p>
 
-[![ci](https://github.com/Rarebuffalo/tracewise/actions/workflows/ci.yml/badge.svg)](https://github.com/Rarebuffalo/tracewise/actions/workflows/ci.yml)
-![python](https://img.shields.io/badge/python-3.12%2B-blue)
+<p align="center">
+  <a href="https://github.com/Rarebuffalo/tracewise/actions/workflows/ci.yml"><img src="https://github.com/Rarebuffalo/tracewise/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
+  <img src="https://img.shields.io/badge/python-3.12%2B-3B82F6" alt="Python 3.12 or newer">
+  <img src="https://img.shields.io/badge/status-pre--release-8B5CF6" alt="Status: pre-release">
+</p>
+
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="docs/ARCHITECTURE.md">Architecture</a> ·
+  <a href="docs/DEVELOPMENT.md">Development</a> ·
+  <a href="docs/TESTING.md">Testing</a> ·
+  <a href="SECURITY.md">Security</a> ·
+  <a href="CONTRIBUTING.md">Contributing</a>
+</p>
+
+---
 
 Tracewise is a GitHub App that diagnoses failed GitHub Actions runs. When a workflow run fails, it reads the failed
 jobs' logs and the code at the failing commit and runs a bounded, read-only investigation. It publishes a short
