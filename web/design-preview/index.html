@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tracewise — Trace failures. Find answers. (design preview)</title>
+<meta name="description" content="Tracewise is a pre-release GitHub App that diagnoses failed GitHub Actions runs and cites the evidence for every claim. Request early access.">
+<meta name="robots" content="noindex">
+<link rel="icon" href="assets/logo/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<!-- Design-preview banner: this page is a visual prototype, not the production site -->
+<div class="preview-banner" role="note">
+  <strong>Design preview.</strong> Not a live site: the form sends nothing, the counter is simulated, and the examples are illustrative.
+</div>
+
+<header class="site-header">
+  <div class="wrap header-row">
+    <a class="brand-card" href="#top" aria-label="Tracewise home">
+      <span class="tape" aria-hidden="true"></span>
+      <img src="assets/logo/tracewise-logo-tagline-on-light.svg" alt="Tracewise — Trace failures. Find answers." width="214" height="57">
+    </a>
+    <nav class="nav" aria-label="Primary">
+      <a href="#how">How it works</a>
+      <a href="#report">The report</a>
+      <a href="#status">Status</a>
+      <a href="#faq">FAQ</a>
+    </nav>
+    <span class="status-chip"><span class="dot" aria-hidden="true"></span>Pre-release</span>
+    <a class="btn btn-ink btn-sm" href="#join">Request early access</a>
+  </div>
+</header>
+
+<main id="main">
+<!-- ============================================================ HERO -->
+<section class="hero" id="top">
+  <div class="wrap hero-grid">
+    <div class="hero-copy">
+      <p class="stamp stamp-ink stamp-sm" aria-label="Early access, pre-release">Early access · pre-release</p>
+      <h1>Your CI failed.<br><span class="h1-2">Follow the paper trail to <em>why</em>.</span></h1>
+      <p class="lede">Tracewise is a GitHub App for failed GitHub Actions runs. It reads the failed job's log, the code at that commit and what your push changed, then posts a short diagnosis where <strong>every claim points to the line it came from</strong>. When the evidence isn't enough, it says so instead of guessing.</p>
+
+      <form class="inline-form" data-preview-form action="#" novalidate>
+        <label class="sr-only" for="hero-email">Email address</label>
+        <input id="hero-email" name="email" type="email" inputmode="email" autocomplete="email" placeholder="you@company.dev" required>
+        <button class="btn btn-ink" type="submit">Request early access</button>
+        <p class="form-note">We'll send one email to confirm, then only early-access news. Unsubscribe in one click.</p>
+        <p class="form-success" hidden><span class="stamp stamp-cyan stamp-xs">On the list</span> Check your inbox to confirm. <span class="preview-tag">(preview: nothing was sent)</span></p>
+      </form>
+      <a class="film-link" href="#film"><span class="play" aria-hidden="true"></span>Watch the 68-second film</a>
+    </div>
+
+    <!-- The evidence trail: the product explained in one picture -->
+    <figure class="trail" aria-labelledby="trail-cap">
+      <figcaption id="trail-cap" class="sr-only">Illustrative example: a failed test run, the log lines that matter, the code at the commit, and the diagnosis Tracewise posts — connected by one thread of evidence.</figcaption>
+      <svg class="trail-thread" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path id="trail-path" d=""/></svg>
+
+      <article class="ev ev-run" data-pin="0">
+        <span class="pin" aria-hidden="true"></span>
+        <p class="ev-label">The failed run</p>
+        <p class="ev-title">test (3.12)</p>
+        <p class="mono ev-sub">Run pytest -q</p>
+        <p class="mono ev-err">exit code 1</p>
+        <span class="stamp stamp-red stamp-failed" aria-hidden="true">Failed</span>
+      </article>
+
+      <article class="ev ev-log receipt" data-pin="1">
+        <span class="pin" aria-hidden="true"></span>
+        <p class="ev-label">The lines that matter</p>
+        <pre class="mono log"><span class="dim">=========== FAILURES ===========</span>
+tests/test_pricing.py:18
+    assert price_with_tax(1.00) == 1.21
+<mark>E   assert 0.21 == 1.21</mark></pre>
+        <p class="ev-foot">log lines 12–14</p>
+      </article>
+
+      <article class="ev ev-code" data-pin="2">
+        <span class="pin" aria-hidden="true"></span>
+        <p class="ev-label">The code at <span class="mono">9f3c2e1</span></p>
+        <pre class="mono code"><span class="ln">39</span> def price_with_tax(subtotal):
+<span class="ln">40</span>   """Price including tax."""
+<mark><span class="ln">41</span>   return round(subtotal * TAX_RATE, 2)</mark></pre>
+        <p class="ev-foot"><span class="mono">storefront/pricing.py</span> · changed in this push</p>
+      </article>
+
+      <article class="ev ev-report" data-pin="3">
+        <span class="pin" aria-hidden="true"></span>
+        <div class="report-head"><img src="assets/logo/tracewise-symbol.svg" alt="" width="18" height="16"><strong>Tracewise</strong><span>check run · test (3.12)</span></div>
+        <p class="ev-label">Likely root cause (assessment)</p>
+        <p class="ev-cause"><span class="mono">price_with_tax()</span> returns only the tax amount, not the price plus tax.</p>
+        <ul class="cites" aria-label="Evidence cited">
+          <li>log L12–14</li><li>pricing.py:41</li><li>push diff</li>
+        </ul>
+        <span class="stamp stamp-ink stamp-conf" aria-label="Confidence: medium">Confidence: medium</span>
+      </article>
+      <p class="illustrative">Illustrative example · <span class="mono">acme/storefront</span></p>
+    </figure>
+  </div>
+</section>
+
+<!-- ============================================================ PROBLEM -->
+<section class="problem" aria-labelledby="problem-h">
+  <div class="wrap problem-grid">
+    <div class="guess-board" aria-hidden="true">
+      <span class="g g1">Flaky test?</span><span class="g g2">Cache?</span><span class="g g3">Timeout?</span><span class="g g4">It worked yesterday</span>
+      <span class="stamp stamp-red stamp-rerun">Rerun</span>
+    </div>
+    <div>
+      <h2 id="problem-h">The red check is the easy part.</h2>
+      <p>A failed run hands you an exit code and a log that can run to thousands of lines. The line that explains it is in there somewhere — between deprecation warnings, progress bars and the output of every test that passed.</p>
+      <p>So you scroll. You guess. You rerun it and hope it was flaky. Tracewise does the reading for you, and shows its work.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ HOW IT WORKS -->
+<section class="how" id="how" aria-labelledby="how-h">
+  <div class="wrap">
+    <p class="kicker">How it works</p>
+    <h2 id="how-h">From a red check to a receipt, in four steps.</h2>
+    <ol class="steps" data-steps>
+      <svg class="steps-thread" aria-hidden="true"><path/></svg>
+      <li class="step">
+        <span class="pin" aria-hidden="true"></span>
+        <span class="step-n mono">01</span>
+        <h3>A run fails</h3>
+        <p>GitHub tells Tracewise when a workflow run fails in a repository you've granted it.</p>
+      </li>
+      <li class="step">
+        <span class="pin" aria-hidden="true"></span>
+        <span class="step-n mono">02</span>
+        <h3>It finds the lines that matter</h3>
+        <p>A deterministic pre-pass pulls the primary error lines out of the failed job's log — before any AI is involved — and tells one failure repeated many times apart from several independent ones.</p>
+      </li>
+      <li class="step">
+        <span class="pin" aria-hidden="true"></span>
+        <span class="step-n mono">03</span>
+        <h3>It follows them into the code</h3>
+        <p>A bounded, read-only investigation reads the code at the failing commit and your push's diff. It can read, search, list and diff — nothing else — within 12 calls and 120 seconds.</p>
+      </li>
+      <li class="step">
+        <span class="pin" aria-hidden="true"></span>
+        <span class="step-n mono">04</span>
+        <h3>It posts the receipt</h3>
+        <p>Every cited file, line and link is checked against what was actually examined. The diagnosis — or an honest "inconclusive" — lands as a Check Run and a PR or commit comment.</p>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<!-- ============================================================ REPORT PREVIEW -->
+<section class="report" id="report" aria-labelledby="report-h">
+  <div class="wrap report-grid">
+    <div class="report-copy">
+      <p class="kicker">The report</p>
+      <h2 id="report-h">What lands on your pull request.</h2>
+      <p>Short enough to read in the PR, specific enough to check. Each finding names its evidence, the confidence is stated with its basis, and a suggested fix is text — never a commit.</p>
+      <div class="tabs" role="tablist" aria-label="Report outcome">
+        <button role="tab" id="tab-diag" aria-controls="panel-diag" aria-selected="true">Diagnosed</button>
+        <button role="tab" id="tab-inc" aria-controls="panel-inc" aria-selected="false" tabindex="-1">Inconclusive</button>
+      </div>
+      <ul class="annotations">
+        <li><span class="ann-mark" aria-hidden="true">1</span> Every claim links to a log line, file or diff.</li>
+        <li><span class="ann-mark" aria-hidden="true">2</span> Confidence is stated, with the reason for it.</li>
+        <li><span class="ann-mark" aria-hidden="true">3</span> When it can't tell, it says so — and what would help.</li>
+      </ul>
+    </div>
+
+    <div class="sheet-wrap">
+      <article class="sheet" id="panel-diag" role="tabpanel" aria-labelledby="tab-diag">
+        <p class="sheet-title"><img src="assets/logo/tracewise-symbol.svg" alt="" width="20" height="18"> Tracewise: Code regression in <code>test (3.12)</code> › <code>Run pytest -q</code></p>
+        <dl class="facts">
+          <div><dt>Likely root cause (assessment)</dt><dd><code>price_with_tax()</code> returns only the tax amount, not the price plus tax. <span class="ann-mark" aria-hidden="true">1</span></dd></div>
+          <div><dt>Confidence</dt><dd>Medium — the failing assertion and the changed line agree; no test exercises the fix yet. <span class="ann-mark" aria-hidden="true">2</span></dd></div>
+        </dl>
+        <h4>What failed (observed in the log)</h4>
+        <div class="loupe-zone" data-loupe>
+          <pre class="mono log">tests/test_pricing.py:18: in test_tax_is_added
+    assert price_with_tax(1.00) == 1.21
+<mark>E   assert 0.21 == 1.21</mark></pre>
+          <span class="cite">log lines 12–14</span>
+        </div>
+        <h4>Problematic code (observed at <code>9f3c2e1abc12</code>)</h4>
+        <pre class="mono code"><mark>storefront/pricing.py:41    return round(subtotal * TAX_RATE, 2)</mark></pre>
+        <h4>Suggested fix (text only; not applied)</h4>
+        <p>Return <code>round(subtotal * (1 + TAX_RATE), 2)</code>.</p>
+        <h4>Attribution (computed from the push's diff)</h4>
+        <p>Changed <code>storefront/pricing.py</code>, which is implicated.</p>
+        <p class="sheet-foot">Illustrative example · fictional repository <code>acme/storefront</code></p>
+      </article>
+
+      <article class="sheet" id="panel-inc" role="tabpanel" aria-labelledby="tab-inc" hidden>
+        <p class="sheet-title"><img src="assets/logo/tracewise-symbol.svg" alt="" width="20" height="18"> Tracewise: could not determine the root cause for <code>e2e</code> › <code>Run npm test</code></p>
+        <p>Tracewise did not name a root cause because the log has no error line to anchor a diagnosis (only an exit code, timeout or kill). No fix is suggested. <strong>This is a deliberate outcome, not an error in your build.</strong> <span class="ann-mark" aria-hidden="true">3</span></p>
+        <h4>What failed (observed in the log)</h4>
+        <pre class="mono log">##[error]The job running on runner GitHub Actions 7 has exceeded the maximum execution time of 30 minutes.</pre>
+        <h4>What would help</h4>
+        <ol class="helps"><li>Re-run the job with test output streamed to the log, so the hanging test is visible.</li><li>Add a per-test timeout so a stuck test fails with its name.</li></ol>
+        <p class="sheet-foot">Illustrative example · fictional repository <code>acme/storefront</code></p>
+        <span class="stamp stamp-slate stamp-inc" aria-hidden="true">Inconclusive</span>
+      </article>
+      <div class="loupe" aria-hidden="true"><div class="loupe-inner"></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ DIFFERENCE -->
+<section class="ledger-sec" aria-labelledby="ledger-h">
+  <div class="wrap">
+    <p class="kicker">The difference</p>
+    <h2 id="ledger-h">Receipts, not guesses.</h2>
+    <div class="ledger receipt">
+      <div class="ledger-col">
+        <h3>Tracewise will</h3>
+        <ul class="ticks">
+          <li>Cite the log line, file and commit behind every claim</li>
+          <li>Say how confident it is, and why</li>
+          <li>Say "inconclusive" when the evidence runs out</li>
+          <li>Ask GitHub only for: Actions, Contents and Metadata <em>read</em>; Checks and Pull requests <em>write</em> (to post its report)</li>
+        </ul>
+      </div>
+      <div class="ledger-col">
+        <h3>Tracewise won't</h3>
+        <ul class="crosses">
+          <li>Push commits, open pull requests or apply fixes</li>
+          <li>Run your code or reach other systems while it investigates</li>
+          <li>Keep your full logs or full source files<sup><a href="#fn-privacy">*</a></sup></li>
+          <li>Pretend to know when it doesn't</li>
+        </ul>
+      </div>
+      <p class="ledger-foot" id="fn-privacy">* As implemented today and described in the draft privacy notice, which will be reviewed before any pilot.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ WHO -->
+<section class="who" aria-labelledby="who-h">
+  <div class="wrap who-grid">
+    <div>
+      <p class="kicker">Who it's for</p>
+      <h2 id="who-h">For whoever gets the red check.</h2>
+      <p>Maintainers and engineering teams whose GitHub Actions runs fail often enough to cost real time — and who'd rather check a cited diagnosis than read a whole log.</p>
+    </div>
+    <div class="formats receipt">
+      <p class="ev-label">Recognises the output of</p>
+      <ul class="format-list mono">
+        <li>pytest</li><li>Python tracebacks</li><li>ruff</li><li>mypy</li><li>tsc</li><li>jest</li><li>vitest</li><li>eslint</li><li>pip</li><li>npm</li><li>uv</li>
+      </ul>
+      <p class="formats-note">GitHub Actions only, for now.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ FILM -->
+<section class="film" id="film" aria-labelledby="film-h">
+  <div class="wrap">
+    <h2 id="film-h" class="sr-only">The Paper Trail film</h2>
+    <div class="film-frame">
+      <video controls preload="none" playsinline poster="assets/film-poster.jpg" aria-label="Paper Trail, the 68-second Tracewise film">
+        <source src="../../tracewise-brand/paper-trail/out/final/tracewise-paper-trail-16x9.mp4" type="video/mp4">
+        <track kind="captions" src="../../tracewise-brand/paper-trail/out/final/captions/main.vtt" srclang="en" label="English">
+      </video>
+      <p class="film-cap">“Paper Trail” · 68 s · captions available · illustrative example</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ STATUS -->
+<section class="status" id="status" aria-labelledby="status-h">
+  <div class="wrap status-grid">
+    <div>
+      <p class="kicker">Where it is today</p>
+      <h2 id="status-h">Honest about the build, too.</h2>
+      <p>Tracewise is pre-release. The analysis pipeline is built and tested offline; it hasn't run on live repositories yet. Early access is how it gets there — with a small group of teams who'll tell us when it's wrong.</p>
+    </div>
+    <div class="build-receipt receipt" aria-label="Build status">
+      <p class="mono receipt-head">TRACEWISE · BUILD STATUS</p>
+      <ul class="build mono">
+        <li class="done">Analysis pipeline, built and tested offline</li>
+        <li class="done">Evidence validator and report format</li>
+        <li class="next">First runs on live GitHub repositories</li>
+        <li class="next">AI model provider connected</li>
+        <li class="next">Hosted service</li>
+      </ul>
+      <p class="mono receipt-foot">— early access opens in small groups —</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ JOIN -->
+<section class="join" id="join" aria-labelledby="join-h">
+  <div class="wrap join-grid">
+    <div>
+      <p class="kicker">Early access</p>
+      <h2 id="join-h">Be one of the first repositories it reads.</h2>
+      <ol class="next-steps">
+        <li><strong>Confirm your email.</strong> One click, so we know it's really you.</li>
+        <li><strong>Wait for a pilot slot.</strong> We'll invite small groups as it's ready, and tell you exactly what it can and can't do yet.</li>
+        <li><strong>Install it where you choose.</strong> You pick the repositories; you can remove it at any time.</li>
+      </ol>
+      <p class="counter" data-counter hidden><span class="counter-n" data-counter-n>50+</span> developers have confirmed a spot. <span class="preview-tag">(simulated; the real figure is a rounded-down count of confirmed signups, shown only from 50)</span></p>
+    </div>
+
+    <form class="signup receipt" data-preview-form action="#" novalidate aria-labelledby="join-h">
+      <span class="pin" aria-hidden="true"></span>
+      <div class="field">
+        <label for="email">Email <span class="req">required</span></label>
+        <input id="email" name="email" type="email" inputmode="email" autocomplete="email" required placeholder="you@company.dev">
+        <p class="err" id="email-err" hidden>Please enter an email address like name@example.com.</p>
+      </div>
+      <div class="field">
+        <label for="gh">GitHub username <span class="opt">optional</span></label>
+        <input id="gh" name="github" type="text" autocomplete="username" spellcheck="false" placeholder="octocat">
+        <p class="hint">Helps us plan invites. We won't access anything with it.</p>
+      </div>
+      <label class="consent"><input type="checkbox" name="updates"> <span>Also send me occasional product updates (a few a year). <span class="opt">optional</span></span></label>
+      <!-- honeypot (production): hidden from people, filled by naive bots -->
+      <div class="hp" aria-hidden="true"><label>Leave empty<input tabindex="-1" autocomplete="off" name="website"></label></div>
+      <button class="btn btn-ink btn-block" type="submit">Request early access</button>
+      <p class="form-note">We'll email you to confirm, and again when a pilot slot opens. Nothing else unless you tick the box. No sharing, no tracking pixels, one-click unsubscribe and deletion.</p>
+      <div class="form-success" hidden>
+        <span class="stamp stamp-cyan">On the list</span>
+        <p><strong>Almost there.</strong> We sent a confirmation link to <span data-echo>your inbox</span>. It expires in 24 hours.</p>
+        <fieldset class="field followup">
+          <legend>One question while you're here — how often does CI fail on you? <span class="opt">optional</span></legend>
+          <div class="chips">
+            <label><input type="radio" name="freq" value="daily"><span>Daily</span></label>
+            <label><input type="radio" name="freq" value="weekly"><span>Weekly</span></label>
+            <label><input type="radio" name="freq" value="monthly"><span>Monthly</span></label>
+            <label><input type="radio" name="freq" value="rarely"><span>Rarely</span></label>
+          </div>
+        </fieldset>
+        <p class="preview-tag">Design preview: nothing was sent or stored.</p>
+      </div>
+    </form>
+  </div>
+</section>
+
+<!-- ============================================================ FAQ -->
+<section class="faq" id="faq" aria-labelledby="faq-h">
+  <div class="wrap faq-grid">
+    <h2 id="faq-h">Questions, answered plainly.</h2>
+    <div class="faq-list">
+      <details><summary>Can I use Tracewise today?</summary><p>Not yet. It's pre-release: the pipeline is built and tested offline but hasn't run on live repositories, no AI model is connected and there's no hosted service. Joining the list is how you get an invite when the first pilot opens.</p></details>
+      <details><summary>What access does the GitHub App ask for?</summary><p>Actions, Contents and Metadata <strong>read</strong>, to fetch the failed run's logs and the code at that commit; Checks and Pull requests <strong>write</strong>, only to post its report. You choose which repositories it can see, and can suspend or uninstall it at any time.</p></details>
+      <details id="faq-data"><summary>What happens to my logs and code?</summary><p>For a failed run it reads the job's logs, the triggering commit's changes and the specific files it needs, with a short-lived token limited to that repository. Once an AI model is enabled (planned: OpenAI; not enabled yet), excerpts are sent to it with secret-like values redacted. Full logs and full source files aren't stored; the diagnosis and short excerpts are, for a limited time. All of this is described in a draft privacy notice that will be reviewed before any pilot.</p></details>
+      <details><summary>Will it change my code?</summary><p>No. The investigation can only read, search, list files and read diffs. A suggested fix is text in the report — it never commits, pushes or opens a pull request.</p></details>
+      <details><summary>What if it's wrong?</summary><p>It can be. That's why every claim links to its evidence, the confidence comes with its reason, details it can't verify are removed or downgraded, and it says "inconclusive" rather than guess. Early-access feedback is how it gets better.</p></details>
+      <details><summary>Which projects does it work with?</summary><p>GitHub Actions only. Its pre-pass recognises output from pytest, Python tracebacks, ruff, mypy, tsc, jest, vitest, eslint and installers (pip, npm, uv).</p></details>
+      <details><summary>How is this different from an AI "fix it" button?</summary><p>Tracewise doesn't write code. Its job is to show you what it found and exactly where it found it — log line, file, commit, diff — and to tell you plainly when the evidence isn't enough. You decide what to change.</p></details>
+      <details><summary>What will it cost?</summary><p>Pricing isn't decided. Joining the list costs nothing and commits you to nothing.</p></details>
+      <details><summary>How do I get off the list?</summary><p>Every email has a one-click unsubscribe, and you can ask for your signup to be deleted at any time.</p></details>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ FINAL CTA -->
+<section class="final" aria-labelledby="final-h">
+  <div class="wrap final-inner">
+    <div class="brand-card brand-card-lg" aria-hidden="true">
+      <span class="tape" aria-hidden="true"></span>
+      <img src="assets/logo/tracewise-logo-tagline-on-light.svg" alt="" width="420" height="111">
+    </div>
+    <h2 id="final-h" class="sr-only">Trace failures. Find answers.</h2>
+    <p>Next time CI fails, read the receipt — not the whole log.</p>
+    <a class="btn btn-ink btn-lg" href="#join">Request early access</a>
+  </div>
+</section>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap footer-row">
+    <img src="assets/logo/tracewise-logo-horizontal-on-light.svg" alt="Tracewise" width="120" height="32">
+    <p>Pre-release software. Examples use a fictional repository, <span class="mono">acme/storefront</span>.</p>
+    <p><a href="#faq-data">Privacy (draft)</a></p>
+  </div>
+</footer>
+
+<!-- Design-review panel (preview only) -->
+<aside class="review" aria-label="Design review controls">
+  <button class="review-toggle" aria-expanded="false" aria-controls="review-body">Review</button>
+  <div class="review-body" id="review-body" hidden>
+    <p class="review-h">Design review</p>
+    <label><input type="checkbox" data-opt="motion" checked> Motion</label>
+    <label><input type="checkbox" data-opt="grain" checked> Paper grain</label>
+    <p class="review-h">Signup counter</p>
+    <label><input type="radio" name="ctr" value="hidden" checked> Hidden (below threshold)</label>
+    <label><input type="radio" name="ctr" value="shown"> Shown from 50, rounded down (e.g. 50+)</label>
+    <p class="review-h">Form state</p>
+    <button type="button" data-state="idle">Idle</button>
+    <button type="button" data-state="error">Error</button>
+    <button type="button" data-state="success">Success</button>
+  </div>
+</aside>
+
+<script src="preview.js" defer></script>
+</body>
+</html>
