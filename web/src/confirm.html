@@ -1,0 +1,85 @@
+<!--meta path="/confirm/" title="Confirm your email — Tracewise" description="Confirm your Tracewise early-access signup." robots="noindex, nofollow"-->
+{{> head}}
+<script type="module" src="/js/confirm.mjs"></script>
+</head>
+<body>
+{{> header}}
+<main id="main" class="page">
+  <div class="wrap">
+    <section class="page-card receipt" aria-live="polite">
+      <span class="pin" aria-hidden="true"></span>
+
+      <div class="state" data-state="ready" hidden>
+        <p class="kicker">Early access</p>
+        <h1>One last step.</h1>
+        <p>Press the button to confirm this email address and join the Tracewise early-access list.</p>
+        <button class="btn btn-ink" type="button" data-confirm><span class="spin" aria-hidden="true"></span><span class="btn-label">Confirm my spot</span></button>
+      </div>
+
+      <div class="state" data-state="confirmed" hidden>
+        <span class="stamp stamp-cyan">Confirmed</span>
+        <h1>You're on the list.</h1>
+        <p>We'll email you when a pilot slot opens, with exactly what it can and can't do yet. Every email has a link to remove you.</p>
+      </div>
+
+      <div class="state" data-state="already_confirmed" hidden>
+        <span class="stamp stamp-ink">Already confirmed</span>
+        <h1>You're already on the list.</h1>
+        <p>This address was confirmed earlier. Nothing else to do.</p>
+      </div>
+
+      <fieldset class="field followup" hidden>
+        <legend>One question while you're here — how often does CI fail on you? <span class="opt">optional</span></legend>
+        <div class="chips">
+          <label><input type="radio" name="freq" value="daily"><span>Daily</span></label>
+          <label><input type="radio" name="freq" value="weekly"><span>Weekly</span></label>
+          <label><input type="radio" name="freq" value="monthly"><span>Monthly</span></label>
+          <label><input type="radio" name="freq" value="rarely"><span>Rarely</span></label>
+        </div>
+        <p class="followup-done" role="status" hidden></p>
+      </fieldset>
+
+      <div class="state" data-state="expired" hidden>
+        <span class="stamp stamp-slate">Expired</span>
+        <h1>This link has expired.</h1>
+        <p>Confirmation links work for {{PUBLIC_VERIFY_TTL_HOURS}} hours. Sign up again with the same address and we'll send a fresh one.</p>
+        <a class="btn btn-ink" href="/#join">Get a new link</a>
+      </div>
+
+      <div class="state" data-state="invalid" hidden>
+        <span class="stamp stamp-slate">Not recognised</span>
+        <h1>We couldn't use this link.</h1>
+        <p>It may have been copied incompletely, or the signup was removed. Open the link from the newest email again, or sign up again.</p>
+        <a class="btn btn-ink" href="/#join">Sign up again</a>
+      </div>
+
+      <div class="state" data-state="missing" hidden>
+        <h1>Open the link from your email.</h1>
+        <p>This page confirms an early-access signup, but there's no confirmation code in the address. Use the button in the email we sent (if you just reloaded this page, open the email link again).</p>
+        <a class="btn btn-ink" href="/#join">Request early access</a>
+      </div>
+
+      <div class="state" data-state="rate_limited" hidden>
+        <h1>Too many attempts.</h1>
+        <p>There have been a lot of confirmation attempts from your network. Please open the email link again in a little while.</p>
+      </div>
+
+      <div class="state" data-state="network" hidden>
+        <h1>We couldn't reach the server.</h1>
+        <p>Check your connection and try again. Your link is still valid.</p>
+        <button class="btn btn-ink" type="button" data-retry>Try again</button>
+      </div>
+
+      <div class="state" data-state="error" hidden>
+        <h1>Something went wrong on our side.</h1>
+        <p>Your link wasn't used up. Please try again in a few minutes.</p>
+        <button class="btn btn-ink" type="button" data-retry>Try again</button>
+      </div>
+
+      <noscript><h1>Confirming needs JavaScript.</h1><p>Please enable JavaScript for this page and open the email link again.</p></noscript>
+    </section>
+  </div>
+</main>
+{{> footer}}
+</body>
+</html>

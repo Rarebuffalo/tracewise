@@ -1,0 +1,85 @@
+WEBVTT
+
+00:00:00.220 --> 00:00:01.580
+Your build failed.
+
+00:00:01.620 --> 00:00:02.586
+Again.
+
+00:00:04.550 --> 00:00:06.062
+So you open the log.
+
+00:00:06.550 --> 00:00:08.834
+And it just... keeps... going.
+
+00:00:09.350 --> 00:00:11.458
+Somewhere in here is the reason.
+
+00:00:12.930 --> 00:00:13.960
+Flaky test?
+
+00:00:14.000 --> 00:00:14.916
+Cache?
+
+00:00:16.080 --> 00:00:17.160
+Cosmic rays?
+
+00:00:17.200 --> 00:00:18.190
+Rerun.
+
+00:00:18.270 --> 00:00:19.170
+Hope.
+
+00:00:19.340 --> 00:00:20.366
+Repeat.
+
+00:00:22.150 --> 00:00:24.485
+Or... you could follow the paper trail.
+
+00:00:25.850 --> 00:00:27.312
+Meet Tracewise.
+
+00:00:27.900 --> 00:00:29.586
+It reads the failed run,
+
+00:00:30.000 --> 00:00:31.847
+pulls out the lines that matter,
+
+00:00:32.200 --> 00:00:33.999
+checks the code at that commit,
+
+00:00:34.300 --> 00:00:36.080
+and what changed in your push.
+
+00:00:36.500 --> 00:00:37.560
+Read-only.
+
+00:00:37.600 --> 00:00:39.720
+Every claim comes with a receipt.
+
+00:00:41.000 --> 00:00:42.837
+Then it writes up what it found,
+
+00:00:43.250 --> 00:00:44.698
+and how sure it is.
+
+00:00:46.000 --> 00:00:47.878
+Evidence. Not guesses.
+
+00:00:49.500 --> 00:00:51.050
+Not enough evidence?
+
+00:00:51.200 --> 00:00:52.421
+It says so.
+
+00:00:55.800 --> 00:00:56.810
+Tracewise.
+
+00:00:56.850 --> 00:00:58.110
+Trace failures.
+
+00:00:58.150 --> 00:00:59.511
+Find answers.
+
+00:01:02.500 --> 00:01:03.894
+See how it works.

@@ -1,0 +1,62 @@
+<!--meta path="/privacy/" title="Waitlist privacy notice (draft) — Tracewise" description="What the Tracewise early-access waitlist collects, why, who processes it and how to remove it."-->
+{{> head}}
+</head>
+<body>
+{{> header}}
+<main id="main" class="page">
+  <article class="wrap prose">
+    <p class="kicker">Privacy · early-access waitlist</p>
+    <h1>Waitlist privacy notice</h1>
+    <p class="draft-note"><strong>Draft, version {{CONSENT_VERSION}}.</strong> This notice describes how the waitlist on this site works as built. It has not been reviewed by a lawyer yet and will be reviewed before any pilot. It covers only this website and its waitlist, not the Tracewise GitHub App (which is not available yet).</p>
+
+    <h2>Who runs this</h2>
+    <p>The waitlist is run by {{OPERATOR}}. Questions and requests: {{CONTACT}}.</p>
+
+    <h2>What we collect when you join</h2>
+    <ul>
+      <li><strong>Your email address</strong> (required), to confirm it's yours and to invite you when a pilot slot opens.</li>
+      <li><strong>Your GitHub username</strong>, only if you give it, to help plan invites. We don't use it to access anything.</li>
+      <li><strong>Whether you ticked "product updates"</strong>, with the time and the version of the wording you saw. The box is unticked unless you tick it.</li>
+      <li><strong>Your answer to "how often does CI fail on you?"</strong>, only if you answer.</li>
+      <li><strong>When you signed up and when you confirmed.</strong></li>
+      <li><strong>Whether your email domain is a known disposable-mail service</strong>, to spot abuse. This is a flag, not a block.</li>
+    </ul>
+
+    <h2>What we don't collect</h2>
+    <ul>
+      <li>No analytics or advertising trackers on this site, and this site sets no cookies.</li>
+      <li>No open or click tracking in our emails.</li>
+      <li>Your IP address is used briefly to limit repeated requests. We store only a keyed hash of it in short counters that are deleted within two days.</li>
+      <li>Confirmation and removal links carry their codes after a <code>#</code>, which browsers don't send to servers, so they don't end up in request logs.</li>
+    </ul>
+
+    <h2>Who processes it</h2>
+    <ul>
+      <li><strong>Hosting:</strong> Vercel serves this site and the signup API. Like any host, it processes requests (including IP addresses) to deliver them and may keep its own request logs.</li>
+      <li><strong>Database:</strong> {{DATABASE_PROVIDER}} stores the waitlist, separately from any other Tracewise data.</li>
+      <li><strong>Email:</strong> Resend delivers the confirmation email and any later early-access emails.</li>
+      <!--#if TURNSTILE--><li><strong>Bot protection:</strong> Cloudflare Turnstile checks that the signup form is used by a person. To do that, Cloudflare processes your IP address and signals from your browser.</li>
+      <!--#endif--></ul>
+    <p>When you confirm, the operator receives one notification email with your signup details (the fields above). We don't sell or share the list with anyone else.</p>
+
+    <h2>How long we keep it</h2>
+    <ul>
+      <li>Signups that are never confirmed are deleted after 7 days. Confirmation links expire after {{PUBLIC_VERIFY_TTL_HOURS}} hours.</li>
+      <li>Confirmed signups are kept until you remove yourself or ask us to delete them. We'll revisit this before launch.</li>
+      <li>Deleting your signup also deletes its email-delivery records. The operator's copy of the notification email isn't deleted automatically; we'll delete it on request.</li>
+    </ul>
+
+    <h2>Your choices</h2>
+    <ul>
+      <li><strong>Leave the list:</strong> every email has a "remove me" link, which deletes your signup straight away.</li>
+      <li><strong>See, correct, export or delete your data:</strong> contact {{CONTACT}} from the address you signed up with.</li>
+      <li><strong>Product updates:</strong> if you ticked the box and change your mind, use the remove link or contact us.</li>
+    </ul>
+
+    <h2>Changes</h2>
+    <p>If this notice changes, the version above changes with it.</p>
+  </article>
+</main>
+{{> footer}}
+</body>
+</html>

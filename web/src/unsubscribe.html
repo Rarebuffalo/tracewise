@@ -1,0 +1,52 @@
+<!--meta path="/unsubscribe/" title="Leave the list — Tracewise" description="Remove your email from the Tracewise early-access list." robots="noindex, nofollow"-->
+{{> head}}
+<script type="module" src="/js/unsubscribe.mjs"></script>
+</head>
+<body>
+{{> header}}
+<main id="main" class="page">
+  <div class="wrap">
+    <section class="page-card receipt" aria-live="polite">
+      <span class="pin" aria-hidden="true"></span>
+
+      <div class="state" data-state="ready" hidden>
+        <p class="kicker">Early access</p>
+        <h1>Leave the list?</h1>
+        <p>This deletes your signup — your email address, optional GitHub username and answers — and we won't email you again.</p>
+        <button class="btn btn-ink" type="button" data-unsubscribe><span class="spin" aria-hidden="true"></span><span class="btn-label">Remove me from the list</span></button>
+      </div>
+
+      <div class="state" data-state="removed" hidden>
+        <span class="stamp stamp-ink">Removed</span>
+        <h1>You're off the list.</h1>
+        <p>Your signup has been deleted. If you change your mind, you're welcome to sign up again.</p>
+      </div>
+
+      <div class="state" data-state="not_found" hidden>
+        <h1>Nothing to remove.</h1>
+        <p>This address isn't on the list (it may already have been removed, or the link is incomplete). If you're still receiving emails, reply to one of them and we'll delete your data by hand.</p>
+      </div>
+
+      <div class="state" data-state="missing" hidden>
+        <h1>Open the link from your email.</h1>
+        <p>There's no removal code in the address. Use the "remove me" link at the bottom of any Tracewise email, or see the <a href="/privacy/">privacy notice</a> for how to ask us directly.</p>
+      </div>
+
+      <div class="state" data-state="rate_limited" hidden>
+        <h1>Too many attempts.</h1>
+        <p>Please try the link again in a little while.</p>
+      </div>
+
+      <div class="state" data-state="error" hidden>
+        <h1>That didn't work.</h1>
+        <p>We couldn't reach the server, so nothing was changed. Please try again.</p>
+        <button class="btn btn-ink" type="button" data-retry>Try again</button>
+      </div>
+
+      <noscript><h1>This page needs JavaScript.</h1><p>Please enable it and open the link again, or see the <a href="/privacy/">privacy notice</a> for how to ask us directly.</p></noscript>
+    </section>
+  </div>
+</main>
+{{> footer}}
+</body>
+</html>
