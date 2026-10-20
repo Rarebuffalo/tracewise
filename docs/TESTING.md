@@ -12,6 +12,7 @@ responses; it does **not** show how GitHub or a real model behaves. That is the 
 | `make check` | ruff lint and format check, strict mypy (package and `scripts/`), pytest without `slow` and `live`, docs consistency |
 | `make test` | pytest `-m "not live and not slow"` |
 | `make test-all` | pytest `-m "not live"` (slow included) |
+| `make ci` | **Everything CI runs**, locally: lint, typing, docs, the truth lock, and the CI test command below, failing on any skipped test |
 | `PYTHONPATH=. uv run pytest -q -p no:cacheprovider -p tests.netguard -m "not live" -rs` | **The CI test command**: all non-live tests under the network guard |
 | `uv run python -m tracewise.bench verify` | Benchmark truth set matches `TRUTH.lock` |
 | `uv run python -m tracewise.bench run --provider oracle --reps 3 --include-slow --out .bench-results/<name>` | Full offline benchmark with scripted providers |
