@@ -3,6 +3,23 @@
 > **Commit hashes in this file before 2026-10-20 (bb) are pre-rewrite hashes.** The history was rewritten once to
 > redact signed URLs before the first push; map them with [HISTORY-REWRITE.md](HISTORY-REWRITE.md).
 
+## 2026-10-21 (bd): Phase 57 reliability and diagnostic-correctness fixes
+
+Two offline audits; every defect was reproduced by a failing test before the fix.
+
+- **GitHub client:**
+  - A body read cut mid-response is a transport error (inline retry for GET; POST never repeated). The generic final-attempt branch now has the same partial-publication guard as the retryable branch: a published PR report is never replaced by a notice.
+  - Malformed job items fail permanently.
+  - Each log download has a 300 s wall-clock budget; at the budget the log is treated like the byte cap.
+- **Diagnostics:**
+  - F1: `read_file` records only the lines it returned.
+  - F2: repository- and log-derived names stay inside the untrusted blocks.
+  - F3: the failing step's one-second boundaries are settled by its own step header.
+  - F4: in-hunk `---`/`++` lines count as changes.
+- **Guard:** settings, `.env.example` and CONFIGURATION.md cannot drift.
+- **New owner questions** (packet §4a): validator rule 3 and examined ranges; a notice for runs deleted mid-analysis.
+- **Benchmark:** scores and results identical to Phase 56 apart from timing; truth lock unchanged.
+
 ## 2026-10-21 (bc): Phase 54–56 documentation, branding and hardening
 
 - **Docs (Phase 54):** README, CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, DEVELOPMENT, CONFIGURATION, TESTING, issue and PR templates, HISTORY-REWRITE (old → new hash map).

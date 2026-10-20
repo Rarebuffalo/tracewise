@@ -67,6 +67,13 @@ deployment.
 | D-5 | Compiler points at a different file → the correct answer is rated low | Relax the conflict rule? | Keep strict until real-model data exists (recommended) |
 | E-01 | Prompt-injection resistance cannot be shown with fake providers | — | Measured in T-605 only |
 
+## 4a. Two new questions from the Phase 57 audit (nothing implemented)
+
+| Item | Question | Choices and consequences |
+|---|---|---|
+| **Validator rule 3 (fix replacement range)** | A suggested replacement may target lines the model never read (e.g. lines 1–5 while only 40–41 were read). Should rule 3, like rule 2 for the location, require the replacement to lie inside an examined range? | **Require it:** fewer unsupported fixes; some fixes are dropped and only the location remains. **Keep:** today's behaviour, which the written rule allows. |
+| **Run deleted while being analysed** | A 404 from the jobs API (run deleted mid-processing) ends the job `dead` with no notice, whereas missing logs give a `logs_unavailable` report. Should a deleted run get a notice? | **Notice:** the user sees something, but on a run that no longer exists. **Silent (today):** nothing to show on a deleted run. |
+
 ## 5. Alert threshold
 
 The rule fires at (dead + could-not-complete) ÷ finished ≥ **0.2** over 1 h, with at least 10 jobs. It is pinned by
