@@ -48,6 +48,18 @@ jobs:
       - name: Documentation consistency
         run: make docs
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Website build and unit tests (zero npm dependencies)
+        run: make web
+
+      - name: Website end to end (headless Chrome, disposable PostgreSQL, file-based email; nothing leaves the runner)
+        env:
+          CHROME: /usr/bin/google-chrome
+        run: make web-e2e
+
       - name: Benchmark truth lock
         run: uv run python -m tracewise.bench verify
 
