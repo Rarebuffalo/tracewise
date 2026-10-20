@@ -62,3 +62,10 @@ strict = true
 mypy_path = "src"
 packages = ["tracewise"]
 plugins = ["pydantic.mypy"]
+
+# ---- Vercel (website + waitlist API on one deployment; see web/docs/deployment.md). Nothing here runs locally.
+[tool.vercel]
+entrypoint = "web.vercel_app:app"
+
+[tool.vercel.scripts]
+build = "node web/build.mjs"

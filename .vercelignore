@@ -1,0 +1,21 @@
+# Only what the website and the waitlist API need is uploaded to Vercel. In particular, research material, brand
+# masters, tests, benchmark data and local files never leave this machine.
+research/
+tracewise-brand/
+tests/
+docs/
+.bench-results/
+.waitlist-mail/
+.tmp/
+.venv/
+.claude/
+web/design-preview/
+web/dist/
+web/docs/
+web/test/
+web/dev.py
+src/tracewise/bench/cases/
+*.pem
+*.key
+.env
+.env.*
