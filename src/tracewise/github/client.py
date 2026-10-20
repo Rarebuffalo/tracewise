@@ -34,9 +34,11 @@ import httpx
 
 from tracewise.github import errors as err
 from tracewise.github.endpoints import ENDPOINTS, SCOPES, Endpoint, covered
-from tracewise.prepass.sanitize import redact
+from tracewise.prepass.sanitize import MAX_LINE_CHARS, redact
 
 log = logging.getLogger(__name__)
+# The longest prefix of a raw log line that is ever used (sanitize.strip_controls pre-cuts there).
+_LINE_KEEP = 2 * MAX_LINE_CHARS
 
 API = "https://api.github.com"
 API_VERSION = "2022-11-28"
@@ -152,6 +154,8 @@ class GitHubHTTP:
                 return
             resp = self._send(ep, url, token, query=q if pages == 1 else None)
             doc = self._json(resp)
+            if key and not isinstance(doc, dict):
+                raise err.GitHubPermanent(f"{ep.name}: unexpected response shape")
             items = doc.get(key) if key else doc
             if not isinstance(items, list):
                 raise err.GitHubPermanent(f"{ep.name}: unexpected response shape")
@@ -176,7 +180,7 @@ class GitHubHTTP:
                 raise err.GitHubRetryable(f"log download failed ({resp.status_code})")
             size = 0
             truncated = False
-            pending = ""
+            pending = ""  # the current unterminated line, at most _LINE_KEEP characters
             for chunk in resp.iter_text():
                 room = self.limits.max_log_bytes - size
                 data = chunk.encode()
@@ -184,9 +188,13 @@ class GitHubHTTP:
                     chunk = data[:room].decode(errors="ignore")  # keep what fits; drop the partial tail line
                     truncated = True
                 size += len(chunk.encode())
-                pending += chunk
-                *lines, pending = pending.split("\n")
-                yield from lines
+                # Split only the new chunk (linear time), and keep at most _LINE_KEEP characters of any line:
+                # sanitize.clean() never looks beyond them, so this changes nothing downstream but bounds memory.
+                parts = chunk.split("\n")
+                pending += parts[0][: max(0, _LINE_KEEP - len(pending))]
+                for part in parts[1:]:
+                    yield pending
+                    pending = part[:_LINE_KEEP]
                 if truncated:
                     break
             if pending and not truncated:
@@ -302,7 +310,7 @@ class GitHubHTTP:
     def _json(self, resp: httpx.Response) -> Any:
         try:
             return json.loads(resp.content or b"null")
-        except ValueError:
+        except (ValueError, RecursionError):  # malformed, or nested deeper than the parser allows
             raise err.GitHubPermanent("invalid JSON from GitHub") from None
 
     def _next_link(self, resp: httpx.Response) -> str | None:
