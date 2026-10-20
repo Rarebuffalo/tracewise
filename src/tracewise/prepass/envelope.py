@@ -114,6 +114,60 @@ def _in_step(line: LogLine, step: StepInfo | None) -> bool:
     return step.started_at <= line.ts < end
 
 
+_GROUP = re.compile(r"^##\[group\]")
+_BOUNDARY_BUFFER = 5000  # lines held while the step's first second is undecided (bounded memory)
+
+
+class _Section:
+    """Which lines belong to the failing step (Phase 57, F3).
+
+    Step times from the jobs API have one-second resolution and steps run back to back, so the failing step's first
+    second can also hold the previous step's last lines, and the last second the next step's first lines. Lines of
+    that first second are held until the step's own `##[group]Run …` header shows which ones precede it (dropped).
+    If no header appears, nothing is dropped. After the step's completion time, a new `##[group]` header (the
+    next step) ends the section. Without timing data the whole log is the section, as before."""
+
+    def __init__(self, step: StepInfo | None) -> None:
+        self.step = step
+        self.held: list[LogLine] = []
+        self.header_seen = False
+        self.ended = False
+
+    def feed(self, ln: LogLine) -> list[LogLine]:
+        step = self.step
+        if step is None or step.started_at is None:
+            return [ln]
+        if self.ended:
+            return []
+        if ln.ts is None:  # an untimed line follows the state of its neighbours
+            if self.held:
+                return self._hold(ln)
+            return [ln]
+        if not _in_step(ln, step):
+            return self.flush() if ln.ts >= step.started_at else []
+        if ln.ts < step.started_at + timedelta(seconds=1) and not self.header_seen:
+            if _RUN.match(ln.text):
+                self.header_seen = True
+                self.held = []  # what came before our header in the shared second was the previous step's
+                return [ln]
+            return self._hold(ln)
+        if step.completed_at is not None and ln.ts >= step.completed_at and self.header_seen and _GROUP.match(ln.text):
+            self.ended = True  # the next step started
+            return self.flush()
+        out = self.flush() if self.held else []
+        return [*out, ln]
+
+    def _hold(self, ln: LogLine) -> list[LogLine]:
+        self.held.append(ln)
+        return self.flush() if len(self.held) > _BOUNDARY_BUFFER else []
+
+    def flush(self) -> list[LogLine]:
+        out, self.held = self.held, []
+        if out:
+            self.header_seen = True  # undecided lines are kept; the boundary is settled
+        return out
+
+
 def retain(job: JobInfo, raw_lines: Iterable[str], max_bytes: int = DEFAULT_MAX_BYTES) -> RetainedLog:
     """Stream a job log once, keeping (in priority order) the window around the first
     error-like line, the step tail, further error windows and the step head, within
@@ -148,10 +202,15 @@ def retain(job: JobInfo, raw_lines: Iterable[str], max_bytes: int = DEFAULT_MAX_
         return True
 
     caps = {"first": budget_first, "windows": budget_windows, "head": budget_head}
-    for ln in parse_lines(raw_lines):
-        out.total_lines = ln.no
-        if not _in_step(ln, step):
-            continue  # other steps (setup, post) are not analysed
+    section = _Section(step)
+
+    def section_lines() -> Iterator[LogLine]:
+        for raw in parse_lines(raw_lines):
+            out.total_lines = raw.no
+            yield from section.feed(raw)  # other steps (setup, post) are not analysed
+        yield from section.flush()
+
+    for ln in section_lines():
         in_section_count += 1
         if out.command is None:
             m = _RUN.match(ln.text)
