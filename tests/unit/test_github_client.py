@@ -8,6 +8,7 @@ from __future__ import annotations
 import ast
 import json
 import logging
+import re
 from pathlib import Path
 
 import httpx
@@ -50,12 +51,14 @@ def test_sec01_every_endpoint_is_permitted_and_none_writes_forbidden_resources()
 # Offline benchmark plumbing (T-601): it SERVES replayed GitHub responses through an in-process
 # httpx.MockTransport and never opens a connection. Exempt by exact file, and checked below.
 BENCH_OFFLINE = {SRC / "bench" / "replay.py", SRC / "bench" / "harness.py"}
+# The early-access website's waitlist (a separate app, no GitHub access): Resend and Turnstile only. Checked below.
+WAITLIST_OUTBOUND = SRC / "waitlist" / "outbound.py"
 
 
 def test_sec01_no_http_or_github_urls_outside_the_client() -> None:
     # The two network modules: the GitHub client, and the model adapter core (T-605 prep), which may only reach
     # its codec's single endpoint (see test_model_adapter_is_the_only_other_network_module below).
-    allowed = {SRC / "github" / "client.py", SRC / "investigate" / "http_adapter.py", *BENCH_OFFLINE}
+    allowed = {SRC / "github" / "client.py", SRC / "investigate" / "http_adapter.py", WAITLIST_OUTBOUND, *BENCH_OFFLINE}
     fixtures = SRC / "bench" / "cases"  # benchmark fixture repositories: data, not product code
     for f in SRC.rglob("*.py"):
         if f in allowed or fixtures in f.parents:
@@ -407,3 +410,12 @@ def test_download_cap_boundaries_and_truncation_signal(body: str, cap: int, line
     it = rc.job_log_lines(99)
     assert it.truncated is False  # nothing known before reading
     assert list(it) == lines and it.truncated is truncated
+
+
+def test_waitlist_outbound_reaches_only_its_two_fixed_endpoints() -> None:
+    """The waitlist's one network module: two https literals (Resend, Turnstile), no redirects, no GitHub or model."""
+    text = WAITLIST_OUTBOUND.read_text()
+    urls = set(re.findall(r'"(https?://[^"]+)"', text))
+    assert urls == {"https://api.resend.com/emails", "https://challenges.cloudflare.com/turnstile/v0/siteverify"}
+    assert "api.github.com" not in text and "openai.com" not in text
+    assert text.count("follow_redirects=False") == 2 and "follow_redirects=True" not in text
