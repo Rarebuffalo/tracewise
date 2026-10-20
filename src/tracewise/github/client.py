@@ -237,6 +237,13 @@ class GitHubHTTP:
                 continue
             try:
                 body = self._read_capped(resp)
+            except httpx.TransportError as e:
+                # The connection broke while the body was being read (after the status and headers): the same
+                # transport failure as above, so the same rules apply (Phase 57). Never a raw httpx error.
+                if ep.method == "POST" or attempt > self.limits.max_retries:
+                    raise err.GitHubRetryable(f"{ep.name}: transport error reading body ({type(e).__name__})") from None
+                self._sleep(self._backoff(attempt))
+                continue
             finally:
                 resp.close()
             resp = httpx.Response(resp.status_code, headers=resp.headers, content=body, request=req)
@@ -435,7 +442,10 @@ class RepoClient:
 
     def failed_jobs(self, run_id: int, attempt: int) -> list[dict[str, Any]]:
         """FS-LOG-1: only failed/timed-out jobs are considered for log download."""
-        return [j for j in self.list_jobs(run_id, attempt) if j.get("conclusion") in ("failure", "timed_out")]
+        jobs = self.list_jobs(run_id, attempt)
+        if not all(isinstance(j, dict) for j in jobs):
+            raise err.GitHubPermanent("list_jobs_for_attempt: unexpected job shape")
+        return [j for j in jobs if j.get("conclusion") in ("failure", "timed_out")]
 
     def job_log_lines(self, job_id: int) -> LogLines:
         """FS-LOG-1: 302 → signed URL (valid ~1 min), fetched immediately without the token."""

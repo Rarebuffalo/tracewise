@@ -19,6 +19,8 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Literal
 
+from pydantic import ValidationError
+
 from tracewise.context.gitfetch import GitFetcher
 from tracewise.context.paths import UnsafePath, validate_repo_path
 from tracewise.context.provider import open_code_context
@@ -101,7 +103,10 @@ def collect_evidence(
 ) -> Iterator[Evidence]:
     if rc.scope != "analysis" or rc.repo_id != job.repo_id:
         raise ValueError("evidence collection needs the analysis-scope client of the run's repository")
-    failed = [JobInfo.model_validate(j) for j in rc.failed_jobs(job.run_id, job.attempt)]
+    try:
+        failed = [JobInfo.model_validate(j) for j in rc.failed_jobs(job.run_id, job.attempt)]
+    except ValidationError:  # a job without the fields we rely on: retrying cannot repair GitHub's answer
+        raise gh_err.GitHubPermanent("list_jobs_for_attempt: unexpected job shape") from None
     selected, skipped = failed[:max_jobs], [j.id for j in failed[max_jobs:]]
 
     status: Status = "ok" if selected else "no_failed_jobs"
