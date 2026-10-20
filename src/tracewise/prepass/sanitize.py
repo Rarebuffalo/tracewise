@@ -19,7 +19,7 @@ _ESC = re.compile(r"\x1b[@-Z\\-_]?")  # other two-byte escapes, bare ESC
 _CTRL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\x80-\x9f]")  # C0 (keep \t) and C1
 
 
-def strip_controls(line: str) -> str:
+def strip_controls(line: str, *, cut: bool = True) -> str:
     """Remove ANSI/OSC/C1 sequences; resolve CR overwrites to the last segment."""
     line = line.rstrip("\r\n")
     if len(line) > MAX_LINE_CHARS * 2:
@@ -31,7 +31,12 @@ def strip_controls(line: str) -> str:
         segments = [s for s in line.split("\r") if s]
         line = segments[-1] if segments else ""
     line = _CTRL.sub("", line)
-    return line[:MAX_LINE_CHARS]
+    return line[:MAX_LINE_CHARS] if cut else line
+
+
+def _strip(line: str) -> str:
+    """strip_controls without the final cut (the 2 * MAX_LINE_CHARS pre-cut still bounds the work)."""
+    return strip_controls(line, cut=False)
 
 
 _PATTERNS: list[tuple[re.Pattern[str], str]] = [
@@ -78,5 +83,18 @@ def redact(line: str) -> str:
     return _CANDIDATE.sub(lambda m: REDACTED if _looks_secret(m.group(0)) else m.group(0), line)
 
 
+_TOKEN_TAIL = re.compile(r"[A-Za-z0-9+/=_.:@%-]+$")
+_TOKEN_CHAR = re.compile(r"[A-Za-z0-9+/=_.:@%-]")
+
+
 def clean(line: str) -> str:
-    return redact(strip_controls(line))
+    """Control characters stripped, secrets redacted, at most MAX_LINE_CHARS. Redaction runs BEFORE the cut, so a
+    secret crossing the cut is matched whole. If the cut still splits a token-like run (an undetected or redacted
+    secret's remainder), that partial run is dropped rather than kept as a fragment (Phase 56)."""
+    whole = redact(_strip(line))
+    if len(whole) <= MAX_LINE_CHARS:
+        return whole
+    cut = whole[:MAX_LINE_CHARS]
+    if _TOKEN_CHAR.match(whole[MAX_LINE_CHARS]):
+        cut = _TOKEN_TAIL.sub("", cut)
+    return cut
