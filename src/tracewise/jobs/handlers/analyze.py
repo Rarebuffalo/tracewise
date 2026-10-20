@@ -196,7 +196,9 @@ def _handle(ctx: JobContext, deps: AnalyzeDeps, job: AnalysisJob) -> dict[str, A
     except (LeaseLost, JobCancelled, PermanentError):
         raise
     except Exception:
-        if is_final():  # FS-ERR-1: tell the user, then still fail the job (never reported as success)
+        # FS-ERR-1: tell the user, then still fail the job (never reported as success). Same guard as the
+        # RetryableError branch: once an analysis was recorded a surface may be visible, so no notice (D-14).
+        if is_final() and not _analysis_recorded(deps, job):
             try:
                 _publish_notice(deps, job, target, publisher, rc_p, "could_not_complete", None)
             except Exception:
