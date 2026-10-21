@@ -229,6 +229,42 @@ def find_workflow_run(conn: Conn, installation_id: int, repo_id: int, run_id: in
     return int(row["id"]) if row else None
 
 
+_QUOTA_COUNTED = ("diagnosed", "inconclusive", "could_not_complete")
+
+
+def count_monthly_analyses(conn: Conn, installation_id: int) -> int:
+    """T-703: analyses this UTC calendar month that ran the investigation (a diagnosis was recorded). Notices,
+    logs-unavailable, permission-denied and quota-exceeded rows do not count."""
+    row = conn.execute(
+        """SELECT count(*) AS n FROM analysis
+           WHERE installation_id = %s AND status = ANY(%s) AND diagnosis IS NOT NULL
+             AND created_at >= date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'""",
+        (installation_id, list(_QUOTA_COUNTED)),
+    ).fetchone()
+    return int(row["n"]) if row else 0
+
+
+def counted_analysis_exists(conn: Conn, run_pk: int) -> bool:
+    """T-703: this run attempt already has an analysis that counts towards the quota (so it is a retry, not a new
+    analysis): the quota gate must let it finish instead of re-labelling it."""
+    row = conn.execute(
+        "SELECT 1 FROM analysis WHERE run_pk = %s AND status = ANY(%s) AND diagnosis IS NOT NULL",
+        (run_pk, list(_QUOTA_COUNTED)),
+    ).fetchone()
+    return row is not None
+
+
+def quota_notice_today(conn: Conn, installation_id: int, repo_id: int, *, excluding_run_pk: int) -> bool:
+    """T-703: whether another run of this repository already recorded today's (UTC) quota notice."""
+    row = conn.execute(
+        """SELECT 1 FROM analysis a JOIN workflow_run w ON w.id = a.run_pk
+           WHERE a.installation_id = %s AND w.repo_id = %s AND a.status = 'quota_exceeded' AND a.run_pk <> %s
+             AND a.created_at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' LIMIT 1""",
+        (installation_id, repo_id, excluding_run_pk),
+    ).fetchone()
+    return row is not None
+
+
 def analysis_recorded(conn: Conn, installation_id: int, repo_id: int, run_id: int, attempt: int) -> bool:
     """Whether any job attempt persisted an analysis for this run attempt. `_persist` runs before ANY publication
     surface is reserved, so False proves that nothing was (or may have been) written to GitHub for it."""

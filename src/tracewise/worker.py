@@ -108,6 +108,7 @@ def build_from_settings(st: Settings, worker_id: str) -> Runtime:
             log_max_bytes=st.log_max_bytes_per_job,
             price_input_per_mtok=st.llm_price_input_per_mtok,
             price_output_per_mtok=st.llm_price_output_per_mtok,
+            analysis_quota=st.analysis_quota_monthly,
         )
         handler = make_analyze_handler(deps)  # require_tenant_plane runs here
     except BaseException:
