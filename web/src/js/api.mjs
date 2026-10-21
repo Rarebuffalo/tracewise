@@ -12,7 +12,9 @@ export async function call(path, { method = 'GET', json } = {}) {
       method,
       headers: json === undefined ? {} : { 'Content-Type': 'application/json' },
       body: json === undefined ? undefined : JSON.stringify(json),
-      credentials: 'omit',
+      // Cookies go only to this site's own origin. The waitlist sets none; this lets Vercel's preview login cookie
+      // through (without it, Deployment Protection redirects to vercel.com and the CSP blocks the redirect).
+      credentials: 'same-origin',
       cache: 'no-store',
       signal: ctl.signal,
     });
