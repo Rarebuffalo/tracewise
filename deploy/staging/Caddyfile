@@ -1,0 +1,12 @@
+# Only the three routes the web process serves; everything else is 404 at the proxy. HTTPS certificates are obtained
+# automatically for {$TW_DOMAIN} (needs public DNS and inbound 80/443). No request-body limit is set here: the app
+# itself caps bodies at 25 MB, above GitHub's maximum.
+{$TW_DOMAIN} {
+	@app path /webhooks/github /healthz /readyz
+	handle @app {
+		reverse_proxy web:8000
+	}
+	handle {
+		respond 404
+	}
+}

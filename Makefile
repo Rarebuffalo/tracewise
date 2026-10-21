@@ -1,4 +1,4 @@
-.PHONY: sync lint type test docs web web-e2e check ci
+.PHONY: sync lint type test docs web web-e2e check ci image image-check
 
 sync:
 	uv sync
@@ -43,3 +43,11 @@ ci: lint type docs web
 	@bash -c 'set -eo pipefail; out=$$(mktemp); trap "rm -f $$out" EXIT; \
 	  PYTHONPATH=$(CURDIR) uv run pytest -q -p no:cacheprovider -p tests.netguard -m "not live" -rs | tee "$$out"; \
 	  if grep -Eq "[0-9]+ skipped" "$$out"; then echo "tests were skipped: the CI gate requires every test to run" >&2; exit 1; fi'
+
+# Runtime image (T-1002): build it, then run every process from it against a disposable PostgreSQL, offline
+# (containers use --network none). Needs Docker; not part of `ci`. See docs/DEPLOYMENT-BLUEPRINT.md §2a.
+image:
+	docker build -t tracewise:local .
+
+image-check: image
+	PYTHONPATH=$(CURDIR) uv run python scripts/container_check.py

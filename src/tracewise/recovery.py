@@ -19,11 +19,12 @@ current pass cleanly (checkpoints keep progress); the next pass resumes.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import re
 import time
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -68,6 +69,43 @@ class RecoverySummary:
         return d
 
 
+# One pass of each kind at a time (overlapping cron runs): a second pass would repeat redelivery POSTs inside the
+# cooldown and could overwrite the first pass's held high-water mark. Transaction-level try-locks, held by a
+# connection that stays open for the pass: released at commit, rollback or process death; never contended.
+PASS_LOCKS = {"deliveries": 0x7477_7265_6465_6C76, "sweep": 0x7477_7265_7377_6570}
+
+
+@contextlib.contextmanager
+def _exclusive(pool: ConnectionPool[Conn], kind: str) -> Iterator[bool]:
+    with transaction(pool) as conn:
+        row = conn.execute("SELECT pg_try_advisory_xact_lock(%s) AS ok", (PASS_LOCKS[kind],)).fetchone()
+        yield bool(row and row["ok"])
+
+
+def redeliver_failed_deliveries(pool: ConnectionPool[Conn], *args: Any, **kw: Any) -> RecoverySummary:
+    """See `_redeliver_failed_deliveries`; refuses to overlap another deliveries pass (`stopped: locked`)."""
+    with _exclusive(pool, "deliveries") as ok:
+        if not ok:
+            event(log, "recovery.locked", logging.WARNING, kind="deliveries")
+            return _done(_locked("redeliver"), completed=False)
+        return _redeliver_failed_deliveries(pool, *args, **kw)
+
+
+def sweep_failed_runs(pool: ConnectionPool[Conn], *args: Any, **kw: Any) -> RecoverySummary:
+    """See `_sweep_failed_runs`; refuses to overlap another sweep (`stopped: locked`)."""
+    with _exclusive(pool, "sweep") as ok:
+        if not ok:
+            event(log, "recovery.locked", logging.WARNING, kind="sweep")
+            return _done(_locked("sweep"), completed=False)
+        return _sweep_failed_runs(pool, *args, **kw)
+
+
+def _locked(kind: str) -> RecoverySummary:
+    s = RecoverySummary(kind)
+    s.stopped = "locked"
+    return s
+
+
 def _stop_reason(e: gh_err.GitHubRetryable) -> str:
     """A rate limit (with a reset time) is not the same signal as a 5xx or a transport failure."""
     return "rate_limited" if e.retry_after_s is not None or "rate limited" in str(e) else "github_unavailable"
@@ -98,7 +136,12 @@ def _ts(raw: object) -> datetime | None:
 # ---------------------------------------------------------------- (a) redelivery
 
 
-def redeliver_failed_deliveries(
+def _succeeded(code: object) -> bool:
+    """A delivery attempt GitHub answered 2xx/3xx. Anything that is not an int (untrusted JSON) is not a success."""
+    return isinstance(code, int) and not isinstance(code, bool) and 200 <= code < 400
+
+
+def _redeliver_failed_deliveries(
     pool: ConnectionPool[Conn],
     http: GitHubHTTP,
     creds: AppCredentials,
@@ -125,6 +168,9 @@ def redeliver_failed_deliveries(
                 s.stopped = "page_cap"  # unseen deliveries remain: the high-water mark must not advance
                 break
             s.scanned += 1
+            if not isinstance(d, dict):
+                s.skipped["malformed"] += 1
+                continue
             when = _ts(d.get("delivered_at"))
             guid, did = d.get("guid"), d.get("id")
             if when is None or not isinstance(guid, str) or not _GUID.match(guid) or not isinstance(did, int):
@@ -146,7 +192,7 @@ def redeliver_failed_deliveries(
     for guid, attempts in sorted(groups.items()):
         s.candidates += 1
         latest = max(attempts, key=lambda a: (_ts(a["delivered_at"]), a["id"]))
-        if any(200 <= int(a.get("status_code") or 0) < 400 for a in attempts):
+        if any(_succeeded(a.get("status_code")) for a in attempts):
             s.skipped["succeeded_later"] += 1
             continue
         if latest.get("event") not in HANDLED_EVENTS:
@@ -232,7 +278,7 @@ def _repos_after(conn: Conn, cursor: int, limit: int) -> list[dict[str, Any]]:
     return list(conn.execute(sql, (cursor, limit)).fetchall())
 
 
-def sweep_failed_runs(
+def _sweep_failed_runs(
     pool: ConnectionPool[Conn],
     http: GitHubHTTP,
     tokens: TokenProvider,

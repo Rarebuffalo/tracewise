@@ -81,7 +81,10 @@ def compute_trigger_diff(rc: RepoClient, head_sha: str, *, base_sha: str | None 
                 return _unknown(head_sha, None, "unexpected commit response")
             if not parents:
                 return _unknown(head_sha, None, "root commit (no parent to compare with)")
-            base_sha = str(parents[0].get("sha", ""))
+            first = parents[0]
+            if not isinstance(first, dict) or not isinstance(first.get("sha"), str):
+                return _unknown(head_sha, None, "unexpected commit response")  # never index an unexpected shape
+            base_sha = first["sha"]
         validate_sha(base_sha)
         doc = rc.request("compare", basehead=f"{base_sha}...{head_sha}")
     except UnsafePath:
@@ -89,6 +92,11 @@ def compute_trigger_diff(rc: RepoClient, head_sha: str, *, base_sha: str | None 
     except (gh_err.GitHubPermanent, gh_err.GitHubRetryable) as e:
         return _unknown(head_sha, base_sha, f"compare unavailable ({type(e).__name__})")
     return _parse_compare(doc, head_sha, base_sha)
+
+
+def _count(v: Any) -> int:
+    """A non-negative line count from untrusted JSON; anything else counts as 0 (never raises)."""
+    return v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else 0
 
 
 def _parse_compare(doc: Any, head_sha: str, base_sha: str) -> TriggerDiff:
@@ -111,8 +119,8 @@ def _parse_compare(doc: Any, head_sha: str, base_sha: str) -> TriggerDiff:
             ChangedFile(
                 path,
                 str(f.get("status", "modified")),
-                int(f.get("additions") or 0),
-                int(f.get("deletions") or 0),
+                _count(f.get("additions")),
+                _count(f.get("deletions")),
                 prev_ok,
                 f.get("patch") if isinstance(f.get("patch"), str) else None,
             )

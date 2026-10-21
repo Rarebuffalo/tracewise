@@ -483,3 +483,48 @@ def test_entry_point_refuses_without_project_config_and_reports_summaries(pool, 
     assert count(owner, "SELECT count(*) FROM job") == 1
     hub.faults["list"] = ["rate_limit"]
     assert rec.main(["deliveries"], build=lambda: (pool, hub.http(), creds())) == 1  # incomplete pass → non-zero
+
+
+def test_hostile_delivery_items_and_status_codes_never_abort_the_pass(pool, owner) -> None:  # type: ignore[no-untyped-def]
+    setup_tenants(pool)
+    hub = Hub()
+    bad_code = delivery(2, "g-badcode")
+    bad_code["status_code"] = "abc"
+    list_code = delivery(3, "g-badcode", age=timedelta(minutes=20))
+    list_code["status_code"] = [200]
+    bool_code = delivery(4, "g-bool")
+    bool_code["status_code"] = True  # never "succeeded"
+    hub.deliveries = [5, "x", None, [1], bad_code, list_code, bool_code, delivery(6, "g-good")]
+    s = redeliver(pool, hub)
+    assert s.skipped["malformed"] == 4 and "succeeded_later" not in s.skipped
+    assert sorted(hub.redelivered) == [
+        3,
+        4,
+        6,
+    ]  # the latest attempt of each; unproven success is not success: redelivery stays deduplicated
+
+
+@pytest.mark.parametrize("kind", ["deliveries", "sweep"])
+def test_an_overlapping_pass_of_the_same_kind_is_refused_without_touching_github(pool, owner, kind) -> None:  # type: ignore[no-untyped-def]
+    """Cron overlap: a second pass must not repeat redelivery POSTs or overwrite the first pass's checkpoint."""
+    setup_tenants(pool)
+    hub = Hub()
+    hub.deliveries = [delivery(1, "g-overlap")]
+    with transaction(pool) as other:  # the first pass, still running
+        other.execute("SELECT pg_advisory_xact_lock(%s)", (rec.PASS_LOCKS[kind],))
+        s = redeliver(pool, hub) if kind == "deliveries" else sweep(pool, hub)
+        assert (s.stopped, s.completed) == ("locked", False)
+        assert hub.redelivered == [] and hub.gh.requests == []  # nothing reached GitHub, not even a token mint
+    after = redeliver(pool, hub) if kind == "deliveries" else sweep(pool, hub)
+    assert after.stopped != "locked"  # released with the first pass's transaction
+    if kind == "deliveries":
+        assert hub.redelivered == [1]
+
+
+def test_different_kinds_do_not_block_each_other(pool, owner) -> None:  # type: ignore[no-untyped-def]
+    setup_tenants(pool)
+    hub = Hub()
+    hub.deliveries = [delivery(1, "g-kinds")]
+    with transaction(pool) as other:
+        other.execute("SELECT pg_advisory_xact_lock(%s)", (rec.PASS_LOCKS["sweep"],))
+        assert redeliver(pool, hub).stopped != "locked" and hub.redelivered == [1]

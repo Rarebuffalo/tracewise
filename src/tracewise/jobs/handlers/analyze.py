@@ -23,6 +23,7 @@ Outcome → job state (FS-ERR-1, FS-ERR-3, FS-LOG-3, FS-INS-3; DECISIONS D-4, D-
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import logging
 import time
 from collections.abc import Callable
@@ -79,6 +80,7 @@ class AnalyzeDeps:
     price_input_per_mtok: Decimal | None = None  # T-706: unset → cost_usd NULL ("unpriced")
     price_output_per_mtok: Decimal | None = None
     log_max_bytes: int = DEFAULT_LOG_RETAIN_BYTES  # FS-LOG-4 per-job retention budget (LOG_MAX_BYTES_PER_JOB)
+    analysis_quota: int | None = None  # T-703 (ANALYSIS_QUOTA_MONTHLY); None: no quota
 
 
 def cost_usd(deps: AnalyzeDeps, tokens_in: int, tokens_out: int) -> Decimal | None:
@@ -173,6 +175,10 @@ def _handle(ctx: JobContext, deps: AnalyzeDeps, job: AnalysisJob) -> dict[str, A
             event(log, "analysis.notice_failed", logging.WARNING)
         raise PermanentError("job deadline passed before a final attempt")
     try:
+        if deps.analysis_quota is not None:
+            over = _quota_gate(deps, job, target, publisher, deps.analysis_quota)
+            if over is not None:
+                return over
         return _run(ctx, deps, job, rc_a, rc_p, target, publisher, is_final)
     except gh_err.InstallationUnavailable:
         raise JobCancelled("cancelled_uninstalled") from None  # FS-INS-3: token mint refused
@@ -205,6 +211,74 @@ def _handle(ctx: JobContext, deps: AnalyzeDeps, job: AnalysisJob) -> dict[str, A
                 # Best effort only: the original error is what gets recorded and retried/failed.
                 event(log, "analysis.notice_failed", logging.WARNING)
         raise
+
+
+QUOTA_TITLE = "Analysis quota reached"
+
+
+def _quota_lock_key(installation_id: int, repo_id: int) -> int:
+    digest = hashlib.sha256(f"tracewise:quota:{installation_id}:{repo_id}".encode()).digest()
+    return int.from_bytes(digest[:8], "big", signed=True)
+
+
+def _quota_gate(
+    deps: AnalyzeDeps, job: AnalysisJob, target: PublishTarget, publisher: Publisher, quota: int
+) -> dict[str, Any] | None:
+    """T-703 / FS-QTA-1: before any log download or investigation, stop when the installation has used its monthly
+    quota. Over quota: record the run as `quota_exceeded` (never counted) and publish ONE neutral "quota reached"
+    Check Run per repository per UTC day; never a comment. Count, today's-notice check and the insert run under one
+    per-repository advisory lock, so concurrent jobs cannot both publish."""
+    _recheck(deps, job)
+    with transaction(deps.pool, tenant=job.installation_id) as conn:  # T-705: tenant plane
+        conn.execute("SELECT pg_advisory_xact_lock(%s)", (_quota_lock_key(job.installation_id, job.repo_id),))
+        existing = repo.find_workflow_run(conn, job.installation_id, job.repo_id, job.run_id, job.attempt)
+        if existing is not None and repo.counted_analysis_exists(conn, existing):
+            return None  # a retry of a run already analysed (and counted): finish it, never re-label it
+        used = repo.count_monthly_analyses(conn, job.installation_id)
+        if used < quota:
+            return None
+        run_pk = repo.find_workflow_run(
+            conn, job.installation_id, job.repo_id, job.run_id, job.attempt
+        ) or repo.insert_workflow_run(
+            conn,
+            installation_id=job.installation_id,
+            repo_id=job.repo_id,
+            run_id=job.run_id,
+            attempt=job.attempt,
+            workflow_id=job.workflow_id,
+            head_sha=job.head_sha,
+            head_branch=job.head_branch,
+            head_repo_id=job.head_repo_id,
+            event=job.event,
+            conclusion=job.conclusion,
+        )
+        noticed = repo.quota_notice_today(conn, job.installation_id, job.repo_id, excluding_run_pk=run_pk)
+        analysis_id = repo.upsert_analysis(
+            conn,
+            installation_id=job.installation_id,
+            run_pk=run_pk,
+            status="quota_exceeded",
+            category=None,
+            confidence_band=None,
+            diagnosis=None,
+        )
+    event(log, "analysis.quota_exceeded", quota=quota, used=used, notice_already_today=noticed)
+    results: dict[str, str] = {}
+    if not noticed:
+        _recheck(deps, job)  # D-10(a): before the surface
+        summary = f"This installation has used its monthly quota of {quota} analyses. Tracewise did not analyse this run."
+        text = (
+            f"{summary} Analyses resume at the start of next month (UTC). This notice appears at most once per "
+            "repository per day; later runs today are not analysed and get no notice."
+        )
+        _note(results, {}, publisher.check_run(target, analysis_id, CheckOutput(QUOTA_TITLE, summary, text)))
+    _record_ops(deps, job, analysis_id, {}, results)
+    return {
+        "outcome": "quota_exceeded",
+        "quota": quota,
+        "notice": "published" if not noticed else "already_today",
+        "publications": results,
+    }
 
 
 def _analysis_recorded(deps: AnalyzeDeps, job: AnalysisJob) -> bool:
