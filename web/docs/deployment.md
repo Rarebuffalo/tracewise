@@ -467,7 +467,7 @@ uv run python -m tracewise.waitlist.admin process
 | Suite | Command | Result |
 |---|---|---|
 | Waitlist backend | `PYTHONPATH=. uv run pytest -p tests.netguard tests/waitlist` | 158 passed, 0 external connections |
-| Website unit and build | `node --test web/test/` | 18 passed |
+| Website unit and build | `node --test web/test/*.test.mjs` | 18 passed |
 | Website end to end | `make web-e2e` (headless Chromium, disposable PostgreSQL, file email) | 24 passed |
 | Full repository gate | `make ci` (lint, strict types, docs, truth lock, `make web`, all non-live tests under the network guard, no skips) | 1198 passed |
 
