@@ -81,10 +81,10 @@ pg_ctl -D "$TWDB/data" -o "-k $TWDB/sock -c listen_addresses=''" -l "$TWDB/pg.lo
 psql -h "$TWDB/sock" -U postgres -d postgres -v ON_ERROR_STOP=1 -f scripts/db/provision_roles.sql
 ```
 
-**4.3 Migrations** run as the owner. There is no migration CLI; call the module:
+**4.3 Migrations** run as the owner, through the migration CLI (`status` exits 4 when behind):
 
 ```bash
-uv run python -c "from tracewise.db.migrate import upgrade; upgrade('postgresql://tracewise_owner@/tracewise?host=$TWDB/sock')"
+DATABASE_URL_MIGRATIONS="postgresql://tracewise_owner@/tracewise?host=$TWDB/sock" uv run python -m tracewise.db.migrate upgrade
 ```
 
 **4.4 Web process:**

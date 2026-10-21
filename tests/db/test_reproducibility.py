@@ -32,7 +32,14 @@ from tracewise.config import Settings
 from tracewise.db.migrate import upgrade
 
 DOCS = [ROOT / "docs" / "OPERATIONS.md", ROOT / "docs" / "DEPLOYMENT-BLUEPRINT.md", ROOT / "docs" / "IMPLEMENTATION-PLAN.md"]
-CLI_MODULES = ("tracewise.worker", "tracewise.recovery", "tracewise.ops", "tracewise.retention")
+CLI_MODULES = (
+    "tracewise.worker",
+    "tracewise.recovery",
+    "tracewise.ops",
+    "tracewise.retention",
+    "tracewise.preflight",
+    "tracewise.db.migrate",
+)
 
 
 def _doc_text() -> str:
