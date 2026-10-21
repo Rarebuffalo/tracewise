@@ -1,6 +1,7 @@
 # Project handoff (canonical; read this first)
 
-**As of 2026-10-21T21:10Z (2026-10-22 local).** Facts here were checked against the working tree at that time.
+**As of 2026-10-21T22:17Z (2026-10-22 local), after the merge into `main`.** Facts here were checked against the
+repository at that time.
 Re-verify the repository state before relying on anything below (§H).
 
 ## A. Project identity
@@ -92,19 +93,26 @@ workflow_run webhook → HMAC check, 25 MB cap, dedupe (web/) → durable Postgr
 
 ## C. Repository state at handoff
 
-- **Branch** `fix/preview-fetch-credentials`, **HEAD** `2da0e27`, remote `origin` (not pushed since). **The working tree
-  has extensive uncommitted work** (tracked modifications plus new files across `src/`, `tests/`, `docs/`, `deploy/`,
-  `scripts/`, `Dockerfile`, `.dockerignore`), none committed. Untracked user assets `.claude/` and `tracewise-brand/`
-  must be preserved.
+- **Branch `main`** at merge commit **`1b62ab0`** ("Merge pull request #1 from Rarebuffalo/fix/preview-fetch-credentials";
+  parents `a3de236`, the previous `main`, and `6042cd9`, the feature branch tip). Local `main` equals `origin/main`
+  after `git fetch origin`; the feature branch has no unmerged commits. The merged tree is identical to `6042cd9`.
+  This handoff update is a documentation-only commit on top of `1b62ab0`.
+- **Working tree:** clean apart from the untracked user assets `.claude/` and `tracewise-brand/`, which are not part
+  of the project's commits and must be preserved.
 - **Migration head:** `0011` (analysis quota).
-- **Verification run 2026-10-21T21:10Z on this tree:**
-  - `make lint type docs`: exit 0 (ruff clean, 252 files formatted, mypy strict clean, docs check PASS);
+- **Local verification on merged `main` (`1b62ab0`), 2026-10-21T22:11Z–22:17Z:**
+  - `make lint type docs`: exit 0 (ruff clean, 253 files formatted, mypy strict clean, docs check PASS, 127 links/paths);
+  - `make ci`: exit 0, **1390 passed, 0 failed, 0 skipped, 0 network attempts**, truth lock matches;
   - `make image-check`: exit 0, all 8 steps passed (built `tracewise:local`);
-  - `make ci`: exit 0, **1385 passed, 0 failed, 0 skipped, 0 network attempts**, truth lock matches;
-  - `python -m tracewise.bench signals`: exit 0 (dependency drift, unseen split: 0 FP, 2 FN, 28 TN; no accuracy claim);
   - `python -m tracewise.bench verify`: 26 cases, truth lock matches; `git diff --check`: clean.
+  - Earlier on `6042cd9`: `python -m tracewise.bench signals` exit 0 (dependency drift, unseen split: 0 FP, 2 FN,
+    28 TN; no accuracy claim).
+- **Remote CI:** the owner reports that the feature branch's checks passed before the merge. The `ci` workflow
+  (`.github/workflows/ci.yml`, on every push and pull request) should also have run on `main` for `1b62ab0`; that
+  run was **not observed here** and must be confirmed in GitHub Actions.
 - **Local resources:** Docker image `tracewise:local`; cached `postgres:16` and `caddy:2`. Unrelated containers (for
   example `aeo-audit-db`) are not part of this project and must be left alone.
+- **Not done:** no staging host, no deployment, no GitHub App installation, no live GitHub stage, no real-model call.
 
 ## D. Completed work (evidence in the linked docs and tests)
 
@@ -182,6 +190,6 @@ Paste this:
 
 > You are continuing the Tracewise project. First read `docs/PROJECT-HANDOFF.md`. Then verify the live repository
 > state (branch, HEAD, `git status`, migration head) before relying on it. Read only the source files the next task
-> needs. Preserve all uncommitted changes, `.claude/`, `tracewise-brand/` and every protected path listed in §G; do
+> needs. Preserve any uncommitted changes, `.claude/`, `tracewise-brand/` and every protected path listed in §G; do
 > not commit, push, deploy or contact external services unless I authorise it. Continue from the next unresolved
 > acceptance criterion in §E/§F rather than repeating completed audits.
