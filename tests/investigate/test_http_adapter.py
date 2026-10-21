@@ -224,6 +224,14 @@ def test_rate_limit_longer_than_the_time_budget_fails_at_once() -> None:
     assert len(s.requests) == 1 and sleeps == []
 
 
+@pytest.mark.parametrize("value", ["nan", "inf", "-1", "1e9", "Wed, 21 Oct 2026 07:28:00 GMT", ""])
+def test_unusable_retry_after_falls_back_to_the_bounded_backoff(value: str) -> None:
+    s = Server(httpx.Response(429, headers={"retry-after": value}), answer(category="ok"))
+    p, sleeps = provider(s, backoff_s=1.0, max_backoff_s=8.0)
+    assert json.loads(p.step(req()).text or "")["category"] == "ok"
+    assert len(s.requests) == 2 and len(sleeps) == 1 and 0.5 <= sleeps[0] <= 8.0  # never NaN, negative or unbounded
+
+
 def test_timeouts_and_transport_errors_are_retried_then_classified() -> None:
     to = httpx.ReadTimeout("slow")
     s = Server(to, to, to)
