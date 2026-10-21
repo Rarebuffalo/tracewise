@@ -484,3 +484,66 @@ class RepoClient:
 
 def safe_error_text(e: BaseException) -> str:
     return redact(str(e))[:300]
+
+
+# ---------------------------------------------------------------------------------------------- anonymous metadata
+
+
+_PUBLIC_REPO = re.compile(r"^[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}$")
+_PUBLIC_PATHS = {
+    "get_run": "/repos/{repo}/actions/runs/{run_id}",
+    "list_jobs_for_attempt": "/repos/{repo}/actions/runs/{run_id}/attempts/{attempt}/jobs",
+    "get_commit": "/repos/{repo}/commits/{sha}",
+}
+
+
+class AnonymousGitHub:
+    """T-604 / AT-SEC-14: anonymous, read-only access to PUBLIC repository metadata for the META benchmark cases.
+
+    GET only, api.github.com only, a fixed set of three endpoints, never an Authorization header, and no token is
+    ever read from the environment. Same response cap and error mapping as the authenticated client. Callers must
+    pass an explicit httpx client: nothing here opens a connection by default (live use is a separate approval)."""
+
+    def __init__(self, client: httpx.Client, *, max_json_bytes: int = 10 * 1024 * 1024) -> None:
+        self._client = client
+        self._cap = max_json_bytes
+        self.requests: list[str] = []  # provenance: the exact public paths fetched
+
+    @staticmethod
+    def allows(name: str) -> bool:
+        return name in _PUBLIC_PATHS
+
+    def get(self, name: str, *, repo: str, **params: Any) -> Any:
+        if name not in _PUBLIC_PATHS:
+            raise ValueError(f"{name} is not an allowed anonymous endpoint")
+        if not _PUBLIC_REPO.match(repo):
+            raise ValueError("repository must be owner/name")
+        for k, v in params.items():
+            if not (isinstance(v, int) and not isinstance(v, bool) and v > 0) and not (
+                isinstance(v, str) and re.fullmatch(r"[0-9a-f]{40}", v)
+            ):
+                raise ValueError(f"invalid {k}")
+        path = _PUBLIC_PATHS[name].format(repo=repo, **params)
+        headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": API_VERSION, "User-Agent": USER_AGENT}
+        self.requests.append(path)
+        try:
+            resp = self._client.get(API + path, headers=headers, follow_redirects=False)
+        except httpx.TransportError as e:
+            raise err.GitHubRetryable(f"{name}: transport error ({type(e).__name__})") from None
+        if len(resp.content) > self._cap:
+            raise err.ResponseTooLarge(f"response larger than {self._cap} bytes")
+        if resp.status_code in (403, 429) and resp.headers.get("x-ratelimit-remaining") == "0":
+            raise err.GitHubRetryable(f"{name}: anonymous rate limit reached")
+        if resp.status_code == 404:
+            raise err.NotFound(f"{name}: not found or not public", 404)
+        if resp.status_code >= 500:
+            raise err.GitHubRetryable(f"{name}: server error {resp.status_code}")
+        if resp.status_code != 200:
+            raise err.GitHubPermanent(f"{name}: unexpected status {resp.status_code}", resp.status_code)
+        try:
+            doc = json.loads(resp.content or b"null")
+        except (ValueError, RecursionError):
+            raise err.GitHubPermanent("invalid JSON from GitHub") from None
+        if not isinstance(doc, dict):
+            raise err.GitHubPermanent(f"{name}: unexpected response shape")
+        return doc

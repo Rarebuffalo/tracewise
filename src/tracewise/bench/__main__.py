@@ -1,10 +1,12 @@
-"""CLI: python -m tracewise.bench {verify|generate|run|score}. Offline; no credentials; no network.
+"""CLI: python -m tracewise.bench {verify|generate|run|score|meta}. Offline; no credentials; no network.
 
   verify                         integrity of all cases + truth lock
   generate [--check] [CASE...]   (re)generate logs from local tool runs, or check they reproduce
   run --provider NAME [--case ID ...] [--reps 3] [--include-slow] --out DIR
                                  writes DIR/results.json, DIR/scores.json, DIR/report.md
   score RESULTS.json --out DIR   re-score saved results
+  meta --recorded DIR [--out F]  META cases P-01..P-03 from anonymous metadata recorded earlier, read in place from
+                                 DIR (bench/meta.py RECORDED_INDEX). Separate from the synthetic benchmark; no network
 Scripted providers only in this build (oracle, wrong_cause, wrong_location, fabricated, abstain, timeout,
 malformed, adversarial); a real model is wired in T-605 with --kind model.
 """
@@ -50,7 +52,19 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("score")
     s.add_argument("results", type=Path)
     s.add_argument("--out", type=Path, required=True)
+    m = sub.add_parser("meta")
+    m.add_argument("--recorded", type=Path, required=True)
+    m.add_argument("--out", type=Path)
     a = ap.parse_args(argv)
+    if a.cmd == "meta":
+        from tracewise.bench import meta
+
+        doc = meta.report(meta.run(meta.RecordedSource(a.recorded)))
+        text = json.dumps(doc, indent=1, sort_keys=True)
+        if a.out:
+            a.out.write_text(text)
+        print(text)
+        return 0 if doc["summary"]["error"] == 0 else 1
     if a.cmd == "verify":
         problems = check_all()
         print("\n".join(problems) or f"OK: {len(REQUIRED_CASES)} cases, truth lock matches")
