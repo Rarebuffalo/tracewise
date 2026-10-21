@@ -176,3 +176,33 @@ def test_truncated_log_without_error_line_never_claims_the_log_has_no_error() ->
     for text in (render(truncated), check_output(truncated, render(truncated)).summary):
         assert "the log has no error line" not in text
         assert "retained" in text and "incomplete" in text  # it says what was actually checked
+
+
+# ---------------------------------------------------------------- AT-EVT-03: a timed-out job is named in the report
+
+
+def _timed_out(ev):  # type: ignore[no-untyped-def]
+    assert ev.prepass is not None
+    ev.prepass.failed[0] = ev.prepass.failed[0].model_copy(update={"timed_out": True})
+    return ev
+
+
+def test_evt03_a_timed_out_job_is_named_in_diagnosed_and_inconclusive_reports() -> None:
+    note = "with a timeout (`timed_out`)"
+    assert note in render(vd(_timed_out(evidence())))
+    inconclusive = diagnose(_timed_out(evidence()), ScriptedProvider([ProviderTimeout("slow")]))
+    assert note in render(inconclusive)
+    assert note not in render(vd())  # an ordinary failure says nothing about timeouts
+
+
+def test_evt03_prepass_takes_the_timeout_from_the_jobs_api_only() -> None:
+    from tests.helpers import build_job
+    from tracewise.prepass.primary import run_prepass
+
+    info, lines = build_job(7, "Tests", "Run pytest", "pytest", fixture("pytest_b02.out"))
+    assert run_prepass([(info, lines)]).failed[0].timed_out is False
+    job_level = info.model_copy(update={"conclusion": "timed_out"})
+    assert run_prepass([(job_level, lines)]).failed[0].timed_out is True
+    steps = [s.model_copy(update={"conclusion": "timed_out"}) if s.conclusion == "failure" else s for s in info.steps]
+    step_level = info.model_copy(update={"steps": steps})
+    assert run_prepass([(step_level, lines)]).failed[0].timed_out is True

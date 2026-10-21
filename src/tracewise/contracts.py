@@ -175,6 +175,7 @@ class FailedStep(_Strict):
     job: str = Field(max_length=200)
     step: str | None = Field(default=None, max_length=200)
     command: str | None = Field(default=None, max_length=500)
+    timed_out: bool = False  # AT-EVT-03: from the jobs API (code-set, never model output)
 
 
 class LogRef(_Strict):
