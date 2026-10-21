@@ -164,7 +164,9 @@ item true.
 
 - No commit, push, deploy, publish, branch switch, provisioning or App installation without explicit authorisation.
 - Never open, print, copy or modify `research/final-audit-public/evidence/marketplace.html`; do not touch
-  `research/final-audit/evidence/` or `research/final-audit-public/evidence/`. Never edit `TRUTH.lock` or benchmark truth.
+  `research/final-audit-public/evidence/` or the quarantined directory research/final-audit/evidence/ (D-3; it is
+  git-ignored and exists only in the owner's local checkout, never in the repository, so it is named here as plain
+  text). Never edit `TRUTH.lock` or benchmark truth.
 - Provider gate: `LLM_PROVIDER=openai` stays refused; no real model call without SMOKE-RUNBOOK §1 approvals.
 - Never print or store secrets; never weaken a test or present a simulated result as live evidence.
 - **Commands that can reach external services:** `scripts/openai_smoke.py --live` (model provider);
