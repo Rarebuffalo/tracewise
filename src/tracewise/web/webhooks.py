@@ -96,11 +96,11 @@ async def github_webhook(request: Request) -> JSONResponse:
         doc = json.loads(body)
         if not isinstance(doc, dict):
             raise ValueError("payload is not an object")
-    except ValueError:
+    except (ValueError, RecursionError):  # RecursionError: pathologically deep nesting
         return await _reject(request, delivery_id, event, log_ctx, "invalid_json")
     action = doc.get("action") if isinstance(doc.get("action"), str) else None
     inst_raw = doc.get("installation", {}).get("id") if isinstance(doc.get("installation"), dict) else None
-    inst = inst_raw if isinstance(inst_raw, int) else None
+    inst = inst_raw if isinstance(inst_raw, int) and not isinstance(inst_raw, bool) and 0 < inst_raw < 2**63 else None
     log_ctx |= {"installation_id": inst, "action": action}
 
     try:

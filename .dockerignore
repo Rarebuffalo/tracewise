@@ -1,0 +1,11 @@
+# Allowlist: only what the runtime image needs. Evidence, brand assets, local config and keys never enter the context.
+*
+!pyproject.toml
+!uv.lock
+!src/
+src/tracewise/bench/cases/
+**/__pycache__/
+**/*.pem
+**/*.key
+**/.env
+**/.env.*

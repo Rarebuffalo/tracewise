@@ -169,3 +169,38 @@ def test_render_feeds_get_diff_tool() -> None:
     box = ToolBox(MemSource({}), diff_text=text)
     assert "coffee_shop/pricing.py" in box.call("get_diff", {}).content
     assert "unavailable" in TriggerDiff(C1, None, known=False, reason="root commit").render()
+
+
+@pytest.mark.parametrize(
+    "parents",
+    [["0" * 40], [42], [None], [{"sha": 7}], [{}]],
+    ids=["string-parent", "number-parent", "null-parent", "sha-not-a-string", "parent-without-sha"],
+)
+def test_malformed_parent_entries_give_an_unknown_diff_not_a_crash(parents: list[Any]) -> None:
+    """Sprint fix: `parents[0].get` assumed an object. A malformed parent now yields an unknown trigger diff
+    (the existing convention for unexpected commit responses), never an AttributeError retried by the worker."""
+    gh, rc = client()
+    gh.route("GET", rf"/commits/{C1}$", jresp(200, {"sha": C1, "parents": parents}))
+    diff = compute_trigger_diff(rc, C1)
+    assert not diff.known and "unexpected commit response" in (diff.reason or "")
+
+
+def test_absent_parents_and_valid_parents_keep_their_behaviour() -> None:
+    gh, rc = client()
+    gh.route("GET", rf"/commits/{C1}$", jresp(200, {"sha": C1}))  # no "parents" key at all
+    assert compute_trigger_diff(rc, C1).reason == "unexpected commit response"
+    gh2, rc2 = client()
+    gh2.route("GET", rf"/commits/{C1}$", jresp(200, commit(C1, [C0])))
+    gh2.route("GET", rf"/compare/{C0}\.\.\.{C1}$", jresp(200, compare([("a.py", "modified")])))
+    diff = compute_trigger_diff(rc2, C1)
+    assert diff.known and diff.base_sha == C0 and diff.changed_paths() == {"a.py"}
+
+
+@pytest.mark.parametrize("bad", ["x", [1], {"n": 1}, -3, True, 1.5, None])
+def test_malformed_line_counts_in_a_compare_file_are_zero_not_a_crash(bad: Any) -> None:
+    from tracewise.context.trigger import _parse_compare
+
+    doc = {"files": [{"filename": "a.py", "status": "modified", "additions": bad, "deletions": bad, "patch": 7}]}
+    d = _parse_compare(doc, "b" * 40, "a" * 40)
+    (f,) = d.files
+    assert (f.path, f.additions, f.deletions, f.patch) == ("a.py", 0, 0, None)

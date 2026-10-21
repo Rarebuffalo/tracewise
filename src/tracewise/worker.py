@@ -25,9 +25,13 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from types import FrameType
+from typing import TYPE_CHECKING
 
 from tracewise.config import Settings, get_settings, invalid_fields
 from tracewise.db.session import DatabaseUnavailable, SchemaMismatch, WrongDatabaseRole
+
+if TYPE_CHECKING:
+    from tracewise.context.gitfetch import GitFetcher
 from tracewise.jobs.worker import Worker
 from tracewise.observe import event
 
@@ -46,8 +50,18 @@ class Runtime:
     close: Callable[[], None]
 
 
-def build_from_settings(st: Settings, worker_id: str) -> Runtime:
+def git_fetcher_or_none() -> GitFetcher | None:
+    """A git fetcher, or None when no `git` binary is available: the code context then falls back to the contents
+    API (context/provider.py) instead of failing every analysis."""
     from tracewise.context.gitfetch import GitFetcher, GitFetchError
+
+    try:
+        return GitFetcher()
+    except GitFetchError:
+        return None
+
+
+def build_from_settings(st: Settings, worker_id: str) -> Runtime:
     from tracewise.db.migrate import head_revision
     from tracewise.db.session import make_pool, require_schema_at, require_system_plane
     from tracewise.github.auth import AppCredentials, TokenProvider
@@ -92,22 +106,23 @@ def build_from_settings(st: Settings, worker_id: str) -> Runtime:
     try:
         require_system_plane(system)
         require_schema_at(system, head_revision())
-        try:
-            swept = GitFetcher().sweep_workspaces()  # AT-SEC-06: workspaces left by a killed process
-        except GitFetchError:
-            swept = 0
+        startup_fetcher = git_fetcher_or_none()
+        swept = startup_fetcher.sweep_workspaces() if startup_fetcher else 0  # AT-SEC-06: left by a killed process
+        if startup_fetcher is None:
+            event(log, "worker.git_unavailable", logging.WARNING)  # code context uses the contents API instead
         deps = AnalyzeDeps(
             tenant,
             http,
             TokenProvider(creds, http, clock=time.time),
             st.github_app_id,
             provider_factory=providers,
-            fetcher_factory=lambda: GitFetcher(),
+            fetcher_factory=git_fetcher_or_none,
             limits=InvestigationLimits.from_settings(st),
             report_max_chars=st.report_max_chars,
             log_max_bytes=st.log_max_bytes_per_job,
             price_input_per_mtok=st.llm_price_input_per_mtok,
             price_output_per_mtok=st.llm_price_output_per_mtok,
+            analysis_quota=st.analysis_quota_monthly,
         )
         handler = make_analyze_handler(deps)  # require_tenant_plane runs here
     except BaseException:

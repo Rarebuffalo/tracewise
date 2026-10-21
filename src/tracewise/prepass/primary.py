@@ -135,7 +135,9 @@ def run_prepass(jobs: Iterable[tuple[JobInfo, Iterable[str]]], max_bytes: int = 
     for job, raw in jobs:
         log = retain(job, raw, max_bytes)
         logs[job.id] = log
-        failed.append(FailedStep(job_id=job.id, job=job.name[:200], step=log.step, command=log.command))
+        step = job.failed_step()
+        timed_out = job.conclusion == "timed_out" or (step is not None and step.conclusion == "timed_out")
+        failed.append(FailedStep(job_id=job.id, job=job.name[:200], step=log.step, command=log.command, timed_out=timed_out))
         cands = _job_candidates(job.id, log.ordered())
         for c in cands:
             c.step_number = log.step_number or 0

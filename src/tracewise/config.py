@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     investigation_timeout_s: int = Field(120, ge=1, le=120)
     log_max_bytes_per_job: int = Field(2 * 1024 * 1024, ge=1024)
     report_max_chars: int = Field(60_000, ge=1000)
+    # T-703 / FS-QTA-1: analyses per installation per UTC calendar month. Unset: no quota (the value is an owner decision).
+    analysis_quota_monthly: int | None = Field(None, ge=1)
 
     @model_validator(mode="after")
     def _provider_needs_key(self) -> Settings:

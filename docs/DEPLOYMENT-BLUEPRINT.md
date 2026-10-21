@@ -6,7 +6,9 @@ This is a vendor-neutral design for a staging, then pilot, deployment. **Nothing
 
 | Done (verified locally) | Remaining (environment-dependent; gated) |
 |---|---|
-| Web ASGI factory and worker CLI, with startup validation, role and schema checks, readiness, graceful shutdown (OPERATIONS §1a; `test_process_entrypoints.py`, `test_worker_main.py`) | Choose a host or platform (ADR-09) and a managed Postgres |
+| Web ASGI factory and worker CLI, with startup validation, role and schema checks, readiness, graceful shutdown (OPERATIONS §1a; `test_process_entrypoints.py`, `test_worker_main.py`) |
+| A runtime image (`Dockerfile`, allowlist `.dockerignore`) and `make image-check`: every process run from the image against a disposable database, offline (§2a) |
+| Migration CLI `python -m tracewise.db.migrate status\|upgrade` and the configuration preflight `python -m tracewise.preflight` | Choose a host or platform (ADR-09) and a managed Postgres |
 | Migrations as a separate owner operation (`db/migrate.py`); the role template (`scripts/db/provision_roles.sql`) | Provision roles and credentials, with separation (D-11) |
 | Recovery, ops and retention CLIs with exit codes | Schedules for recovery, retention and alerts |
 | Structured JSON logs with scrubbing; the failure-rate rule | Log shipping, alert routing, error reporting (ADR-12 "Sentry at pilot") |
@@ -18,7 +20,7 @@ This is a vendor-neutral design for a staging, then pilot, deployment. **Nothing
 |---|---|---|---|
 | **web** | `uvicorn --factory tracewise.web.asgi:create_runtime_app --host 0.0.0.0 --port <PORT>` | ≥1 | Stateless. Each uvicorn worker process has its own pool (max 10 connections, `make_pool` default). It must answer within GitHub's 10 s (EV-P05); it only records and enqueues. |
 | **worker** | `python -m tracewise.worker` | ≥1 | One job at a time per process. Run N processes for N parallel jobs; the queue caps **2 running jobs per installation** across all workers (FS-EVT-6). It holds two pools (system and tenant, max 10 each); size them to the platform's connection budget. |
-| **migrate** (job) | `tracewise.db.migrate.upgrade(DATABASE_URL_MIGRATIONS)` | One-off, before a release | **The only process with owner credentials.** Never part of web or worker startup. Both refuse to run on a schema other than their build's head. |
+| **migrate** (job) | `python -m tracewise.db.migrate upgrade` (reads `DATABASE_URL_MIGRATIONS`; `status` exits 4 when behind) | One-off, before a release | **The only process with owner credentials.** Never part of web or worker startup. Both refuse to run on a schema other than their build's head. |
 | **recovery** (job) | `python -m tracewise.recovery deliveries` / `runs` | Scheduled (gated) | Bounded and checkpointed; exit 1 means incomplete. Suggested cadence for decision: deliveries every 15 min, runs hourly. |
 | **retention** (job) | `python -m tracewise.retention` | Scheduled (gated) | Exit 3 means run again; 1 means error. Suggested: daily. |
 | **alerts** (job) | `python -m tracewise.ops alerts` | Scheduled (gated) | Exit 2 means firing. **Threshold 0.2 is provisional.** It needs routing. |
@@ -26,6 +28,48 @@ This is a vendor-neutral design for a staging, then pilot, deployment. **Nothing
 **Shutdown:**
 - **web:** SIGTERM drains in-flight requests and closes the pool. uvicorn re-raises SIGTERM, so the exit status is −15; the orchestrator must treat that as clean.
 - **worker:** SIGTERM stops claiming and finishes the current job, which can take up to the 10-minute deadline. Set the orchestrator's grace period to **at least 600 s**, or accept that a killed job's lease (120 s) expires and another worker re-runs it. Publication is idempotent, so a re-run is safe.
+
+## 2a. Build and start locally (verified offline)
+
+**Build:** `make image` builds `tracewise:local` from `uv.lock` (Python 3.14, non-root uid 10001, `git` included). The build context is an allowlist (`.dockerignore`): only `pyproject.toml`, `uv.lock` and `src/` (without the benchmark cases); `research/`, `tracewise-brand/`, `.env*` and key files never enter it. The image has no default process (the default command prints the preflight usage) and contains no secret.
+
+**Start, in this order** (one process per container; secrets from the platform; the key file mounted read-only, mode 0600):
+
+1. `python -m tracewise.db.migrate upgrade` with only `DATABASE_URL_MIGRATIONS`.
+2. `python -m tracewise.preflight --process all --database`. Exit 0 is required before any traffic.
+3. web: `uvicorn --factory tracewise.web.asgi:create_runtime_app --host 0.0.0.0 --port 8000`. Route traffic only when `/readyz` is 200.
+4. worker: `python -m tracewise.worker` (N containers for N parallel jobs).
+
+**Check the whole sequence locally:** `make image-check` (Docker required; not part of `make ci`). It runs steps 1–4, a deliberately wrong worker configuration (exit 2) and `ops report` against a disposable PostgreSQL, with container networking disabled. Result on 2026-10-22: all steps passed (`/healthz` 200, `/readyz` 200; preflight warnings only for the fake provider and the unset quota).
+
+**Runtime requirements a host must meet** (none is provider-specific):
+
+| Requirement | Why |
+|---|---|
+| Long-running containers for web and worker, with a stop grace period of ≥600 s for the worker | A job may run to its 10-minute deadline (§2 shutdown) |
+| A one-off job runner for migrate, and a scheduler for recovery, retention and alerts | §2 jobs; schedules are gated |
+| HTTPS ingress to `POST /webhooks/github` with ≥25 MB bodies and ≥10 s timeout; readiness probe on `/readyz`, liveness on `/healthz` | §3 |
+| Managed PostgreSQL that allows three roles, one of them `BYPASSRLS` (`tracewise_system`), plus non-superuser ownership | §6; **verify** that the chosen service lets you create a `BYPASSRLS` role: some managed services restrict that attribute |
+| A secret store that can mount a file (the App key) and inject environment values | §4 |
+| Outbound HTTPS to `api.github.com` and `github.com` (git fetch), and later to the model provider | Worker and recovery |
+| Log collection of JSON lines on stderr | §7 |
+
+**Choosing the host (ADR-09; owner decision).** Any platform meeting the table works; the differences are operational:
+
+| Option | Fits | Watch |
+|---|---|---|
+| Container PaaS with background workers and cron | Least operations; image runs unchanged | Worker stop grace (some cap it below 600 s; then rely on the 120 s lease re-run), BYPASSRLS on its managed Postgres |
+| Managed Kubernetes | Full control of grace periods, probes, CronJobs | Most operational work for a pilot |
+| A single VM with Docker Compose and systemd timers | Cheapest; simple | You own TLS, backups, patching and restarts |
+
+## 2b. Recommended first staging: one VM with Docker Compose
+
+`deploy/staging/` (compose file, Caddyfile, README with the ordered procedure) runs PostgreSQL 16 self-managed, so
+the role template (including the `BYPASSRLS` system role) runs unchanged; Caddy terminates HTTPS and proxies only
+the three routes; the worker has a 10-minute stop grace; scheduled jobs run from cron. Rehearsed locally on
+2026-10-22 (roles, migration, preflight exit 0, `/readyz` 200 through HTTPS, signed ping accepted, unsigned refused,
+graceful worker stop). Managed PostgreSQL is deferred until a `CREATE ROLE … BYPASSRLS` test succeeds on the chosen
+service (README "Why not a managed PostgreSQL first").
 
 ## 3. Ingress and TLS (web only)
 
@@ -66,7 +110,7 @@ Inject secrets through the platform's secret store. Never bake them into images 
 ## 6. Database
 
 - **Roles:** `tracewise_owner` (owns the schema; migrations), `tracewise_app` (tenant plane, RLS), `tracewise_system` (BYPASSRLS; system plane). All are non-superuser. The template revokes TEMP and CREATE from PUBLIC. That revoke **has not been applied to any real database**.
-- **Minimum permissions:** as granted by migrations 0001–0010 (verified by `test_fresh_install.py`):
+- **Minimum permissions:** as granted by migrations 0001–0011 (verified by `test_fresh_install.py`):
   - the app role has DML on tenant tables, filtered by RLS, and no recovery tables;
   - the system role has DML on all tables, no DELETE on content, audit append-only, and EXECUTE on `tracewise_purge` only;
   - neither runtime role can write `alembic_version` or create objects.

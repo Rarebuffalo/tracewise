@@ -256,6 +256,12 @@ def render(vd: ValidatedDiagnosis, *, max_chars: int = DEFAULT_MAX_CHARS, marker
     if d.attribution is not None:
         sections.append((1, "### Attribution (computed from the push's diff)\n\n" + esc(d.attribution.statement)))
     notes = []
+    for f in d.failed:
+        if f.timed_out:  # AT-EVT-03
+            notes.append(
+                f"GitHub ended {code(f.job)} with a timeout (`timed_out`): the job hit its time limit, so the log may "
+                "stop before the underlying problem."
+            )
     if d.limits.log_truncated:
         notes.append("Part of the log was not retained or was unavailable.")
     if d.limits.diff_truncated:

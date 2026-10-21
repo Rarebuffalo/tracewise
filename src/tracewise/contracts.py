@@ -13,6 +13,9 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstra
 
 Sha = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{40}$")]
 Fingerprint = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{16}$")]
+# GitHub ids from untrusted webhook JSON: a JSON integer (no bools, strings or floats) that fits the bigint columns.
+GitHubId = Annotated[int, Field(strict=True, gt=0, le=2**63 - 1)]
+RunAttempt = Annotated[int, Field(strict=True, ge=1, le=2**31 - 1)]  # workflow_run.run_attempt is `integer`
 
 
 def _rel_path(p: str) -> str:
@@ -39,20 +42,20 @@ class _Lenient(BaseModel):
 
 
 class RepoRef(_Lenient):
-    id: int
+    id: GitHubId
     full_name: str
     private: bool = False
 
 
 class HeadRepoRef(_Lenient):
-    id: int
+    id: GitHubId
     full_name: str
 
 
 class WorkflowRun(_Lenient):
-    id: int
-    run_attempt: int = 1
-    workflow_id: int | None = None
+    id: GitHubId
+    run_attempt: RunAttempt = 1
+    workflow_id: GitHubId | None = None
     head_sha: Sha
     head_branch: str | None = None
     event: str
@@ -64,7 +67,7 @@ class WorkflowRun(_Lenient):
 
 
 class Installation(_Lenient):
-    id: int
+    id: GitHubId
 
 
 class WorkflowRunEvent(_Lenient):
@@ -172,6 +175,7 @@ class FailedStep(_Strict):
     job: str = Field(max_length=200)
     step: str | None = Field(default=None, max_length=200)
     command: str | None = Field(default=None, max_length=500)
+    timed_out: bool = False  # AT-EVT-03: from the jobs API (code-set, never model output)
 
 
 class LogRef(_Strict):

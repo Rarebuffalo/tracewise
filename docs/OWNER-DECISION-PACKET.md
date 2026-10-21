@@ -67,12 +67,14 @@ deployment.
 | D-5 | Compiler points at a different file → the correct answer is rated low | Relax the conflict rule? | Keep strict until real-model data exists (recommended) |
 | E-01 | Prompt-injection resistance cannot be shown with fake providers | — | Measured in T-605 only |
 
-## 4a. Two new questions from the Phase 57 audit (nothing implemented)
+## 4a. Open questions from the Phase 57 audit and later work (nothing decided)
 
 | Item | Question | Choices and consequences |
 |---|---|---|
 | **Validator rule 3 (fix replacement range)** | A suggested replacement may target lines the model never read (e.g. lines 1–5 while only 40–41 were read). Should rule 3, like rule 2 for the location, require the replacement to lie inside an examined range? | **Require it:** fewer unsupported fixes; some fixes are dropped and only the location remains. **Keep:** today's behaviour, which the written rule allows. |
+| **Monthly analysis quota value (T-703)** | The quota mechanics are implemented (`ANALYSIS_QUOTA_MONTHLY`), but FS-QTA-1 gives no number. Which value per installation per month, and should a value be required in production? | **Unset (today's default):** no limit. **A number:** cost is capped; over-quota runs get one notice per repository per day and no analysis. |
 | **Run deleted while being analysed** | A 404 from the jobs API (run deleted mid-processing) ends the job `dead` with no notice, whereas missing logs give a `logs_unavailable` report. Should a deleted run get a notice? | **Notice:** the user sees something, but on a run that no longer exists. **Silent (today):** nothing to show on a deleted run. |
+| **Lane history: surfacing (T-901, T-903, T-604)** | The lane foundation and dependency drift are computed offline and published nowhere (ADR-13). META P-01–P-03 now pass from the recorded anonymous metadata of 2026-10-17 (docs/benchmark-runs/2026-10-22-meta-recorded.md), with no new fetch, but the case logic was written knowing the labels, so this is not held-out evidence. May "already failing before this push" or a dependency-drift note appear in reports, and what evidence is required first? | **Require held-out META cases first (fresh anonymous fetch, approved separately):** slower, independent evidence. **Surface now as a labelled signal:** earlier user value on 3 consistency-checked cases. **Keep unsurfaced (today).** |
 
 ## 5. Alert threshold
 

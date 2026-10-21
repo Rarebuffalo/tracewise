@@ -2,7 +2,10 @@
 """Consistency checks for the canonical Tracewise documentation (T-002).
 
 Checks:
-  1. Relative markdown links and backticked research/ paths in active docs resolve.
+  1. Relative markdown links and backticked research/ paths in active docs resolve to files that are part of the
+     repository: a path that exists only because it is git-ignored on this machine (for example the local-only
+     quarantined evidence, D-3) fails here exactly as it fails in a fresh CI checkout. Mention such directories as
+     plain text, not as a link or a backticked path.
   2. SPEC <-> TASKS <-> ACCEPTANCE-TESTS traceability.
   3. No obsolete or forbidden instructions in active docs.
   4. Benchmark cases B-01..B-16 from doc 04 are consolidated in docs/BENCHMARK.md.
@@ -13,6 +16,7 @@ Exit code 0 when all checks pass, 1 otherwise. Read-only; no network.
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -45,6 +49,23 @@ errors: list[str] = []
 notes: list[str] = []
 
 
+def _present(path: Path) -> bool:
+    """Exists and is not git-ignored: what a fresh checkout of the repository would contain. Outside a git
+    checkout (or without git) only existence is checked."""
+    if not path.exists():
+        return False
+    try:
+        r = subprocess.run(  # noqa: S603 - fixed binary and arguments, local repository only
+            ["git", "-C", str(ROOT), "check-ignore", "-q", str(path)],  # noqa: S607
+            capture_output=True,
+            check=False,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return True
+    return r.returncode != 0  # 0 = ignored; 1 = not ignored; 128 = not a git checkout (treated as present)
+
+
 def check_links() -> None:
     link_re = re.compile(r"\]\(([^)#\s]+)(?:#[^)]*)?\)")
     tick_re = re.compile(r"`(research/[^`\s*{}…]+)`")
@@ -58,13 +79,13 @@ def check_links() -> None:
             if target.startswith(("http://", "https://", "mailto:")):
                 continue
             n += 1
-            if not (doc.parent / target).resolve().exists():
-                errors.append(f"[links] {doc.relative_to(ROOT)} -> {target} (missing)")
+            if not _present((doc.parent / target).resolve()):
+                errors.append(f"[links] {doc.relative_to(ROOT)} -> {target} (missing or git-ignored)")
         for target in tick_re.findall(text):
             target = target.rstrip(".,;:")
             n += 1
-            if not (ROOT / target).exists():
-                errors.append(f"[paths] {doc.relative_to(ROOT)} -> {target} (missing)")
+            if not _present(ROOT / target):
+                errors.append(f"[paths] {doc.relative_to(ROOT)} -> {target} (missing or git-ignored)")
     notes.append(f"links/paths checked: {n}")
 
 

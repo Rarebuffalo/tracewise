@@ -334,3 +334,60 @@ def test_ready_and_no_docs_endpoints(client) -> None:  # type: ignore[no-untyped
     assert client.get("/readyz").json() == {"status": "ready"}
     for path in ("/docs", "/redoc", "/openapi.json"):
         assert client.get(path).status_code == 404
+
+
+def _mutate(path: tuple[str, ...], value: Any) -> dict[str, Any]:
+    p = copy.deepcopy(payload())
+    target = p
+    for k in path[:-1]:
+        target = target[k]
+    target[path[-1]] = value
+    return p
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        (("workflow_run", "run_attempt"), 0),  # the column's CHECK (run_attempt >= 1) must never be reached
+        (("workflow_run", "run_attempt"), 2**31),  # integer column
+        (("workflow_run", "id"), 2**63),  # bigint column
+        (("workflow_run", "id"), -1),
+        (("workflow_run", "id"), "37632626982"),
+        (("installation", "id"), True),
+        (("repository", "id"), 1.0),
+        (("workflow_run", "workflow_id"), False),
+    ],
+    ids=[
+        "attempt-0",
+        "attempt-overflow",
+        "id-overflow",
+        "negative-id",
+        "string-id",
+        "bool-installation",
+        "float-repo",
+        "bool-workflow",
+    ],
+)
+def test_out_of_range_or_mistyped_ids_are_rejected_not_a_server_error(client, secret, owner, path, value) -> None:  # type: ignore[no-untyped-def]
+    r = post(client, secret, _mutate(path, value), delivery="ids-1")
+    assert (r.status_code, r.json()["outcome"]) == (400, "invalid_payload")
+    assert rows(owner, "job") == 0
+    assert owner.execute("SELECT outcome FROM webhook_delivery WHERE delivery_id = 'ids-1'").fetchone() == ("rejected",)
+
+
+def test_a_rejected_payload_with_an_unstorable_installation_id_is_still_recorded(client, secret, owner) -> None:  # type: ignore[no-untyped-def]
+    r = post(client, secret, _mutate(("installation", "id"), 2**70), delivery="ids-2")
+    assert r.status_code == 400
+    assert owner.execute("SELECT installation_id FROM webhook_delivery WHERE delivery_id = 'ids-2'").fetchone() == (None,)
+
+
+def test_pathologically_deep_json_is_invalid_json_not_a_crash(client, secret, owner) -> None:  # type: ignore[no-untyped-def]
+    r = post(client, secret, b"[" * 100_000 + b"]" * 100_000, delivery="deep-1")
+    assert (r.status_code, r.json()["outcome"]) == (400, "invalid_json") and rows(owner, "job") == 0
+
+
+@pytest.mark.parametrize("value", [2**63, True, 0, "7"])
+def test_lifecycle_events_with_bad_ids_are_rejected(client, secret, owner, value) -> None:  # type: ignore[no-untyped-def]
+    body = {"action": "created", "installation": {"id": value, "account": {"login": "acme"}}, "repositories": []}
+    r = post(client, secret, body, event="installation")
+    assert (r.status_code, r.json()["outcome"]) == (400, "invalid_payload") and rows(owner, "installation") == 0

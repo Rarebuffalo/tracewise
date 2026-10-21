@@ -177,7 +177,7 @@ def test_readiness_requires_this_builds_schema(pool) -> None:  # type: ignore[no
     with TestClient(create_app(st, pool, schema_head="9999")) as c:
         assert (c.get("/readyz").status_code, c.get("/readyz").json()) == (503, {"status": "schema_mismatch"})
     closed: list[bool] = []
-    with TestClient(create_app(st, pool, schema_head="0010", on_shutdown=lambda: closed.append(True))) as c:
+    with TestClient(create_app(st, pool, schema_head="0011", on_shutdown=lambda: closed.append(True))) as c:
         assert c.get("/readyz").json() == {"status": "ready"}
     assert closed == [True]  # the lifespan hook ran on shutdown
 
