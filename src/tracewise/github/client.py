@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import itertools
 import json
 import logging
 import random
@@ -446,6 +447,17 @@ class RepoClient:
             raise ValueError(f"{name} is not paginated")
         path = self._path(ep, **params)
         return list(self._with_reauth(lambda t: list(self.http.paginate(ep, path, t, key, query))))
+
+    def paginate_limited(
+        self, name: str, key: str | None, limit: int, *, query: dict[str, Any] | None = None, **params: Any
+    ) -> list[Any]:
+        """Like paginate, but stops after `limit` items (fewer requests for bounded windows such as lane history)."""
+        ep = ENDPOINTS[name]
+        if not ep.paginated:
+            raise ValueError(f"{name} is not paginated")
+        path = self._path(ep, **params)
+        items: list[Any] = self._with_reauth(lambda t: list(itertools.islice(self.http.paginate(ep, path, t, key, query), limit)))
+        return items
 
     # -------------------------------------------------------------- typed helpers used by the pipeline
 
