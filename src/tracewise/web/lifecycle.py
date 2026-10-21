@@ -22,6 +22,7 @@ from typing import Literal
 from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, ConfigDict, Field
 
+from tracewise.contracts import GitHubId
 from tracewise.db import repositories as repo
 from tracewise.db.session import Conn, transaction
 from tracewise.jobs import queue
@@ -34,7 +35,7 @@ class _M(BaseModel):
 
 
 class RepoRef(_M):
-    id: int = Field(gt=0)
+    id: GitHubId
     full_name: str = Field(pattern=FULL_NAME)
 
 
@@ -43,7 +44,7 @@ class Account(_M):
 
 
 class InstallationRef(_M):
-    id: int = Field(gt=0)
+    id: GitHubId
     account: Account | None = None
 
 
