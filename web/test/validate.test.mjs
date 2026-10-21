@@ -1,4 +1,4 @@
-// Unit tests for the browser-side checks (node --test web/test). The same cases as the server's, so both agree.
+// Unit tests for the browser-side checks (node --test web/test/*.test.mjs). The same cases as the server's, so both agree.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { counterText, normalizeEmail, normalizeGithub, signupOutcome, tokenFromHash, validateSignup } from '../src/js/validate.mjs';

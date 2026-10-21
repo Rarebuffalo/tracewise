@@ -24,7 +24,7 @@ docs:
 # Website: zero-dependency build, then the browser-side unit tests and the build's own guarantees (Node >= 20).
 web:
 	node web/build.mjs
-	node --test web/test/
+	node --test web/test/*.test.mjs
 
 # Website end to end in headless Chromium: a disposable PostgreSQL, file-based email, the real app on 127.0.0.1.
 web-e2e: web
