@@ -168,3 +168,43 @@ def test_signal_after_startup_but_before_the_loop_claims_nothing(pool, owner, se
     rt = worker_main.Runtime(SignalsFirst(base.pool, base.handlers, "pre"), lambda: closed.append(1))
     assert worker_main.main(["--idle-sleep", "0.05"], build=lambda st, wid: rt) == 0
     assert closed == [1] and w.jobrow(jid)["status"] == "queued" and w.state.writes == []
+
+
+def test_without_a_git_binary_the_worker_starts_and_analyses_fall_back_to_the_contents_api(  # type: ignore[no-untyped-def]
+    pg, owner, monkeypatch, tmp_path, caplog
+) -> None:
+    """T-1002: a runtime without `git` must not fail every analysis; the code context uses the contents API."""
+    import logging
+    import shutil
+
+    from pydantic import SecretStr
+
+    from tests.github_fake import test_key_pem as _key_pem
+    from tests.pg import APP, SYSTEM
+    from tracewise.config import Settings
+    from tracewise.jobs.handlers import analyze as a
+
+    key = tmp_path / "k.pem"
+    key.write_bytes(_key_pem())
+    seen: list[Any] = []
+    real = a.make_analyze_handler
+    monkeypatch.setattr(a, "make_analyze_handler", lambda deps: seen.append(deps) or real(deps))
+    monkeypatch.setattr(shutil, "which", lambda name, *a, **k: None)  # no git anywhere
+    st = Settings(
+        tw_env="test",
+        llm_provider="fake",
+        database_url=SecretStr(pg.url(APP)),
+        database_url_system=SecretStr(pg.url(SYSTEM)),
+        github_app_id=1,
+        github_app_private_key_path=key,
+    )
+    with caplog.at_level(logging.WARNING):
+        rt = worker_main.build_from_settings(st, "nogit")
+    try:
+        assert seen and seen[0].fetcher_factory() is None  # open_code_context then uses the contents API
+        assert any(
+            "worker.git_unavailable" in r.getMessage() or getattr(r, "tw", {}).get("event") == "worker.git_unavailable"
+            for r in caplog.records
+        )
+    finally:
+        rt.close()
