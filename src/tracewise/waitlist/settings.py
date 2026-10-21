@@ -18,7 +18,8 @@ EmailMode = Literal["disabled", "file", "resend"]
 
 
 class WaitlistSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=None, extra="ignore", frozen=True)
+    # hide_input_in_errors: a validation error must never echo environment values (secrets) into logs.
+    model_config = SettingsConfigDict(env_file=None, extra="ignore", frozen=True, hide_input_in_errors=True)
 
     waitlist_env: Literal["local", "test", "preview", "production"] = "local"
     # Runtime role (tracewise_waitlist): SELECT/INSERT/UPDATE/DELETE on schema `waitlist` only.
@@ -92,8 +93,11 @@ class WaitlistSettings(BaseSettings):
         if the owner will hear about it. Otherwise the page would promise an email that never comes."""
         if self.waitlist_email_mode == "disabled":
             return "WAITLIST_EMAIL_MODE is disabled"
-        if self.waitlist_env in ("preview", "production") and not self.waitlist_owner_notify_email:
-            return "WAITLIST_OWNER_NOTIFY_EMAIL is not set"
+        if self.waitlist_env in ("preview", "production"):
+            if self.waitlist_database_url is None:
+                return "WAITLIST_DATABASE_URL is not set"
+            if not self.waitlist_owner_notify_email:
+                return "WAITLIST_OWNER_NOTIFY_EMAIL is not set"
         return None
 
     def trust_proxy(self) -> bool:

@@ -10,8 +10,11 @@ been created or assumed.
 > working. `GET /api/waitlist/health` reports `"accepting_signups": true|false`. So a deployment without email
 > configured is safe to put online: it simply isn't taking signups yet.
 >
+> **Confirmed on Vercel:** the build step (`node web/build.mjs`, from `[tool.vercel.scripts]`) runs. The first
+> deployment reached it and stopped at the production identity guard (section 5, troubleshooting).
+>
 > **Not verified on Vercel or with real email** (everything else was tested locally; see section 14):
-> - the Python build reading `[tool.vercel]` and `[tool.vercel.scripts]`;
+> - installation of the Python dependencies and start-up of the FastAPI function from `[tool.vercel] entrypoint`;
 > - CDN promotion of `app.frontend()`;
 > - `vercel.json` headers and cron;
 > - `.vercelignore` on Git deployments;
@@ -139,68 +142,128 @@ Additional points:
 ## 5. Environment variables
 
 Placeholders and comments are in `web/.env.example`. Set real values in **Vercel → Project → Settings → Environment
-Variables**. Use separate values for **Production** and **Preview**: a different `WAITLIST_SECRET`, and ideally a
-separate database branch for Preview.
+Variables**. Every variable there has an **Environments** checkbox list:
 
-Everything runs on Vercel, so "backend" variables are also Vercel variables. The difference is *when* they are read:
+- **Production:** deployments of the production branch (`main`). The first deployment of a new project is a
+  Production deployment.
+- **Preview:** deployments of every other branch and pull request.
+- **Development:** only `vercel dev` and `vercel env pull` on your machine. Not needed for this project, which runs
+  locally with `web/dev.py`.
 
-- **Runtime** variables are read by the API function. Changing them needs a redeploy.
-- **Build-time** variables (`PUBLIC_*`) are read by `node web/build.mjs` and **end up in the public HTML**. Never put
-  a secret in a `PUBLIC_*` variable; the build also refuses anything that looks like a key or a database URL.
+A variable only reaches the environments you tick. Use **separate values** for Production and Preview for every
+secret, and ideally a separate database (or branch) for Preview.
 
-| Variable | Where | Secret | Required | Value |
+There are two kinds of variable, and they behave differently.
+
+### 5a. Build-time variables (`PUBLIC_*`): read by `node web/build.mjs`, baked into the static HTML
+
+- These are read **once, during the build**, and written into the generated pages. `PUBLIC_OPERATOR_NAME` and
+  `PUBLIC_CONTACT_EMAIL` are printed on `/privacy/`.
+- They are **public, not secrets**: anyone can read them in the page source. Never put a secret in a `PUBLIC_*`
+  variable. The build only reads `PUBLIC_*` (plus `WAITLIST_VERIFY_TTL_HOURS`, a number), and it fails if any output
+  looks like a key or database URL. A test proves that runtime secrets set during the build never reach the output
+  or the build log.
+- **Changing one has no effect until you rebuild.** Use Deployments → ⋯ → **Redeploy**: a redeploy runs the build
+  again with the current values. A redeploy that reuses the build cache still reruns `node web/build.mjs`, which
+  regenerates every page from scratch.
+- Both builds read the values of their own environment:
+  - A **Production** build gets the Production values.
+  - A **Preview** build gets the Preview values.
+
+| Variable | Production | Preview | Value |
+|---|---|---|---|
+| `PUBLIC_OPERATOR_NAME` | **required** (build fails without it) | recommended | The person or organisation that runs the waitlist, as it should appear in the privacy notice |
+| `PUBLIC_CONTACT_EMAIL` | **required** (build fails without it) | recommended | The inbox people write to for privacy questions and data requests |
+| `PUBLIC_DATABASE_PROVIDER` | recommended | optional | e.g. `Neon (AWS us-east-1)`; otherwise the notice says "named here before launch" |
+| `PUBLIC_SITE_URL` | after the custom domain is live | no | Canonical origin, e.g. `https://www.example.com` |
+| `PUBLIC_TURNSTILE_SITE_KEY` | optional | optional | Turnstile site key (pair with `WAITLIST_TURNSTILE_SECRET`) |
+| `PUBLIC_ALLOW_INDEXING` | optional | no | Default: Production is indexed, Preview is not |
+| `PUBLIC_API_BASE` | leave unset | leave unset | Only for a separate API origin |
+
+**Why the two identity values are required.** The privacy notice must say who runs the waitlist and how to reach
+them (section "Who runs this"). Without them the page would show a red "not set" placeholder.
+
+- **Preview builds:** the placeholder is allowed. They are noindex and the build prints a warning.
+- **Production builds:** they are refused. A Production build also rejects obvious placeholders: names such as
+  `CHANGE_ME`, `TODO`, `TBD`, `Your Name` or `example`, and addresses on `example.com/.org/.net`, `.invalid`,
+  `.test`, `.example` or `localhost`.
+- There is no default, and nothing is substituted.
+
+### 5b. Runtime variables: read by the API function on every cold start
+
+- These are read when the Python function starts. They never reach the browser.
+- Changing one also needs a **Redeploy**, because Vercel functions get environment values at deployment.
+- Mark every secret as **Sensitive** in Vercel.
+
+| Variable | Secret | Production | Preview | Value |
 |---|---|---|---|---|
-| `WAITLIST_ENV` | Vercel runtime | no | yes | `production` (Production), `preview` (Preview) |
-| `WAITLIST_DATABASE_URL` | Vercel runtime | **yes** | yes | Runtime-role URL, pooled host, `sslmode=require` |
-| `WAITLIST_SECRET` | Vercel runtime | **yes** | yes | ≥ 32 random chars: `python -c "import secrets; print(secrets.token_urlsafe(48))"` |
-| `WAITLIST_EMAIL_MODE` | Vercel runtime | no | yes | `resend` (or `disabled` until DNS is verified) |
-| `RESEND_API_KEY` | Vercel runtime | **yes** | with resend | Sending-only key for your domain |
-| `WAITLIST_EMAIL_FROM` | Vercel runtime | no | with resend | `Tracewise <hello@updates.example.com>` |
-| `WAITLIST_OWNER_NOTIFY_EMAIL` | Vercel runtime | no (personal data) | for notifications | Your inbox |
-| `CRON_SECRET` | Vercel runtime | **yes** | yes | ≥ 32 random chars; Vercel Cron sends it as a Bearer token |
-| `WAITLIST_PUBLIC_SITE_URL` | Vercel runtime | no | after custom domain | `https://www.example.com`; empty = the Vercel production URL |
-| `WAITLIST_EMAIL_REPLY_TO` | Vercel runtime | no | optional | Inbox for replies |
-| `WAITLIST_POSTAL_ADDRESS` | Vercel runtime | no | optional | Shown in email footers |
-| `WAITLIST_TURNSTILE_SECRET` | Vercel runtime | **yes** | optional | With `PUBLIC_TURNSTILE_SITE_KEY` |
-| `WAITLIST_VERIFY_TTL_HOURS` | runtime + build | no | optional | Default 48 |
-| `WAITLIST_ALLOWED_ORIGINS` | Vercel runtime | no | no | Leave empty (same origin) |
-| `PUBLIC_OPERATOR_NAME` | Vercel build | no | **yes for Production** | Who runs the waitlist (privacy notice) |
-| `PUBLIC_CONTACT_EMAIL` | Vercel build | no | **yes for Production** | Privacy and data-request contact |
-| `PUBLIC_DATABASE_PROVIDER` | Vercel build | no | recommended | e.g. `Neon (AWS us-east-1)` |
-| `PUBLIC_SITE_URL` | Vercel build | no | after custom domain | Canonical origin |
-| `PUBLIC_TURNSTILE_SITE_KEY` | Vercel build | no | optional | Turnstile site key |
-| `PUBLIC_ALLOW_INDEXING` | Vercel build | no | optional | Default: index Production only |
-| `WAITLIST_DATABASE_URL_MIGRATIONS` | **your machine only** | **yes** | for migrations | Owner URL; never in Vercel |
+| `WAITLIST_ENV` | no | `production` | `preview` | |
+| `WAITLIST_DATABASE_URL` | **yes** | required | required | Runtime-role URL, pooled host, `sslmode=require` |
+| `WAITLIST_SECRET` | **yes** | required | required (different) | ≥ 32 random chars: `python -c "import secrets; print(secrets.token_urlsafe(48))"` |
+| `WAITLIST_EMAIL_MODE` | no | `resend` | `resend` | `disabled` keeps signups closed |
+| `RESEND_API_KEY` | **yes** | required | required | Sending-only key for your verified domain |
+| `WAITLIST_EMAIL_FROM` | no | required | required | e.g. `Tracewise <hello@updates.your-domain>` |
+| `WAITLIST_OWNER_NOTIFY_EMAIL` | no (personal data) | required | required | Your inbox for confirmed-signup notifications |
+| `CRON_SECRET` | **yes** | required | optional | ≥ 32 random chars; Vercel Cron sends it as a Bearer token (crons run on Production only) |
+| `WAITLIST_PUBLIC_SITE_URL` | no | after custom domain | no | Empty = the Vercel production URL; Preview uses its own deployment URL |
+| `WAITLIST_EMAIL_REPLY_TO` | no | optional | optional | Inbox for replies |
+| `WAITLIST_POSTAL_ADDRESS` | no | optional | optional | Shown in email footers |
+| `WAITLIST_TURNSTILE_SECRET` | **yes** | optional | optional | With `PUBLIC_TURNSTILE_SITE_KEY` |
+| `WAITLIST_VERIFY_TTL_HOURS` | no | optional | optional | Default 48; also read by the build for the copy |
+| `WAITLIST_ALLOWED_ORIGINS` | no | leave empty | leave empty | Same origin needs no CORS |
+| `WAITLIST_DATABASE_URL_MIGRATIONS` | **yes** | **never in Vercel** | **never in Vercel** | Owner URL, for migrations from your machine only |
 
 Set automatically by Vercel, not by you:
+
 - `VERCEL=1`: client-IP headers are then trusted for rate limiting;
-- `VERCEL_ENV`;
+- `VERCEL_ENV`: `production` or `preview`, which decides the build guard and indexing;
 - `VERCEL_URL`: the email-link origin on preview deployments;
 - `VERCEL_PROJECT_PRODUCTION_URL`: the fallback for email links and the canonical URL.
 
-**Production safety rules:**
+### 5c. What happens when something is missing
 
-- The settings refuse to start with `WAITLIST_ENV=production` or `preview` without `WAITLIST_SECRET` and an https
-  site URL, or with `file` email mode.
-- The build refuses a Production build without `PUBLIC_OPERATOR_NAME` and `PUBLIC_CONTACT_EMAIL`.
+| Situation | Result |
+|---|---|
+| Production build without `PUBLIC_OPERATOR_NAME` / `PUBLIC_CONTACT_EMAIL` (or with placeholders) | **Build fails** with a message naming the variable; nothing is deployed |
+| Invalid runtime setting (e.g. `WAITLIST_SECRET` shorter than 32, `resend` without key, `production` without an https site URL) | The site still loads. Every `/api/waitlist/*` route returns 503 and nothing is stored. `/api/waitlist/health` lists the setting's *name* under `config_error`; the function log has the message. Values are never printed |
+| `WAITLIST_EMAIL_MODE=disabled`, or (Production/Preview) no `WAITLIST_DATABASE_URL` or no `WAITLIST_OWNER_NOTIFY_EMAIL` | **Signups closed:** the form says "Signups aren't open yet"; `/health` shows `"accepting_signups": false` |
+| Database unreachable | 503 "temporarily unavailable"; nothing stored |
+
+### Troubleshooting: "production builds need PUBLIC_OPERATOR_NAME and PUBLIC_CONTACT_EMAIL"
+
+The deployment was a Production build (`VERCEL_ENV=production`) and one or both values were not set for the
+**Production** environment. This includes the very first deployment of a new project.
+
+1. In Vercel → Project → Settings → Environment Variables, add `PUBLIC_OPERATOR_NAME` and `PUBLIC_CONTACT_EMAIL` with
+   your real operator name and contact inbox. Tick **Production**, and Preview if you want previews to show them.
+   They are public, so they don't need the Sensitive flag.
+2. Deployments → the failed deployment → ⋯ → **Redeploy**.
+3. Check that the build log now ends with `build: 5 pages, … (indexing on, …)`, and that `/privacy/` shows your
+   details.
 
 ## 6. Deploy steps
 
 Prerequisites: sections 2–5 done.
 
-1. **Commit the website.** The website, the waitlist code and the 720p film (`web/public/media/`, 7.5 MB) are
-   currently **untracked**. Review them and commit them on a branch. Git status shows what is new; nothing was
-   committed for you.
+1. **Push the website commits.** The website, the waitlist code and the 720p film are committed on `main`
+   (`c195dc6`…`172cd57`).
 2. **Create the Vercel project.** Vercel → Add New → Project → import the GitHub repository. Framework preset:
    **FastAPI**, or "Other"; the `[tool.vercel]` entrypoint is what matters. Root directory: the repository root.
 3. **Check the build settings:**
    - The build step comes from `pyproject.toml` → `[tool.vercel.scripts] build = "node web/build.mjs"`.
-   - If your project shows no build step running, set **Build Command** to `node web/build.mjs` in Project Settings.
-   - The function refuses to start without `web/dist`, so a missing build fails loudly instead of deploying half a
-     site.
+     **Confirmed on Vercel:** the first deployment ran it, and failed in its production guard (section 5,
+     troubleshooting).
+   - If a deployment ever shows no `build:` line, set **Build Command** to `node web/build.mjs` in Project Settings.
+   - A missing `web/dist` fails the build itself. On Vercel the function does not re-check the directory, because
+     the static files may be served from the CDN rather than bundled with it.
    - Python: the project needs Python ≥ 3.12. Check the version in the build log.
-4. **Add the environment variables** (section 5) for Production, and for Preview if you'll use preview deployments.
-5. **Deploy.** Check that the build log contains `build: 5 pages, … (indexing on, …)`.
+4. **Add the environment variables.**
+   - Build-time (5a): `PUBLIC_OPERATOR_NAME` and `PUBLIC_CONTACT_EMAIL` at least, ticked for **Production**.
+   - Runtime (5b): ticked for Production, and with separate values for Preview if you'll use preview deployments.
+5. **Deploy, or Redeploy the failed deployment.** Check that:
+   - the build log contains `build: 5 pages, … (indexing on, …)`;
+   - `/privacy/` shows your operator details;
+   - `/api/waitlist/health` returns `"accepting_signups": true`. If it says false, or shows `config_error`, see 5c.
 6. **Check the upload.** `.vercelignore` keeps `research/`, `tracewise-brand/`, `tests/`, `docs/` and local files out
    of the deployment. Confirm this in the deployment's **Source** view: no `research/` folder should be listed.
 7. **Cron.** `vercel.json` schedules the retry job once a day (`17 9 * * *`). On Vercel's Hobby plan cron jobs are
@@ -403,10 +466,10 @@ uv run python -m tracewise.waitlist.admin process
 
 | Suite | Command | Result |
 |---|---|---|
-| Waitlist backend | `PYTHONPATH=. uv run pytest -p tests.netguard tests/waitlist` | 155 passed, 0 external connections |
-| Website unit and build | `node --test web/test/` | 14 passed |
+| Waitlist backend | `PYTHONPATH=. uv run pytest -p tests.netguard tests/waitlist` | 158 passed, 0 external connections |
+| Website unit and build | `node --test web/test/` | 18 passed |
 | Website end to end | `make web-e2e` (headless Chromium, disposable PostgreSQL, file email) | 24 passed |
-| Full repository gate | `make ci` (lint, strict types, docs, truth lock, `make web`, all non-live tests under the network guard, no skips) | 1196 passed |
+| Full repository gate | `make ci` (lint, strict types, docs, truth lock, `make web`, all non-live tests under the network guard, no skips) | 1198 passed |
 
 All the waitlist's network access is in one module, `src/tracewise/waitlist/outbound.py`: Resend and Turnstile,
 fixed URLs, no redirects. The repository's existing network-surface test (`tests/unit/test_github_client.py`) now

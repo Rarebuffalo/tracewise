@@ -75,10 +75,38 @@ def _json(body: dict[str, Any] | None, status: int = 200, extra: dict[str, str] 
     return JSONResponse(body, status_code=status, headers=headers)
 
 
+def config_error_app(fields: list[str]) -> FastAPI:
+    """Served when the waitlist settings are invalid: the website keeps working, every API route answers 503 and
+    nothing can be stored. Only the names of the offending settings are exposed (never their values)."""
+    app = FastAPI(title="Tracewise waitlist (misconfigured)", docs_url=None, redoc_url=None, openapi_url=None)
+
+    @app.get(f"{PREFIX}/health")
+    async def health() -> Response:
+        return _json({"ok": False, "accepting_signups": False, "config_error": fields}, 503)
+
+    @app.api_route(f"{PREFIX}/{{path:path}}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+    async def closed(path: str) -> Response:
+        closed_signup = path in ("form", "signup")
+        return _json({"error": "signups_closed" if closed_signup else "unavailable"}, 503, {"Retry-After": "300"})
+
+    return app
+
+
 def create_app(
     settings: WaitlistSettings | None = None, *, pool: ConnectionPool[Conn] | None = None, sender: Sender | None = None
 ) -> FastAPI:
-    s = settings or get_settings()
+    if settings is None:
+        try:
+            settings = get_settings()
+        except ValidationError as e:
+            # Field names and messages only: input values are hidden (settings use hide_input_in_errors).
+            fields = sorted({str(err["loc"][0]) if err["loc"] else "settings" for err in e.errors(include_input=False)})
+            problems = "; ".join(
+                f"{'.'.join(map(str, err['loc'])) or 'settings'}: {err['msg']}" for err in e.errors(include_input=False)
+            )
+            log.error("waitlist.config_invalid: %s", problems)
+            return config_error_app(fields)
+    s = settings
     secret = s.secret_bytes()
     _sender = sender or make_sender(
         s.waitlist_email_mode,
