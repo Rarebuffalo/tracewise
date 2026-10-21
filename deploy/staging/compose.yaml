@@ -1,0 +1,113 @@
+# Tracewise private staging on one VM (T-1002; DEPLOYMENT-BLUEPRINT §2b). Provider-neutral: Docker Compose only.
+# Secrets live OUTSIDE the repository in $TW_SECRETS_DIR (each file chmod 600; app.pem owned by uid 10001).
+# Each process gets only the env files it needs: system.env (DATABASE_URL_SYSTEM), web.env (webhook secret),
+# worker.env (tenant URL, provider), app.env (App id and key path), migrate.env (owner URL; migrate and preflight only).
+# Secret files are bound with create_host_path: false: a missing file is an error, never an empty directory.
+# Long-running: db, web, worker, proxy.   One-off (profile "jobs"): migrate, preflight, recovery, retention, alerts.
+#   docker compose --profile jobs run --rm migrate upgrade
+name: tracewise-staging
+
+x-image: &image ${TRACEWISE_IMAGE:-tracewise:local}
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg_superuser_password
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - { type: bind, source: "${TW_SECRETS_DIR:?set TW_SECRETS_DIR}/pg_superuser_password", target: /run/secrets/pg_superuser_password, read_only: true, bind: { create_host_path: false } }
+      - ../../scripts/db:/provision:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 5s
+      retries: 20
+    restart: unless-stopped  # no published port: reachable only from this Compose network
+
+  web:
+    image: *image
+    command: ["uvicorn", "--factory", "tracewise.web.asgi:create_runtime_app", "--host", "0.0.0.0", "--port", "8000"]
+    env_file:
+      - ${TW_SECRETS_DIR:?set TW_SECRETS_DIR}/system.env
+      - ${TW_SECRETS_DIR:?set TW_SECRETS_DIR}/web.env
+    depends_on: { db: { condition: service_healthy } }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz', timeout=3)"]
+      interval: 10s
+      retries: 6
+    restart: unless-stopped
+
+  worker:
+    image: *image
+    command: ["python", "-m", "tracewise.worker"]
+    env_file:
+      - ${TW_SECRETS_DIR:?set TW_SECRETS_DIR}/system.env
+      - ${TW_SECRETS_DIR:?set TW_SECRETS_DIR}/worker.env
+      - ${TW_SECRETS_DIR:?set TW_SECRETS_DIR}/app.env
+    volumes:
+      - &appkey { type: bind, source: "${TW_SECRETS_DIR:?set TW_SECRETS_DIR}/app.pem", target: /run/secrets/app.pem, read_only: true, bind: { create_host_path: false } }
+    depends_on: { db: { condition: service_healthy } }
+    stop_grace_period: 10m  # a job may run to its 10-minute deadline (DEPLOYMENT-BLUEPRINT §2)
+    restart: unless-stopped
+
+  proxy:
+    image: caddy:2
+    ports: ["80:80", "443:443"]
+    environment:
+      TW_DOMAIN: ${TW_DOMAIN:?set TW_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on: { web: { condition: service_healthy } }  # no traffic before /readyz succeeds
+    restart: unless-stopped
+
+  migrate:
+    image: *image
+    profiles: [jobs]
+    entrypoint: ["python", "-m", "tracewise.db.migrate"]
+    env_file:
+      - ${TW_SECRETS_DIR:?set TW_SECRETS_DIR}/migrate.env
+    depends_on: { db: { condition: service_healthy } }
+
+  preflight:
+    image: *image
+    profiles: [jobs]
+    entrypoint: ["python", "-m", "tracewise.preflight"]
+    command: ["--process", "all", "--database"]
+    env_file:
+      - ${TW_SECRETS_DIR:?set TW_SECRETS_DIR}/system.env
+      - ${TW_SECRETS_DIR:?set TW_SECRETS_DIR}/web.env
+      - ${TW_SECRETS_DIR:?set TW_SECRETS_DIR}/worker.env
+      - ${TW_SECRETS_DIR:?set TW_SECRETS_DIR}/app.env
+      - ${TW_SECRETS_DIR:?set TW_SECRETS_DIR}/migrate.env
+    volumes:
+      - *appkey
+    depends_on: { db: { condition: service_healthy } }
+
+  recovery:
+    image: *image
+    profiles: [jobs]
+    entrypoint: ["python", "-m", "tracewise.recovery"]
+    env_file:
+      - ${TW_SECRETS_DIR:?set TW_SECRETS_DIR}/system.env
+      - ${TW_SECRETS_DIR:?set TW_SECRETS_DIR}/app.env
+    volumes:
+      - *appkey
+
+  retention:
+    image: *image
+    profiles: [jobs]
+    entrypoint: ["python", "-m", "tracewise.retention"]
+    env_file:
+      - ${TW_SECRETS_DIR:?set TW_SECRETS_DIR}/system.env
+
+  ops:
+    image: *image
+    profiles: [jobs]
+    entrypoint: ["python", "-m", "tracewise.ops"]
+    env_file:
+      - ${TW_SECRETS_DIR:?set TW_SECRETS_DIR}/system.env
+
+volumes:
+  pgdata:
+  caddy_data:
