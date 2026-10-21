@@ -182,7 +182,7 @@ def test_schema_grants_rls_and_definer_owner_after_a_clean_install(fresh) -> Non
             got = k.execute("SELECT has_function_privilege(%s, 'tracewise_purge(integer)', 'EXECUTE')", (role,)).fetchone()
             assert got == (allowed,), role
     with psycopg.connect(fresh.url("tracewise_owner")) as k:
-        assert k.execute("SELECT version_num FROM alembic_version").fetchone() == ("0010",)
+        assert k.execute("SELECT version_num FROM alembic_version").fetchone() == ("0011",)
         assert k.execute(
             "SELECT count(*) FROM pg_indexes WHERE indexname IN ('job_ready', 'analysis_updated', 'installation_purge_due')"
         ).fetchone() == (3,)

@@ -99,6 +99,7 @@ class World:
     `pool` is the system plane (queue, ingress); the analyze handler runs on `tenant_pool` (RLS, T-705)."""
 
     tenant_pool: Any = None
+    quota: int | None = None  # T-703: AnalyzeDeps.analysis_quota for the worker this World builds
 
     def __init__(
         self,
@@ -218,6 +219,7 @@ class World:
             APP_ID,
             provider_factory=self.provider,
             fetcher_factory=lambda: make_fetcher(self.server, self.ws_root),
+            analysis_quota=self.quota,
         )
         return Worker(self.pool, {"analyze": make_analyze_handler(deps)}, name, heartbeat_s=kw.pop("heartbeat_s", 5), **kw)
 
