@@ -10,7 +10,6 @@ docs/
 .venv/
 .claude/
 web/design-preview/
-web/dist/
 web/docs/
 web/test/
 web/dev.py

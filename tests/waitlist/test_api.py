@@ -315,3 +315,28 @@ def test_confirm_and_unsubscribe_still_work_while_signups_are_closed(
 
 def test_health_reports_accepting(client: TestClient) -> None:
     assert client.get(f"{API}/health").json()["accepting_signups"] is True
+
+
+def test_invalid_configuration_serves_a_closed_api(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    """A bad environment (here: a too-short secret) must not crash the app or leak the value: every route is 503."""
+    from tracewise.waitlist.app import create_app
+    from tracewise.waitlist.settings import get_settings
+
+    monkeypatch.setenv("WAITLIST_ENV", "production")
+    monkeypatch.setenv("WAITLIST_SECRET", "too-short-LEAKCHECK")
+    get_settings.cache_clear()
+    caplog.set_level(logging.ERROR)
+    try:
+        with TestClient(create_app(), base_url="https://tracewise-test.example") as c:
+            h = c.get(f"{API}/health")
+            assert h.status_code == 503
+            assert h.json() == {"ok": False, "accepting_signups": False, "config_error": ["settings"]}
+            assert c.get(f"{API}/form").json() == {"error": "signups_closed"}
+            r = c.post(f"{API}/signup", json={"email": "ada@example.com", "form_token": "x"})
+            assert r.status_code == 503 and r.json() == {"error": "signups_closed"}
+            assert c.post(f"{API}/confirm", json={"token": "x"}).json() == {"error": "unavailable"}
+            assert c.get(f"{API}/internal/outbox").status_code == 503
+    finally:
+        get_settings.cache_clear()
+    assert "waitlist.config_invalid" in caplog.text and "WAITLIST_SECRET must be at least 32" in caplog.text
+    assert "LEAKCHECK" not in caplog.text

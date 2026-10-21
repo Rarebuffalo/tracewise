@@ -92,6 +92,8 @@ def test_signup_block_reason() -> None:
         "resend_api_key": "re_x",
         "waitlist_email_from": "a@e.example",
     }
+    assert make(**prod).signup_block_reason() == "WAITLIST_DATABASE_URL is not set"
+    prod["waitlist_database_url"] = "postgresql://u@h/db"
     assert make(**prod).signup_block_reason() == "WAITLIST_OWNER_NOTIFY_EMAIL is not set"
     assert make(**prod, waitlist_owner_notify_email="o@e.example").signup_block_reason() is None
 
@@ -104,3 +106,12 @@ def test_preview_deployments_link_to_themselves(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setenv("VERCEL_ENV", "production")
     assert make().site_url() == "https://tw.vercel.app"
     assert make(waitlist_public_site_url="https://www.example.com").site_url() == "https://www.example.com"
+
+
+def test_validation_errors_never_echo_secret_values() -> None:
+    with pytest.raises(ValidationError) as e:
+        make(waitlist_secret="short-SECRET-VALUE-xyz")
+    assert "SECRET-VALUE" not in str(e.value) and "SECRET-VALUE" not in repr(e.value)
+    with pytest.raises(ValidationError) as e2:
+        make(waitlist_email_mode="resend", resend_api_key="re_SECRETKEYVALUE")  # model-level error: no FROM address
+    assert "SECRETKEYVALUE" not in str(e2.value)

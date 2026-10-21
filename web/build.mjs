@@ -50,8 +50,25 @@ const operator = (env.PUBLIC_OPERATOR_NAME || '').trim();
 const contact = (env.PUBLIC_CONTACT_EMAIL || '').trim();
 const dbProvider = (env.PUBLIC_DATABASE_PROVIDER || '').trim();
 if (contact && !/^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]+$/.test(contact)) fail('PUBLIC_CONTACT_EMAIL is not an email address');
-if (production && (!operator || !contact)) {
-  fail('production builds need PUBLIC_OPERATOR_NAME and PUBLIC_CONTACT_EMAIL (the privacy notice names who runs the waitlist and how to reach them)');
+// Production guard: the public privacy notice must name who runs the waitlist and how to reach them. These are
+// build-time values (embedded in /privacy/), not secrets; there is deliberately no default and no fallback.
+if (production) {
+  const missing = [['PUBLIC_OPERATOR_NAME', operator], ['PUBLIC_CONTACT_EMAIL', contact]].filter(([, v]) => !v).map(([k]) => k);
+  const placeholderName = /^(change[_ -]?me|todo|tbd|tba|n\/?a|none|test|example|your (name|company)|operator|name)\b/i;
+  const placeholderDomain = /@(([^@]+\.)?(example\.(com|org|net))|[^@]+\.(invalid|test|example|localhost)|localhost)$/i;
+  const bad = [];
+  if (operator && placeholderName.test(operator)) bad.push(`PUBLIC_OPERATOR_NAME looks like a placeholder ("${operator}")`);
+  if (contact && placeholderDomain.test(contact)) bad.push(`PUBLIC_CONTACT_EMAIL uses a reserved/placeholder domain ("${contact}")`);
+  if (missing.length || bad.length) {
+    fail([
+      'this is a Vercel Production build (VERCEL_ENV=production), and the privacy notice needs real operator details.',
+      ...missing.map((k) => `  - ${k} is not set`),
+      ...bad.map((b) => `  - ${b}`),
+      '  Set them in Vercel → Project → Settings → Environment Variables, environment "Production"',
+      '  (build-time and public: they are printed on /privacy/, so they are not secrets), then Redeploy.',
+      '  See web/docs/deployment.md, section 5.',
+    ].join('\n'));
+  }
 }
 const consentVersion = (readFileSync(join(WEB, '..', 'src', 'tracewise', 'waitlist', 'service.py'), 'utf8').match(/^CONSENT_VERSION = "([^"]+)"/m) || [])[1];
 if (!consentVersion) fail('could not read CONSENT_VERSION from src/tracewise/waitlist/service.py');

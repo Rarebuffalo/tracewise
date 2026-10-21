@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -20,5 +21,8 @@ DIST = ROOT / "web" / "dist"
 def create_site(dist: Path = DIST, **kwargs: Any) -> FastAPI:
     """The waitlist API plus the built site. API routes always win; unknown paths get the site's 404 page."""
     site = create_app(**kwargs)
-    site.frontend("/", directory=str(dist), fallback="404.html", check_dir=True)
+    # Locally and in tests a missing build is an error. On Vercel the build step already fails without web/dist,
+    # and the static files may be served from the CDN rather than bundled with the function, so the function must
+    # not refuse to start just because the directory is absent from its bundle (unverified platform behaviour).
+    site.frontend("/", directory=str(dist), fallback="404.html", check_dir=os.environ.get("VERCEL") != "1")
     return site
