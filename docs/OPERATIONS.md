@@ -6,7 +6,7 @@ This document prepares a **later, approved** pilot. Nothing here has been deploy
 
 | Ready (verified offline) | Not ready |
 |---|---|
-| Schema, migrations 0001–0010, roles, RLS, the purge function (`tests/db/test_fresh_install.py`) | Hosting, process supervision, TLS and ingress for the webhook URL (T-1002, gated) |
+| Schema, migrations 0001–0011, roles, RLS, the purge function (`tests/db/test_fresh_install.py`) | Hosting, process supervision, TLS and ingress for the webhook URL (T-1002, gated) |
 | **Process entry points** (Phase 18): web via uvicorn, worker via `python -m tracewise.worker` (§1a) | |
 | Webhook intake, queue, worker, publisher, recovery, retention and observability (offline suites) | **No real model adapter** (D-7). The only provider is `fake`. A real one is T-605. |
 | CLIs: `python -m tracewise.{recovery,ops,retention,bench}` | Credential provisioning (D-11), schedules, alert routing (T-1002) |
@@ -17,9 +17,9 @@ This document prepares a **later, approved** pilot. Nothing here has been deploy
 
 1. **Roles.** A database administrator runs `scripts/db/provision_roles.sql` as superuser, once. It creates the non-superuser owner and the `tracewise_app` and `tracewise_system` roles, and the `tracewise` database. It sets no passwords and revokes TEMP and CREATE from PUBLIC.
 2. **Authentication.** Configure authentication for the three roles (password, certificate or IAM) **outside this repository**. That is the D-11 decision.
-3. **Migrate.** Run the migrations as the owner, in order: `tracewise.db.migrate.upgrade(<owner url>)`. This applies 0001–0010. The runtime roles must exist before this step, otherwise they get no grants, which fails closed.
+3. **Migrate.** Run the migrations as the owner: `python -m tracewise.db.migrate upgrade` with only `DATABASE_URL_MIGRATIONS` set. It refuses (exit 2, before any change) a missing owner URL, a URL or user shared with a runtime URL, a connection that turns out to be `tracewise_app`/`tracewise_system`, a **superuser** (the SECURITY DEFINER purge would then run with superuser rights; `--allow-superuser` is for disposable development clusters only), or a role that does not own the existing schema; exit 1 is an unreachable database or a failed migration. `python -m tracewise.db.migrate status` prints the current and head revisions (exit 0 at head, 4 behind). This applies 0001–0011. The runtime roles must exist before this step, otherwise they get no grants, which fails closed.
 4. **Verify.** Run the checks on the target database before use:
-   - `SELECT version_num FROM alembic_version` must return `0010`;
+   - `SELECT version_num FROM alembic_version` must return `0011`;
    - **Migration 0010** (per-installation keys) is reversible only while no two installations share an old global key. After a repository transfer they may, and the downgrade then refuses (`downgrade 0010 refused: …`) without deleting anything; the operator must resolve the rows explicitly.
    - the grant and RLS checks in `tests/db/test_fresh_install.py`. Adapt that file's queries to read-only use; do not run the test suite against a real database.
 5. **New migrations** must keep `tests/db/test_db_security.py` passing:
@@ -155,6 +155,7 @@ Expired leases are reaped at the next claim (`queue.lease_expired`). Handlers ar
 | 1 | Incomplete, or the database was unavailable. The JSON summary says why: `rate_limited`, `github_unavailable`, `list_failed`, `page_cap`, `request_cap` or `failed_repos`. |
 
 - Checkpoints in `recovery_checkpoint` advance only after the step they cover, so a pass is safe to re-run.
+- One pass of each kind at a time: an overlapping `deliveries` (or `runs`) pass stops at once with `"stopped": "locked"` and exit 1, before any GitHub request (`recovery.locked`). Different kinds may overlap. Safe for cron.
 - Redelivery is limited to 3 attempts and a 15-minute cooldown, uncertain attempts included.
 - **No schedule is installed.** Suggested cadence for the pilot, to be decided at T-1002: deliveries every 15 min, runs every hour.
 
@@ -193,6 +194,22 @@ Expired leases are reaped at the next claim (`queue.lease_expired`). Handlers ar
 | Suspected credential leak | Rotate the affected secret at its source: the App private key or webhook secret in GitHub's App settings, the database role credential, the model key. Then restart the processes. Logs are scrubbed, but check `logs` access too. |
 | Suspected cross-tenant exposure | Stop workers and intake. Preserve the logs. Run the RLS and schema guards (`test_db_security.py` queries) against the database, read-only. Review `audit_event`. |
 | Uninstalled tenant asks for deletion before the grace period | A policy decision. The purge honours `purge_after` (+7 days, FS-INS-3). |
+
+## 8a. Troubleshooting (prepared offline; not exercised against a live deployment)
+
+Run every SQL below **read-only, as the system role** (`DATABASE_URL_SYSTEM`); the tenant role sees no rows outside a
+tenant transaction. Never paste a URL, token or log blob into a ticket. Start with `python -m tracewise.preflight
+--database` (exit 0 required) and `python -m tracewise.ops report`.
+
+| Symptom | Check | Action |
+|---|---|---|
+| **Webhooks fail** (GitHub shows red deliveries) | Events: `webhook.signature_rejected` (401), `webhook.not_configured` (503), `webhook.db_unavailable` (503), `webhook.too_large` (413), `webhook.bad_headers` / `webhook.payload_rejected` (400). `/readyz` reason. | 401: the App's webhook secret and `GITHUB_WEBHOOK_SECRET` differ; set both again, restart web. 503: fix the setting or the database, then `recovery deliveries` (redelivery is capped and cooled down, §5). 400: a payload outside the contract; record the delivery GUID only. |
+| **Webhook accepted, nothing happens** | `SELECT outcome, count(*) FROM webhook_delivery WHERE received_at > now() - interval '1 hour' GROUP BY 1` (column names per migration 0001). `ignored` is expected for successful runs and unsupported events. | `enqueued` but no job progress: see the next row. `duplicate_run`: dedupe by (repo, run, attempt) is working as designed. |
+| **Jobs stuck** | `SELECT status, count(*), min(run_after), max(updated_at) FROM job WHERE finished_at IS NULL GROUP BY 1`. `running` with `locked_until < now()` = a dead worker; `retry_wait` with `last_error` = backing off. Events: `queue.lease_expired`, `job.lease_lost`, `worker.db_unavailable`. | No worker running: start one (it reaps expired leases at the next claim). ≤2 running jobs per installation is a limit, not a fault. Never edit `job` rows by hand; a job past `max_attempts` becomes `dead` with a bounded `last_error`. |
+| **Publication failed** | `SELECT surface, state, count(*) FROM publication GROUP BY 1, 2`. `unpublished_permission` with `missing_permission` = the installation declined a permission (`publication.permission_refused`); `failed` with `last_error`. | Permission: the installer must accept it in GitHub; Tracewise never escalates. `failed`: transient GitHub errors retry with the job (3 attempts). There is no automatic re-publication after that; a workflow re-run (a new attempt) is analysed and published afresh. Publication reconciles before creating, so retries never duplicate a commit comment (FS-PUB-1 trigger). `recovery runs` only finds failed runs whose webhook never arrived. |
+| **Database unavailable** | `worker.db_unavailable`, `webhook.db_unavailable`, `/readyz` → 503 `unavailable`; `ops` exits 1 with `database_unavailable`. | Restore the database. Workers back off on their own; web keeps answering 503 so GitHub records the deliveries. Afterwards: `recovery deliveries`, then `recovery runs`. `wrong_database_role` or `schema_mismatch` instead: a configuration or migration problem, not an outage (preflight names which). |
+| **Provider failures** | `SELECT status, count(*) FROM analysis WHERE created_at > now() - interval '1 hour' GROUP BY 1`: a rise in `could_not_complete`; `alert.failure_rate`. The job itself succeeds (it published the could-not-complete notice). | Timeouts, 429 and 5xx are retried inside the investigation's time budget; then the run is reported as could-not-complete, never as a diagnosis. Quota (`insufficient_quota`) and auth (401/403) errors are not retried: fix the account or key at its source, restart the workers. With the `fake` provider every analysis is could-not-complete by design. |
+| **Quota reached** | `analysis.quota_exceeded`; analyses with status `quota_exceeded`; at most one notice per repository per UTC day. | Expected when `ANALYSIS_QUOTA_MONTHLY` is set. Raising it is an owner decision. |
 
 ## 9. Data retention and privacy
 

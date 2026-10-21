@@ -3,6 +3,32 @@
 > **Commit hashes in this file before 2026-10-20 (bb) are pre-rewrite hashes.** The history was rewritten once to
 > redact signed URLs before the first push; map them with [HISTORY-REWRITE.md](HISTORY-REWRITE.md).
 
+## Unreleased (uncommitted): offline completion toward live validation
+
+Offline only; nothing live was run. Every defect below was reproduced by a failing test before the fix.
+
+- **T-703** monthly analysis quota (migration 0011; unset = no quota).
+- **T-901** lane history and **T-903** dependency drift: computed, not surfaced (ADR-13).
+- **T-604** META runner: P-01–P-03 pass from the recorded anonymous metadata of 2026-10-17, read in place (`python -m tracewise.bench meta`); not held-out evidence; separate from the synthetic benchmark.
+- **T-801/T-802 preparation:** `python -m tracewise.preflight` (no network; `--database` read-only) and the S0–S3 operator checklist.
+- **Fixes:**
+  - A malformed `parents` entry, or a non-integer line count in a compare file, gave an unhandled error; both now give an unknown or zero value.
+  - Recovery aborted its whole pass on a non-object delivery item or a non-integer `status_code`.
+  - Webhook ids accepted booleans, numeric strings, negatives and values beyond the bigint/integer columns (a `run_attempt` of 0 reached the column CHECK); deeply nested JSON returned 500. All are now `400 invalid_payload` / `invalid_json`.
+- **Guards:** least-privilege catalogue checks beyond S/I/U/D (TRUNCATE/REFERENCES/TRIGGER, PUBLIC, `setval`, column grants, definer functions, memberships, default privileges); hostile `Retry-After` values.
+- **Docs:** troubleshooting runbook (OPERATIONS §8a); S3 step 1 corrected (no slow-provider setting exists).
+- **Release readiness (T-1002):** runtime image and `make image-check` (whole stack from the image, offline, passed); `python -m tracewise.db.migrate status|upgrade` with owner-only refusals; preflight warns when `git` is missing.
+- **Fix:** without a `git` binary every analysis failed (the fetcher was built outside the contents-API fallback); it now falls back.
+- **Signals:** `python -m tracewise.bench signals` evaluates dependency drift on the frozen cases (unseen: 0 FP, 2 FN, 28 TN; no accuracy claim). Lane history has no valid evaluation yet.
+- **Live plan:** stage gates (prerequisite, command, expectation, cleanup, proceed condition); G-PLAT-3 needs a model.
+- **Pre-staging hardening (each reproduced first):**
+  - Overlapping recovery passes of one kind (cron) could repeat redelivery POSTs inside the cooldown and overwrite a held high-water mark; each kind now takes a transaction-level advisory try-lock and a second pass stops with `locked` before any GitHub request.
+  - The migration CLI accepted a superuser owner URL (the SECURITY DEFINER purge would then run with superuser rights) and crashed with a misleading message for a non-owner role; both are refused before any change. The preflight `--database` flags a superuser-owned definer.
+  - A missing secret file made Docker create a root-owned directory in its place; secret files are now bound with `create_host_path: false`.
+  - Staging env files split per process: retention and ops no longer receive the webhook secret, recovery no longer receives the tenant URL. The proxy starts only after web readiness.
+  - `make image-check` now uses a non-superuser owner (the production role model) and checks the superuser refusal.
+- **AT-EVT-03 (REPLAY) closed:** a job that GitHub ended `timed_out` was analysed, but no report said so. `FailedStep.timed_out` (from the jobs API, never model output) now adds a Limits note on every report; end-to-end test through the worker to both surfaces.
+
 ## 2026-10-21 (bd): Phase 57 reliability and diagnostic-correctness fixes
 
 Two offline audits; every defect was reproduced by a failing test before the fix.

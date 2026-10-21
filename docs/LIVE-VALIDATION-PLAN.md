@@ -41,6 +41,70 @@
 
 **Never capture:** tokens, signed URLs or log blobs.
 
+## Operator checklist for S0–S3 (prepared offline; nothing below has been run)
+
+**Owner-provided inputs** (none exist in this repository; none may be committed):
+
+| Input | Where it goes | Who provides it |
+|---|---|---|
+| Test organisation and the three test repositories | GitHub | Owner (T-801 approval) |
+| Dev GitHub App: id, private key (`.pem`), webhook secret (≥16 random characters) | `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY_PATH` (file mode 0600, **outside** any git working tree), `GITHUB_WEBHOOK_SECRET` | Owner creates the App |
+| HTTPS URL of the test deployment (`/webhooks/github`) | App settings | Owner (no hosting exists yet) |
+| Three database credentials on a non-production database (D-11) | `DATABASE_URL` (tracewise_app), `DATABASE_URL_SYSTEM` (tracewise_system), `DATABASE_URL_MIGRATIONS` (owner) | Owner / DBA |
+| Model choice; without it the run uses `TW_ENV=test LLM_PROVIDER=fake` and diagnosis quality is not under test | `LLM_PROVIDER`, `TW_ENV` | Owner |
+| Monthly analysis quota (optional) | `ANALYSIS_QUOTA_MONTHLY` | Owner decision |
+
+**Commands, in order** (run in the test deployment's environment; each must succeed before the next):
+On the recommended single-VM staging, the same commands run through Compose: `deploy/staging/README.md` steps 7–11 (for example `docker compose --profile jobs run --rm preflight`).
+
+1. Migrate as the owner (only `DATABASE_URL_MIGRATIONS` set in this shell): `uv run python -m tracewise.db.migrate upgrade`, then `uv run python -m tracewise.db.migrate status` (exit 0 = at head).
+2. Preflight, configuration only (no network): `uv run python -m tracewise.preflight --process all` (`all` also covers `python -m tracewise.recovery`, used in S1, which needs the system URL and the App credentials). Exit 0 is required; exit 2 lists the failed checks by name; exit 3 means a setting is invalid. Output never contains a value.
+3. Preflight with the database (read-only: roles and schema head): `uv run python -m tracewise.preflight --process all --database`.
+4. Confirm by hand each `manual` line the preflight prints (App permissions exactly as FS-INS-2, the `workflow_run` subscription, the webhook URL and secret, installation scope). The preflight cannot see GitHub and does not try.
+5. Start the web process and check `/readyz` returns 200; start one worker (§1a of OPERATIONS.md).
+6. Only then install the App on `tw-push` and begin S0. Run S1–S3 in order; stop at any abort condition below.
+
+A failed preflight starts nothing: the module has no GitHub or model client (tested in `tests/unit/test_preflight.py`), and the web and worker processes repeat their own startup refusals independently.
+
+## Stage gates (prepared offline; checked against the CLIs in this build)
+
+S0 in this plan is the install baseline; environment readiness is the gate **before** it. Each row: do the action,
+check the expectation, and continue only when "Proceed when" holds. On failure, apply the cleanup and the rollback
+conditions below.
+
+| Stage | Prerequisites | Action / command | Expected (observable) | On failure | Proceed when |
+|---|---|---|---|---|---|
+| Readiness | Owner inputs in the checklist above | `python -m tracewise.db.migrate upgrade`; `python -m tracewise.db.migrate status`; `python -m tracewise.preflight --process all --database`; start web and one worker | migrate status exit 0; preflight exit 0 (warnings allowed: fake provider, quota); `/readyz` 200; `worker.started` event | Fix the named check; nothing has reached GitHub | All four hold and every `manual` preflight line is confirmed by hand |
+| S0 | Readiness | Install the App on `tw-push`; push a failing commit; re-run twice | §S0 below: one comment, one Check Run updated in place, one `completed` per attempt | Uninstall the App | No abort condition; ids captured |
+| S1 | S0 | Redeliver; stop web during a failure, then `python -m tracewise.recovery deliveries`; then `python -m tracewise.recovery runs` | §S1: `duplicate_delivery`; `"redelivered": 1`; second pass `already_received`; sweep `"enqueued": 1`, then `"duplicates": 1` | Stop recovery; no cleanup needed (dedupe) | No second job for any run attempt |
+| S2 | S1 | Decline a permission; failing PR on `tw-pr` | §S2: `publication.state = unpublished_permission` with `missing_permission`; record the mint result | Restore and re-approve permissions | Mint behaviour recorded; never more than requested |
+| S3 | S2 | Suspend, remove the repository, uninstall (see §S3 step 1 limits) | Jobs `cancelled` with `installation_suspended`, `repo_not_in_scope` or `cancelled_uninstalled`; installation `deleted` with `purge_after` | Reinstall; delete test PRs and branches | No write after `deleted`; old id stays a tombstone |
+| S4 | S3 (G-PLAT-3 also needs T-605) | §S4 table rows | Recorded per gate | Revert `REPORT_MAX_CHARS` | Each gate recorded (accept, reject or not run, with the reason) |
+| S5 | S4 | `python -m tracewise.ops report`; `python -m tracewise.ops alerts`; grep captured logs; uninstall; `python -m tracewise.retention` | report and p50/p95 labelled test-org traffic; zero token shapes; tenant purged, tombstone kept (retention exit 0, or 3 = run again) | Rotate any leaked secret (rollback section) | Findings recorded in GITHUB-CONTRACT-AUDIT.md |
+
+**The App is created before the readiness gate, installed only at S0.** Creating the dev App (step 3 of
+`deploy/staging/README.md`) gives the id, key and webhook secret the preflight needs; it reaches no repository. Its
+**installation** on `tw-push` starts S0 and is a deliberate, separately authorised action, as is every later live
+event. Offline tests (the first table) cover our side of each stage with fake GitHub; none of them is live evidence.
+
+**How to inspect each result on the staging host** (`deploy/staging`, with `TW_SECRETS_DIR` and `TW_DOMAIN` set):
+
+| Evidence | Command |
+|---|---|
+| Event lines (`webhook.ingested`, `publication.result`, `job.*`, `recovery.*`) | `docker compose logs --since 30m web worker \| grep '"event"'` |
+| Job, publication and analysis states | `docker compose exec -T db psql -U postgres -d tracewise -c "SELECT status, count(*) FROM job GROUP BY 1"` (likewise `publication` by `surface, state, missing_permission`; `analysis` by `status`) |
+| Delivery outcomes and GUIDs | `docker compose exec -T db psql -U postgres -d tracewise -c "SELECT delivery_id, event, outcome FROM webhook_delivery ORDER BY received_at DESC LIMIT 20"` |
+| Recovery summary | the JSON printed by `docker compose --profile jobs run --rm recovery deliveries` (fields `redelivered`, `already_received`, `enqueued`, `duplicates`, `stopped`, `completed`) |
+| Report and latency | `docker compose --profile jobs run --rm ops report` |
+| GitHub surfaces | the commit's comments and Checks tab in the GitHub UI, or the API JSON, captured without tokens |
+
+**Known gaps in S0–S3 (flagged, not redefined):**
+- **Worker crash recovery** (a killed worker's lease expiring and another worker publishing exactly once) is not a
+  live step; it is covered only offline (`tests/db/test_worker_main.py`). Adding it to a stage is your decision.
+- **S2** records GitHub's behaviour under three hypotheses; it has no pass/fail beyond "recorded, and never more than
+  requested". The follow-up (G-PLAT-11, F-1) is your decision after S2.
+- **S3 step 1** cannot be timed deliberately in this build (see the step); it may end up recorded as step 2.
+
 ## S0: Install and baseline (G-PLAT-6 partial, FS-INS-2)
 
 1. Install the App on `tw-push` only.
@@ -98,7 +162,7 @@
 
 ## S3: Suspension, deletion, repository removal (G-PLAT-6, D-10, F-2, F-3)
 
-1. **Suspend during publication.** Use a slow fake provider, or a CI failure with a large log, so there is time. Suspend the installation in the window between the commit comment and the Check Run.
+1. **Suspend during publication.** This build has no way to widen the window between the commit comment and the Check Run (there is no slow provider setting, and the provider runs before publication), so this step can only be attempted by timing, with a failure whose analysis takes long enough to suspend during it. If the suspension lands before publication, record it as step 2 instead. The re-check itself is covered offline (`tests/db/test_d10.py`).
    - **Unknown:** whether GitHub refuses the Check Run write from the already-minted token (F-2).
    - **Expect (D-10(a) decided):** Tracewise re-checks before the Check Run, so it does **not** publish. The job ends `cancelled` `installation_suspended`. Separately, record whether GitHub would have refused the write anyway.
 2. **Suspend, then cause a failure, then unsuspend.**
@@ -124,7 +188,7 @@
 | Gate | Step | Expect or record |
 |---|---|---|
 | G-PLAT-1 | Push invalid workflow YAML | Is `workflow_run.completed` delivered, and with which conclusion? We ignore `startup_failure`. Record what GitHub sends. |
-| G-PLAT-3 | Publish at 59k, 65k and 70k characters | Through a test-only renderer cap override in the test deployment: accept or reject per surface. Keep the production cap below the measured limit. |
+| G-PLAT-3 | Publish at 59k, 65k and 70k characters | Raise `REPORT_MAX_CHARS` (no upper bound; default 60000) in the test deployment only: accept or reject per surface. **Needs a model** (T-605): the fake provider only produces short could-not-complete notices, so this gate cannot run with `fake`. Keep the production cap below the measured limit. |
 | G-PLAT-4 | Fork PR on `tw-fork` | `/commits/{sha}/pulls` returns `[]`; `pulls?head=owner:branch` finds the PR. Record whether the Check Run and PR comment writes are permitted. |
 | G-PLAT-8 | Log download | Record the redirect host. If it is not in the allowlist, logs fail closed (`UnsafeRedirect`). Never record the signed query string. |
 | G-PLAT-9 | Code context | `git fetch --depth=1 --filter=blob:limit=1m` with a Basic-auth installation token succeeds against github.com |
