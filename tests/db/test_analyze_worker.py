@@ -753,3 +753,17 @@ def test_t705_background_job_runs_as_the_tenant_role_and_cannot_reach_another_te
     assert [r.url.path for r in world.gh.requests if r.url.path.startswith("/app/installations/77")] == []
     rows = world.owner.execute("SELECT DISTINCT installation_id FROM analysis UNION SELECT installation_id FROM publication")
     assert {r[0] for r in rows} == {9}
+
+
+def test_evt03_timed_out_job_end_to_end_the_published_report_mentions_the_timeout(world: World) -> None:
+    """AT-EVT-03 (REPLAY): a `timed_out` job is analysed and both surfaces say the job hit its time limit."""
+    doc, _ = api_job(101, "Tests (Python 3.11)", "timed_out", fixture("pytest_b02.out"))
+    jobs = __import__("re").compile(r"^/repos/acme/coffee/actions/runs/55/attempts/\d+/jobs$")
+    world.gh.routes.insert(0, ("GET", jobs, lambda r: jresp(200, {"jobs": [doc]})))  # first match wins in FakeGitHub
+    world.enqueue()
+    world.run()
+    (cc,) = world.all_ccs()
+    (cr,) = world.state.check_runs
+    for text in (cc["body"], cr["output"]["text"]):
+        assert "with a timeout (`timed_out`)" in text
+    assert cr["conclusion"] == "neutral"
