@@ -15,38 +15,55 @@ support a conclusion it says so instead of guessing.
   TypeScript (D-2), generic extraction for everything else.
 - **MVP:** [SPEC.md](SPEC.md) (requirements FS-*), [ACCEPTANCE-TESTS.md](ACCEPTANCE-TESTS.md) (AT-*),
   [TASKS.md](TASKS.md) (T-*), decisions in [DECISIONS.md](DECISIONS.md) and [ARCHITECTURE.md](ARCHITECTURE.md) (ADR-*).
-- **Comparator: "The Plumber"**, the GitHub Marketplace app `the-plumber-app` (app id 3376027; vendor site
-  `theplumber.dev`; demo repository `theplumber-dev/coffee_shop`), Free plan, 10 analyses per month
-  (research/final-evidence-review/EVIDENCE-LEDGER.md, REPRODUCIBILITY-AND-PROVENANCE.md). Only its declared
-  integration and **one** real report (a commit comment, April 2026) are observed; everything else about its runtime
-  behaviour is a vendor claim or unknown (research/final-evidence-review/COMPETITOR-BEHAVIOR-VERIFICATION.md).
+- **Comparator: "The Plumber"**, as studied in this repository's research: the GitHub Marketplace app
+  `the-plumber-app` (app id 3376027), a CI-failure diagnosis bot whose one public report is a commit comment on
+  `theplumber-dev/coffee_shop` (April 2026). Sources: research/final-evidence-review/EVIDENCE-LEDGER.md (EV-C01,
+  EV-C04, EV-C06, EV-C14, EV-C16), research/final-audit-public/FINAL-REVERSE-ENGINEERING-AUDIT.md (P-1, P-10, P-15).
+  - **Identity is not independently verified.** The link between the app and `theplumber.dev` rests only on
+    GitHub-displayed metadata: the Marketplace listing names "theplumber.dev" as publisher, and the publishing
+    organisation's profile shows that domain as verified (P-10, E-4). The site itself (`theplumber.dev`,
+    `api.theplumber.dev`) was never reachable (Cloudflare challenge; no archived copy: EV-C14, EV-C16), so no
+    first-party description of the product was observed. Treat "app 3376027 is the product at `theplumber.dev`"
+    as **unverified**.
+  - **Not the same product as `getplumber.io`**, a CI/CD security scanner with a similar name. This repository's
+    research does not cover `getplumber.io`; nothing here describes it, and no finding about it should be inferred
+    from this research.
+- **What is known about the comparator is narrow:** its declared integration (Marketplace metadata) and **one**
+  real report. Everything else about its runtime behaviour is a vendor claim or unknown
+  (research/final-evidence-review/COMPETITOR-BEHAVIOR-VERIFICATION.md). **No parity claim beyond the rows below, and
+  no comparative claim, is supported** without AT-CMP-01.
 - **Strategy:** essential parity with that workflow first; evidence-backed differentiation second (attribution from
   the push's diff ships in the MVP; lane history, flaky and dependency drift are P2 behind ADR-13). No comparative
   claim without AT-CMP-01 (a head-to-head in an approved test organisation).
 
 ### Parity matrix (essential workflow)
 
-Comparator classes are the research's own labels. "Live" = needs the real GitHub test organisation.
+Comparator labels: **observed** (seen directly in GitHub metadata or the single public report; n=1 where noted),
+**inferred** (deduced from observed facts), **unknown** (not observed; vendor claims count as unknown). Tracewise
+status is offline evidence only; "live" needs the real GitHub test organisation, and quality needs a real model.
 
-| Capability | Comparator evidence | Tracewise implementation | Tests | Status |
+| Capability | Comparator (label, evidence) | Tracewise implementation | Tests | Tracewise status |
 |---|---|---|---|---|
-| Install without repository config | Documented | `web/lifecycle.py`, `github/auth.py` | `tests/db/test_lifecycle.py` | Parity offline; live install is S0 |
-| Trigger on a failed `workflow_run` | Observed for `failure` (n=1) | `web/webhooks.py`, `web/ingest.py` (`failure`, `timed_out`) | `tests/db/test_webhook.py` | Parity; `startup_failure` awaits G-PLAT-1 (live) |
-| Asynchronous processing | Inferred | `jobs/queue.py`, `jobs/worker.py`, `worker.py` | `tests/db/test_queue.py`, `test_worker.py` | Parity |
-| Failed job, step, first error, sibling grouping | Observed (n=1) | `prepass/`, `analysis/collect.py` | `tests/unit/test_primary.py`, `test_extractors.py` | Parity |
-| Code at the failing commit | Observed / Documented | `context/gitfetch.py`, `context/contents_api.py`, `context/tools.py` | `tests/context/test_gitfetch.py`, `test_contents_api.py`, `test_tools.py` | Parity |
-| Root cause, why, location, fix text, confidence | Observed (n=1) | `investigate/`, `analysis/diagnose.py` | `tests/investigate/`, `tests/context/test_diagnose_e2e.py` | Implemented; **real-model quality unmeasured** (T-605) |
-| Report in GitHub (commit comment, PR comment) | Commit comment observed; PR comment documented only | `github/publish.py`, `github/pulls.py`, `report/render.py` | `tests/db/test_analyze_worker.py`, `test_github_worker.py`, `test_full_chain.py` | Parity offline; live in S0–S2 |
-| Check Run | Comparator cannot create one | `github/publish.py` (neutral, upserted) | as above | Tracewise addition |
-| Re-runs, duplicates, incomplete analyses | Unknown | dedupe in `web/ingest.py`; markers; `render_could_not_complete`; `recovery.py` | `tests/db/test_phase51_final_publication.py`, `test_recovery*.py` | Implemented; D-14 open |
-| Attribution from the push's diff | Absent in its report | `context/trigger.py` | `tests/context/test_trigger.py` | Differentiator (MVP) |
-| Lane history, dependency drift, flaky | Unknown | `analysis/lane.py`, `analysis/drift.py`; flaky not built | `tests/unit/test_lane.py`, `test_drift.py` | P2, **not surfaced** (ADR-13); T-902 blocked (B-04) |
-| Quota | 10/month documented | migration 0011, `jobs/handlers/analyze.py` | `tests/db/test_quota.py` | Implemented; value is your decision |
+| Install without repository config | unknown (vendor claim) | `web/lifecycle.py`, `github/auth.py` | `tests/db/test_lifecycle.py` | Implemented, offline tests; live install is S0 |
+| Trigger on a failed `workflow_run` | observed: declared event `workflow_run` (EV-C01) and one report on a failed push run (n=1); other conclusions unknown | `web/webhooks.py`, `web/ingest.py` (`failure`, `timed_out`) | `tests/db/test_webhook.py` | Implemented, offline tests; `startup_failure` awaits G-PLAT-1 (live) |
+| Asynchronous processing | inferred (report timing, n=1) | `jobs/queue.py`, `jobs/worker.py`, `worker.py` | `tests/db/test_queue.py`, `test_worker.py` | Implemented, offline tests |
+| Failed job, step, first error, sibling grouping | observed (n=1) | `prepass/`, `analysis/collect.py` | `tests/unit/test_primary.py`, `test_extractors.py` | Implemented, offline tests |
+| Code at the failing commit | observed that the report cites code (n=1); clone versus API unknown | `context/gitfetch.py`, `context/contents_api.py`, `context/tools.py` | `tests/context/test_gitfetch.py`, `test_contents_api.py`, `test_tools.py` | Implemented, offline tests |
+| Root cause, why, location, fix text, confidence | observed (n=1); quality beyond that case unknown | `investigate/`, `analysis/diagnose.py` | `tests/investigate/`, `tests/context/test_diagnose_e2e.py` | Implemented; **real-model quality unmeasured** (T-605) |
+| Report surfaces | commit comment: observed (n=1); PR comment: unknown (vendor claim only) | `github/publish.py`, `github/pulls.py`, `report/render.py` | `tests/db/test_analyze_worker.py`, `test_github_worker.py`, `test_full_chain.py` | Implemented, offline tests; live in S0–S2 |
+| Check Run | inferred absent: declared permissions include only `checks:read` (EV-C01) | `github/publish.py` (neutral, upserted) | as above | Tracewise addition |
+| Re-runs, duplicates, incomplete analyses | unknown | dedupe in `web/ingest.py`; markers; `render_could_not_complete`; `recovery.py` | `tests/db/test_phase51_final_publication.py`, `test_recovery*.py` | Implemented, offline tests; D-14 open |
+| Attribution from the push's diff | observed absent in its one report (n=1) | `context/trigger.py` | `tests/context/test_trigger.py` | Differentiator (MVP), offline tests |
+| Lane history, dependency drift, flaky | unknown | `analysis/lane.py`, `analysis/drift.py`; flaky not built | `tests/unit/test_lane.py`, `test_drift.py` | P2, **not surfaced** (ADR-13); T-902 blocked (B-04) |
+| Quota | observed: Marketplace plan lists 10 analyses per month (EV-C04); enforcement unknown | migration 0011, `jobs/handlers/analyze.py` | `tests/db/test_quota.py` | Implemented; value is your decision |
+
+Parity on these rows means "Tracewise implements the capability and tests it offline", **not** a verified
+equivalence with the comparator: the comparator side rests on n=1 or on nothing.
 
 **Comparator unknowns** (never claim parity or superiority on these): handling of `timed_out`/`cancelled`/
 `startup_failure`, PR runs, re-runs; flaky, dependency, infrastructure and multi-error cases; quota exhaustion,
 uninstall, missing permissions; PR comment format; clone versus API; model vendor; actual retention; latency
-beyond n=1; any change since April 2026.
+beyond n=1; any change since April 2026; and the product's own description (its site was never reachable).
 
 ## B. Architecture
 
