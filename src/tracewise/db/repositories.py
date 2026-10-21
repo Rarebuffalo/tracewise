@@ -244,6 +244,33 @@ def count_monthly_analyses(conn: Conn, installation_id: int) -> int:
     return int(row["n"]) if row else 0
 
 
+def prior_lane_analyses(
+    conn: Conn,
+    *,
+    installation_id: int,
+    repo_id: int,
+    workflow_id: int,
+    branch: str,
+    head_repo_id: int,
+    events: tuple[str, ...],
+    before_run_id: int,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    """T-901: earlier analysed failures in the same lane, newest first (one row per run attempt). Tenant plane:
+    RLS confines it to the installation; the explicit filter keeps it correct for system callers too."""
+    rows = conn.execute(
+        """SELECT w.github_run_id AS run_id, w.run_attempt AS attempt, w.head_sha, w.created_at,
+                  a.status, a.category, a.confidence_band
+           FROM workflow_run w LEFT JOIN analysis a ON a.run_pk = w.id
+           WHERE w.installation_id = %s AND w.repo_id = %s AND w.workflow_id = %s AND w.head_branch = %s
+             AND w.head_repo_id = %s AND w.event = ANY(%s) AND w.github_run_id < %s
+           ORDER BY w.github_run_id DESC, w.run_attempt DESC
+           LIMIT %s""",
+        (installation_id, repo_id, workflow_id, branch, head_repo_id, list(events), before_run_id, max(1, min(limit, 100))),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def counted_analysis_exists(conn: Conn, run_pk: int) -> bool:
     """T-703: this run attempt already has an analysis that counts towards the quota (so it is a retry, not a new
     analysis): the quota gate must let it finish instead of re-labelling it."""
