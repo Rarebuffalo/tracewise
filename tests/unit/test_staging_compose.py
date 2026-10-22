@@ -86,3 +86,14 @@ def test_secret_files_are_never_created_as_directories_when_missing() -> None:
         for v in svc.get("volumes", []):
             if "TW_SECRETS_DIR" in str(v):
                 assert isinstance(v, dict) and v["bind"]["create_host_path"] is False and v["read_only"] is True, name
+
+
+def test_long_running_services_have_bounded_json_file_logs() -> None:
+    """Docker's default json-file logs grow without limit and can fill a small staging disk."""
+    s = compose()["services"]
+    long_running = {k for k, v in s.items() if "profiles" not in v}
+    assert long_running == {"db", "web", "worker", "proxy"}
+    for name in long_running:
+        logging = s[name]["logging"]
+        assert logging["driver"] == "json-file", name
+        assert logging["options"] == {"max-size": "10m", "max-file": "3"}, name  # Docker log options are strings

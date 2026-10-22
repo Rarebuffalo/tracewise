@@ -106,6 +106,24 @@ Alert routing is still your decision (threshold 0.2 is provisional).
   suspension, removal and uninstall cancel without writes).
 - No abort condition occurred (no token in logs, no write outside the three surfaces or the test organisation).
 
+**Logs.** The long-running services (`db`, `web`, `worker`, `proxy`) use Docker's `json-file` driver with rotation:
+at most 3 files of 10 MB per container, so at most 30 MB per service and 120 MB in total. Rotation discards the
+oldest lines, which keeps a small disk from filling but means old log lines are **not** an archive. The application
+writes JSON event lines with secrets scrubbed; still treat logs as sensitive and keep exports outside the repository.
+
+```bash
+docker compose logs --since 30m web worker          # recent events (add -f to follow)
+docker compose logs --tail 200 db proxy             # last lines of the database and the proxy
+docker compose logs --since 2h --no-color web worker > /var/log/tracewise/s0-$(date +%F-%H%M).log   # evidence export
+```
+
+Create the export directory once (`sudo install -d -m 700 -o "$USER" /var/log/tracewise`, or any private location
+you chose for evidence). Export evidence for each live stage as soon as it ends (LIVE-VALIDATION-PLAN "How to
+inspect"); a busy stage can rotate its earliest lines away within hours. One-off jobs (`--profile jobs run --rm …`)
+print to the terminal or to cron's output and keep no container log after they exit. The limits apply when a
+container is created: after changing them, `docker compose up -d` recreates the affected services (the database
+keeps its data in `pgdata`).
+
 **Backup and restore** (OPERATIONS §8). Take a backup before every migration, as the owner, over the container's
 local socket:
 
