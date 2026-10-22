@@ -9,6 +9,15 @@ name: tracewise-staging
 
 x-image: &image ${TRACEWISE_IMAGE:-tracewise:local}
 
+# Bounded container logs for the long-running services: Docker's json-file driver keeps at most 3 files of 10 MB
+# per container (30 MB each, 120 MB for the four), so a small disk cannot fill with logs. Older lines are discarded:
+# export evidence promptly (deploy/staging/README.md, "Logs").
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   db:
     image: postgres:16
@@ -22,6 +31,7 @@ services:
       test: ["CMD", "pg_isready", "-U", "postgres"]
       interval: 5s
       retries: 20
+    logging: *logging
     restart: unless-stopped  # no published port: reachable only from this Compose network
 
   web:
@@ -35,6 +45,7 @@ services:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz', timeout=3)"]
       interval: 10s
       retries: 6
+    logging: *logging
     restart: unless-stopped
 
   worker:
@@ -48,6 +59,7 @@ services:
       - &appkey { type: bind, source: "${TW_SECRETS_DIR:?set TW_SECRETS_DIR}/app.pem", target: /run/secrets/app.pem, read_only: true, bind: { create_host_path: false } }
     depends_on: { db: { condition: service_healthy } }
     stop_grace_period: 10m  # a job may run to its 10-minute deadline (DEPLOYMENT-BLUEPRINT §2)
+    logging: *logging
     restart: unless-stopped
 
   proxy:
@@ -59,6 +71,7 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
     depends_on: { web: { condition: service_healthy } }  # no traffic before /readyz succeeds
+    logging: *logging
     restart: unless-stopped
 
   migrate:
