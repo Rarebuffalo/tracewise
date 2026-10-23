@@ -288,6 +288,18 @@ def test_401_remints_once_then_gives_up() -> None:
     assert gh2.minted == 2
 
 
+def test_401_on_a_cached_token_then_401_on_the_mint_is_an_app_authentication_failure() -> None:
+    """The cached token is rejected, the re-mint is refused with 401: the App JWT is the problem, not the install."""
+    gh, rc = setup()
+    gh.route("GET", JOBS, [jresp(200, {"jobs": []}), jresp(401, {"message": "Bad credentials"})])
+    assert rc.list_jobs(37632626982, 1) == [] and gh.minted == 1  # token cached
+    gh.routes.insert(0, ("POST", re.compile(r"^/app/installations/\d+/access_tokens$"), lambda r: jresp(401, {"message": "x"})))
+    with pytest.raises(err.AppAuthenticationFailed) as ei:
+        rc.list_jobs(37632626982, 1)
+    assert not isinstance(ei.value, err.InstallationUnavailable) and ei.value.status == 401
+    assert len(gh.calls("POST", r"/access_tokens$")) == 2  # one re-mint, no loop
+
+
 def test_response_size_cap_and_invalid_json() -> None:
     gh, rc = setup(max_json_bytes=1000)
     gh.route("GET", JOBS, httpx.Response(200, content=b'{"jobs": [' + b" " * 2000 + b"]}"))

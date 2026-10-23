@@ -39,7 +39,7 @@ Version 2.0, 2026-10-18. Supersedes all earlier specs (see `research/README.md` 
 |---|---|---|---|---|---|
 | FS-INS-1 | Public GitHub App; works with no files added to the repo; analysis starts on the next failed run | EV-C04, EV-C05 | AT-INS-01 | T-101, T-801 | P0 |
 | FS-INS-2 | Permissions exactly: Actions **read**, Contents **read**, Metadata **read**, Pull requests **write**, Checks **write**. No other repository write scope. No user-to-server authorization. Event: `workflow_run`. | EV-P09; Q2 | AT-INS-02, AT-SEC-01 | T-301, T-801 | P0 |
-| FS-INS-3 | On `installation.deleted` / `suspend`: stop new jobs. In-flight jobs whose token mint fails end as `cancelled_uninstalled` with no publish. Purge tenant data after a grace period (default 7 days). | EV-P21 | AT-INS-03 | T-701 | P1 |
+| FS-INS-3 | On `installation.deleted` / `suspend`: stop new jobs. In-flight jobs whose token mint fails on the installation (404, or a 403 that is not a rate limit) end as `cancelled_uninstalled` with no publish. A 401 on the mint is not an uninstall: GitHub rejected the App JWT (key, App ID or clock), so the job ends `dead` (`AppAuthenticationFailed`, no retry, counted as a failure). Purge tenant data after a grace period (default 7 days). | EV-P21 | AT-INS-03 | T-701 | P1 |
 | FS-INS-4 | Honour `installation_repositories` added and removed | EV-P21 | AT-INS-04 | T-701 | P1 |
 
 ### 1.2 Events and orchestration

@@ -3,6 +3,25 @@
 > **Commit hashes in this file before 2026-10-20 (bb) are pre-rewrite hashes.** The history was rewritten once to
 > redact signed URLs before the first push; map them with [HISTORY-REWRITE.md](HISTORY-REWRITE.md).
 
+## Unreleased: App authentication failures are no longer treated as uninstalls (2026-10-24)
+
+- **Fix:** a 401 on the installation-token mint means GitHub rejected the App JWT (a wrong, deleted or mismatched
+  private key, a wrong App ID, or clock skew). It was mapped to `InstallationUnavailable`, so the job ended
+  `cancelled_uninstalled`: no error event, outside the failure rate, indistinguishable from an uninstall (observed
+  live on 2026-10-22). `GitHubHTTP.app_call` now raises `AppAuthenticationFailed` (a `GitHubPermanent`, not an
+  `InstallationUnavailable`); the job ends `dead` after one attempt with an actionable `last_error`, the worker
+  emits `job.failed` with `error_type=AppAuthenticationFailed`, and `ops` counts it as a failure. Nothing is
+  published (no token). `RepoClient._with_reauth` lets it through instead of re-minting and relabelling it as
+  "token rejected after re-mint"; PR association re-raises it; the recovery sweep counts the repository as failed.
+- **Unchanged:** 404 and non-rate-limit 403 on the mint (`cancelled_uninstalled`), uninstall and suspension
+  through webhooks, a fresh token still rejected (401 after a successful re-mint), 422 permission refusals,
+  rate limits and 5xx (retryable), retry timing, deduplication and publication policy.
+- **Tests:** `test_github_auth.py` (mint 401, rate-limited mint), `test_github_client.py` (cached-token 401, then
+  mint 401), `test_github_pulls.py` (token refusals propagate), `test_observability.py` (dead, event, failure
+  rate, no publication, no JWT or body in logs), `test_recovery.py` (failed repository, not a lifecycle skip).
+- **Follow-up (open):** a run whose job died during a credential fault is not re-analysed after the key is fixed,
+  because its run-attempt dedupe key is consumed.
+
 ## Unreleased: live S0 with the fake provider (2026-10-22 to 2026-10-23)
 
 Local trial on a laptop, exposed through an ngrok tunnel, with a development App installed on one test repository;
@@ -29,7 +48,7 @@ below; 2026-10-23, replacement key, gzip fix, then the publishing runs, re-runs 
   the job ends `cancelled_uninstalled`, quietly, like an uninstall. Seen on 2026-10-22 (jobs 1 and 2); the likely
   cause is a local private key whose key pair had been deleted in the App settings, since a replacement key
   resolved it (`GET /app` 200 on 2026-10-23). The worker logs of 2026-10-22 were not retained, so the cause is
-  inferred, not shown by logs. Recorded in OWNER-DECISION-PACKET §4a.
+  inferred, not shown by logs. Recorded in OWNER-DECISION-PACKET §4a. *Resolved 2026-10-24: see the entry above.*
 - **Corrections:** SELF-HOSTING §3b gave the retry delays as about 30 s and 60 s; the queue backs off about 30 s
   and 120 s (±20%). The preflight warning for the fake provider no longer says every analysis ends "could not
   complete". The two statements below marked *superseded* were wrong for a log without a recognised error line.

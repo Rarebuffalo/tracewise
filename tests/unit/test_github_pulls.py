@@ -152,6 +152,17 @@ def test_permission_errors_propagate() -> None:
         assoc(rc)
 
 
+@pytest.mark.parametrize(("status", "exc"), [(401, gh_err.AppAuthenticationFailed), (404, gh_err.InstallationUnavailable)])
+def test_token_refusals_propagate_instead_of_becoming_a_lookup_error(status: int, exc: type[Exception]) -> None:
+    gh = FakeGitHub()
+    gh.add_token_route(status=status)
+    http = gh.http()
+    rc = RepoClient(http, gh.provider(http), installation_id=1, repo_id=REPO_ID, full_name="acme/app", scope="publish")
+    with pytest.raises(exc):
+        assoc(rc)
+    assert not gh.calls("GET", r"/pulls$")  # nothing was read without a token
+
+
 def test_same_repo_does_not_use_head_filter_and_fork_without_branch_is_push() -> None:
     gh, rc = client()
     gh.route("GET", rf"/commits/{SHA}/pulls$", jresp(200, []))

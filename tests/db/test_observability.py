@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -19,6 +20,7 @@ import pytest
 from tests.db.test_analyze_worker import World, head, server  # noqa: F401 - module fixtures
 from tests.db.test_lifecycle import client as client
 from tests.db.test_lifecycle import failure, send
+from tests.github_fake import jresp
 from tracewise import observe, ops
 from tracewise.db import repositories as repo
 from tracewise.db.session import DatabaseUnavailable, transaction
@@ -183,6 +185,36 @@ def test_retry_and_dead_and_cancel_are_distinguishable(world: World, cap: Captur
     world.run()
     (c,) = cap.events("job.cancelled")
     assert (c["job_id"], c["reason"]) == (off, "repo_disabled")
+
+
+def test_app_authentication_failure_is_dead_visible_and_counted_never_an_uninstall(world: World, cap: Capture) -> None:
+    """A 401 on the token mint (App JWT rejected: wrong or deleted key, wrong App ID, clock skew) was cancelled as
+    `cancelled_uninstalled`, invisible to the failure rate (live S0, 2026-10-22). It is a permanent operator fault."""
+    mints: list[str] = []
+
+    def refuse(req: Any) -> Any:
+        mints.append(req.headers["authorization"].removeprefix("Bearer "))
+        return jresp(401, {"message": "A JSON web token could not be decoded"})
+
+    world.gh.routes.insert(0, ("POST", re.compile(r"^/app/installations/\d+/access_tokens$"), refuse))
+    jid = world.enqueue()
+    world.run()
+    j = world.jobrow(jid)
+    assert (j["status"], j["attempts"]) == ("dead", 1)  # no retry, not cancelled
+    assert j["last_error"].startswith("permanent; AppAuthenticationFailed: GitHub App authentication failed (401)")
+    assert "create_installation_token" in j["last_error"] and "GITHUB_APP_ID" in j["last_error"]
+    assert "cancelled_uninstalled" not in j["last_error"] and "could not be decoded" not in j["last_error"]
+    assert len(mints) == 1  # refused once, no re-mint loop
+    assert world.state.writes == [] and world.state.check_runs == [] and world.all_ccs() == []  # nothing published
+    assert world.owner.execute("SELECT count(*) FROM analysis").fetchone() == (0,)
+    assert world.owner.execute("SELECT status FROM installation WHERE id = 9").fetchone() == ("active",)  # no purge
+    (f,) = cap.events("job.failed")
+    assert (f["job_id"], f["new_status"], f["error_type"]) == (jid, "dead", "AppAuthenticationFailed")
+    assert not cap.events("job.cancelled")
+    rate = ops.failure_rate(world.pool, ops.AlertRule(threshold=0.5, min_sample=1))
+    assert (rate["dead"], rate["failures"], rate["finished"], rate["state"]) == (1, 1, 1, "firing")
+    text = "\n".join(cap.lines) + j["last_error"]
+    assert mints[0] not in text and "ghs_" not in text and "could not be decoded" not in text  # no JWT, token or body
 
 
 def test_stale_lease_recovery_is_visible(world: World, cap: Capture) -> None:

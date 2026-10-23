@@ -410,6 +410,18 @@ def test_refused_token_for_one_repo_does_not_stop_the_sweep(pool, owner) -> None
     assert s.completed and s.errors["InstallationUnavailable"] == 2 and s.enqueued == 1
 
 
+def test_app_authentication_failure_is_a_failed_repository_not_a_lifecycle_skip(pool, owner) -> None:  # type: ignore[no-untyped-def]
+    """A 401 on the mint is an App credential fault: counted and reported per repository like any GitHub fault,
+    never filed under "lifecycle sorts this out" (InstallationUnavailable)."""
+    setup_tenants(pool)
+    hub = Hub(FakeGitHub())
+    hub.gh.route("POST", r"^/app/installations/\d+/access_tokens$", jresp(401, {"message": "Bad credentials"}))
+    s = sweep(pool, hub)
+    assert s.errors["GitHubPermanent"] >= 1 and s.errors["InstallationUnavailable"] == 0
+    assert s.failed_repos == s.errors["GitHubPermanent"] and s.enqueued == 0
+    assert owner.execute("SELECT count(*) FROM job").fetchone() == (0,)
+
+
 def test_interrupted_sweep_reruns_without_duplicates(pool, owner, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     setup_tenants(pool)
     hub = Hub()

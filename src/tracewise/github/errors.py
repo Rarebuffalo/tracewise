@@ -33,7 +33,15 @@ class PermissionDenied(GitHubPermanent):
 
 
 class InstallationUnavailable(GitHubPermanent):
-    """Token mint refused (401/404/403 on the installation): uninstalled or suspended (FS-INS-3)."""
+    """Token mint refused on the installation (404, or a 403 that is not a rate limit): uninstalled or suspended
+    (FS-INS-3). Also a fresh installation token that is still rejected (401 after a successful re-mint)."""
+
+
+class AppAuthenticationFailed(GitHubPermanent):
+    """GitHub rejected the App JWT itself (401 on an App-JWT call such as the token mint): a wrong, deleted or
+    mismatched private key, a wrong App ID, or clock skew. An operator fault, never an uninstall, so it is
+    deliberately not an `InstallationUnavailable`: the job ends `dead` and counts as a failure (no publication is
+    possible without a token)."""
 
 
 class TokenScopeError(GitHubPermanent):

@@ -85,7 +85,7 @@ def associate_pr(
             if (decided := _decide(_matches(prs, head_sha, rc.repo_id), "head_filter")) is not None:
                 return decided
     except gh_err.GitHubPermanent as e:
-        if isinstance(e, gh_err.PermissionDenied | gh_err.InstallationUnavailable):
+        if isinstance(e, gh_err.PermissionDenied | gh_err.InstallationUnavailable | gh_err.AppAuthenticationFailed):
             raise  # handled by the failure/permission paths (T-503), not guessed here
         return PRAssociation("error", detail=f"PR lookup failed: {type(e).__name__}")
     return PRAssociation("none")

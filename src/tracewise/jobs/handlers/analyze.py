@@ -14,6 +14,8 @@ Outcome → job state (FS-ERR-1, FS-ERR-3, FS-LOG-3, FS-INS-3; DECISIONS D-4, D-
                                     the Check Run names the missing permission
   transient GitHub/DB errors        propagate → retry with backoff (honours retry-after; 10-min deadline)
   installation unavailable / repo disabled → JobCancelled (no-op, no GitHub write)
+  App JWT rejected (401 on the token mint) → AppAuthenticationFailed, a PermanentError: dead, no retry, no
+                                    further GitHub write (no token), counted as a failure; never an uninstall
   invalid payload / repo or installation mismatch → PermanentError (dead, no GitHub write)
   unexpected exception              re-raised (retry; never reported as success). On the last attempt a
                                     best-effort "could not complete" notice is published first.

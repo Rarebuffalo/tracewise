@@ -121,7 +121,11 @@ class GitHubHTTP:
             raise err.InstallationUnavailable(f"installation token refused ({e.status})", e.status) from None
         except err.GitHubPermanent as e:
             if e.status == 401:
-                raise err.InstallationUnavailable("installation token refused (401)", 401) from None
+                # The App JWT was rejected, not the installation: an operator credential fault (key, App ID, clock).
+                raise err.AppAuthenticationFailed(
+                    f"GitHub App authentication failed (401) on {name}; check GITHUB_APP_ID, the private key and the clock",
+                    401,
+                ) from None
             raise
         doc = self._json(resp)
         if not isinstance(doc, dict):
@@ -424,14 +428,20 @@ class RepoClient:
         return _fill(ep.path, {**params, "owner": self._owner, "repo": self._repo})
 
     def _with_reauth(self, fn: Callable[[str], Any]) -> Any:
+        # A 401 from the mint itself (AppAuthenticationFailed) is an App credential fault: re-minting cannot help, and
+        # it must not be relabelled as a rejected installation token.
         try:
             return fn(self._token())
+        except err.AppAuthenticationFailed:
+            raise
         except err.GitHubPermanent as e:
             if e.status != 401:
                 raise
             self.tokens.invalidate(self.installation_id, self.repo_id, self.scope)
             try:
                 return fn(self._token())
+            except err.AppAuthenticationFailed:
+                raise
             except err.GitHubPermanent as e2:
                 if e2.status == 401:
                     raise err.InstallationUnavailable("token rejected after re-mint", 401) from None

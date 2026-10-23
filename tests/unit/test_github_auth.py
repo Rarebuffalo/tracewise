@@ -9,10 +9,11 @@ import logging
 import jwt
 import pytest
 
-from tests.github_fake import FakeGitHub, test_key, test_key_pem
+from tests.github_fake import FakeGitHub, jresp, test_key, test_key_pem
 from tracewise.github.auth import JWT_BACKDATE_S, JWT_LIFETIME_S, AppCredentials
 from tracewise.github.endpoints import ANALYSIS_SCOPE, APP_PERMISSIONS, PUBLISH_SCOPE
-from tracewise.github.errors import InstallationUnavailable, PermissionDenied, TokenScopeError
+from tracewise.github.errors import AppAuthenticationFailed, InstallationUnavailable, PermissionDenied, TokenScopeError
+from tracewise.jobs.queue import PermanentError, RetryableError
 from tracewise.logging import JsonFormatter, secret_filter
 
 
@@ -100,13 +101,43 @@ def test_overbroad_grant_fails_closed(override, selection, match) -> None:  # ty
 
 @pytest.mark.parametrize(
     ("status", "exc"),
-    [(401, InstallationUnavailable), (403, InstallationUnavailable), (404, InstallationUnavailable), (422, PermissionDenied)],
+    [(401, AppAuthenticationFailed), (403, InstallationUnavailable), (404, InstallationUnavailable), (422, PermissionDenied)],
 )
 def test_mint_failures(status, exc) -> None:  # type: ignore[no-untyped-def]
     gh = FakeGitHub()
     gh.add_token_route(status=status)
     with pytest.raises(exc):
         gh.provider(gh.http()).token(1, 10, "publish")
+
+
+def test_mint_401_is_an_app_authentication_failure_never_an_uninstall(caplog) -> None:  # type: ignore[no-untyped-def]
+    """A 401 on the mint means GitHub rejected the App JWT (key, App ID, clock), not the installation."""
+    caplog.set_level(logging.DEBUG)
+    gh = FakeGitHub()
+    gh.add_token_route(status=401)
+    tp = gh.provider(gh.http())
+    with pytest.raises(AppAuthenticationFailed) as ei:
+        tp.token(1, 10, "analysis")
+    e = ei.value
+    assert not isinstance(e, InstallationUnavailable) and not isinstance(e, RetryableError)
+    assert isinstance(e, PermanentError) and e.status == 401  # the queue marks it dead, without retries
+    jwt_sent = gh.requests[0].headers["authorization"].removeprefix("Bearer ")
+    raw = str(e) + caplog.text + " ".join(str(getattr(r, "tw", "")) for r in caplog.records)
+    assert jwt_sent not in raw and "nope" not in raw and "BEGIN" not in raw  # no JWT, response body or key
+    assert "create_installation_token" in str(e) and "GITHUB_APP_ID" in str(e)  # actionable for the operator
+    with pytest.raises(AppAuthenticationFailed):
+        tp.token(1, 10, "analysis")  # a refusal is never cached
+    assert len(gh.calls("POST", r"/access_tokens$")) == 2
+
+
+@pytest.mark.parametrize("status", [403, 429])
+def test_rate_limited_mint_stays_retryable(status: int) -> None:
+    gh = FakeGitHub()
+    gh.route("POST", r"^/app/installations/\d+/access_tokens$", jresp(status, {"message": "rate limit"}, {"retry-after": "600"}))
+    with pytest.raises(RetryableError) as ei:
+        gh.provider(gh.http()).token(1, 10, "analysis")
+    assert not isinstance(ei.value, AppAuthenticationFailed | InstallationUnavailable)
+    assert ei.value.retry_after_s == 600
 
 
 def test_tokens_and_jwts_never_logged(caplog) -> None:  # type: ignore[no-untyped-def]
