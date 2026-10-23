@@ -1,0 +1,9 @@
+# ngrok traffic policy for the local trial tunnel (docs/SELF-HOSTING.md §3a). No secrets.
+# The local Caddy site serves only the name `localhost`. ngrok forwards the public hostname as `Host`, which Caddy
+# answers with an empty 200 without reaching Tracewise; rewriting `Host` to `localhost` routes it to the app.
+on_http_request:
+  - actions:
+      - type: add-headers
+        config:
+          headers:
+            host: localhost

@@ -97,3 +97,14 @@ def test_long_running_services_have_bounded_json_file_logs() -> None:
         logging = s[name]["logging"]
         assert logging["driver"] == "json-file", name
         assert logging["options"] == {"max-size": "10m", "max-file": "3"}, name  # Docker log options are strings
+
+
+def test_the_local_trial_override_only_narrows_the_proxy_to_loopback() -> None:
+    """compose.local.yaml must not change anything except publishing the proxy on 127.0.0.1 only."""
+    text = (BUNDLE / "compose.local.yaml").read_text()
+    loader = type("L", (yaml.SafeLoader,), {})
+    loader.add_constructor("!override", lambda ld, node: ld.construct_sequence(node))
+    doc = yaml.load(text, Loader=loader)  # noqa: S506 - SafeLoader subclass with one extra tag
+    assert set(doc) == {"services"} and set(doc["services"]) == {"proxy"} and set(doc["services"]["proxy"]) == {"ports"}
+    assert doc["services"]["proxy"]["ports"] == ["127.0.0.1:8443:443"]
+    assert "!override" in text  # replaces, rather than adds to, the public 80/443 bindings of compose.yaml

@@ -1,0 +1,8 @@
+# Local trial override: the same stack, reachable only from this machine (https://localhost:8443).
+#   TW_DOMAIN=localhost docker compose -f compose.yaml -f compose.local.yaml up -d web worker proxy
+# Caddy serves `localhost` with its own local certificate authority (curl needs -k, or trust Caddy's root).
+# GitHub cannot deliver webhooks here: use this mode to rehearse setup, migrations, preflight, health and signed
+# test deliveries (docs/SELF-HOSTING.md, "Local trial"). Needs Compose v2.24+ for `!override`.
+services:
+  proxy:
+    ports: !override ["127.0.0.1:8443:443"]
