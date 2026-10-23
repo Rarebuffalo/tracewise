@@ -89,7 +89,8 @@ workflow_run webhook → HMAC check, 25 MB cap, dedupe (web/) → durable Postgr
   one neutral Check Run "Tracewise" (`external_id` = run id), all reconciled before creating, so retries never
   duplicate. Missing permissions are recorded as `unpublished_permission`, never escalated.
 - **Operations CLIs:** `python -m tracewise.{preflight,db.migrate,worker,recovery,retention,ops}`; web:
-  `uvicorn --factory tracewise.web.asgi:create_runtime_app`. Staging bundle: [deploy/staging/](../deploy/staging/README.md).
+  `uvicorn --factory tracewise.web.asgi:create_runtime_app`. Self-hosting guide: [SELF-HOSTING.md](SELF-HOSTING.md);
+  Compose bundle and runbook: [deploy/staging/](../deploy/staging/README.md) (plus `compose.local.yaml` for a local trial).
 
 ## C. Repository state at handoff
 
@@ -127,6 +128,8 @@ workflow_run webhook → HMAC check, 25 MB cap, dedupe (web/) → durable Postgr
 - Operations: preflight, migration CLI, health/readiness, troubleshooting runbook (OPERATIONS §8a), runtime image,
   staging Compose bundle rehearsed locally (deploy/staging/README.md "Readiness status").
 - Latest fix this sprint: AT-EVT-03 (a job GitHub ended `timed_out` is now named in every report).
+- Self-hosting: [SELF-HOSTING.md](SELF-HOSTING.md) and a loopback-only local trial, rehearsed on amd64 with measured
+  idle memory (about 210 MiB for the four services).
 
 ## E. Remaining work
 
@@ -144,7 +147,7 @@ workflow_run webhook → HMAC check, 25 MB cap, dedupe (web/) → durable Postgr
 | T-902 | Flaky suspicion | — | BLOCKED_APPROVAL | B-04; ingest lacks a passed-attempt signal | AT-ATR-07 | Decide B-04 |
 | T-904 | Outcome tracking | — | DEFERRED | P2, changes published reports | AT-PUB-07 | After pilot |
 | AT-CMP-01, AT-RPT-10 | Any comparative or usefulness claim | — | BLOCKED_APPROVAL | Install the comparator in a test org; user study | As defined | Only if you want claims |
-| Owner decisions | Policy | OWNER-DECISION-PACKET | BLOCKED_APPROVAL | D-11, D-12, D-14, B-04, A-05, A-04, B-12, D-5, E-01, validator rule 3, quota value, alert threshold, deleted-run notice, G-PLAT-11 (after S2), D-10 follow-up (after S3), worker-crash step in S0–S3 | [OWNER-DECISION-PACKET.md](OWNER-DECISION-PACKET.md) | Decide in order of the pilot path |
+| Owner decisions | Policy | OWNER-DECISION-PACKET | BLOCKED_APPROVAL | D-11, D-12, D-14, B-04, A-05, A-04, B-12, D-5, E-01, validator rule 3, quota value, alert threshold, deleted-run notice, G-PLAT-11 (after S2), D-10 follow-up (after S3), worker-crash step in S0–S3, S0 with the fake provider (commit-comment coverage) | [OWNER-DECISION-PACKET.md](OWNER-DECISION-PACKET.md) | Decide in order of the pilot path |
 
 No local implementation gap remains that can be closed without one of the above.
 
@@ -154,9 +157,18 @@ No local implementation gap remains that can be closed without one of the above.
    repositories and the dev App (not installed); write the secret files; then follow deploy/staging/README.md steps
    6–11 until preflight exits 0 and `/readyz` is 200 over HTTPS. *(Requires your authorisation: provisioning,
    the App.)*
-2. **First S0** *(authorisation required)*: install the App on `tw-push` only; push one failing commit. Passes when:
-   one delivery ingested, exactly one commit comment with `<!-- tracewise:cc:wfN -->`, one neutral Check Run
-   "Tracewise" with the could-not-complete notice, re-runs update in place without new comments, no abort condition.
+2. **First S0** *(authorisation required)*: install the App on `tw-push` only; push one failing commit. With the
+   fake provider it passes when: one delivery ingested, one neutral Check Run "Tracewise" per run, publication
+   following the existing policy (a log with no recognised error line ends `inconclusive` and also gets the
+   write-once commit comment; a log with one ends `could_not_complete`, Check Run only), re-runs update the same
+   Check Run, no abort condition. G-PLAT-5 stays deferred (owner decision, OWNER-DECISION-PACKET §4a). First run
+   2026-10-23: run 40008159332 ended `inconclusive` with one commit comment and one Check Run. *Observed the same
+   day (local trial behind a tunnel, one test repository; observations, not guarantees):* run 40011572580, attempts
+   1–3, each ended `could_not_complete` with no commit comment, and Check Run 120614188181 was updated in place
+   (`source_attempt` 1 → 2 → 3); re-runs delivered only `in_progress` and `completed`, one `completed` per attempt
+   (G-PLAT-2); a redelivery of the attempt-3 delivery kept its GUID and was rejected as `duplicate_delivery` (S1
+   step 1 only). Details: LIVE-VALIDATION-PLAN §S0, §S1. Open finding: a 401 on the token mint cancels the job as
+   `cancelled_uninstalled` (OWNER-DECISION-PACKET §4a).
 3. **S1–S3** *(authorisation per stage)*: in order, per LIVE-VALIDATION-PLAN "Stage gates"; record G-PLAT findings;
    then decide G-PLAT-11 and D-10. Enable cron schedules only after S1, with your approval.
 4. **Real-model smoke and evaluation** *(approvals A-1…A-7, then separate approvals for wiring and evaluation)*:

@@ -1,5 +1,10 @@
 # First private staging: one VM, Docker Compose (T-1002)
 
+> **Overview first:** [docs/SELF-HOSTING.md](../../docs/SELF-HOSTING.md) is the authoritative self-hosting guide
+> (concepts, local trial, upgrade/rollback, data handling, resources, limitations). This file is the bundle's
+> step-by-step runbook. For a local trial on one machine, add `-f compose.local.yaml` to every `docker compose`
+> command (publishes only `127.0.0.1:8443`; GitHub cannot deliver webhooks to it).
+
 **Status:** prepared and rehearsed locally (latest 2026-10-22, project `tw-rehearsal2`, `localhost`, loopback-only
 port override, throwaway secrets, run as the host user). Rehearsed: missing-secret refusal (no directory created),
 role template, `\password` via `psql -c`, `migrate status`/`upgrade`, preflight, key mount (0600, read-only),
@@ -13,8 +18,9 @@ contact GitHub; only `recovery --help` ran). Nothing has been deployed.
 Two milestones, kept apart:
 
 - **Milestone A: GitHub pipeline with the fake provider** (this document, steps 1–12). It proves intake, queueing,
-  evidence collection, publication, lifecycle and recovery against real GitHub. Every analysis ends "could not
-  complete": **it says nothing about diagnosis quality.**
+  evidence collection, publication, lifecycle and recovery against real GitHub. No analysis names a root cause
+  (`inconclusive` when the log has no recognised error line, `could_not_complete` when it has one; see
+  docs/SELF-HOSTING.md §1): **it says nothing about diagnosis quality.**
 - **Milestone B: the real-model smoke test (T-605).** Separate approval, separate procedure (§B below and
   docs/SMOKE-RUNBOOK.md). It does not change this deployment.
 
@@ -98,10 +104,12 @@ command line, a ticket or chat.
 Alert routing is still your decision (threshold 0.2 is provisional).
 
 **Milestone A is complete when** (fake provider; diagnosis content is **not** under test):
-- S0: one failing push on `tw-push` → exactly one `workflow_run.completed` ingested (`webhook.ingested` `enqueued`), one
-  commit comment with the `<!-- tracewise:cc:wfN -->` marker and one neutral Check Run "Tracewise" carrying the
-  could-not-complete notice; two re-runs give one delivery per attempt, the comment count stays 1 and the Check Run is
-  updated in place.
+- S0: one failing push on `tw-push` → exactly one `workflow_run.completed` ingested (`webhook.ingested` `enqueued`)
+  and exactly one neutral Check Run "Tracewise" per run, published under the existing policy: a log with **no
+  recognised error line** ends `inconclusive` (`no_error_line`, no provider call) and also gets the write-once
+  commit comment; a log **with** a recognised error line ends `could_not_complete` after the retries (about
+  1–3 minutes) and gets **no** commit comment (FS-ERR-1, D-8). Two re-runs give one delivery per attempt and update
+  the same Check Run. G-PLAT-5 stays deferred (owner decision; LIVE-VALIDATION-PLAN note under §S0).
 - S1–S3 pass their gates (no second job per run attempt; declined permission recorded as `unpublished_permission`;
   suspension, removal and uninstall cancel without writes).
 - No abort condition occurred (no token in logs, no write outside the three surfaces or the test organisation).

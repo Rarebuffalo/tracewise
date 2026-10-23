@@ -148,6 +148,24 @@ uv run python -m tracewise.bench run --provider oracle --reps 1 --out .bench-res
 Running the web and worker processes against a local database (roles, migrations, environment variables) is
 described step by step in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
+### Self-hosting
+
+Tracewise is distributed as a self-hosted GitHub App: you run it with Docker Compose on your own machine or server
+and keep your database, credentials and logs. **[docs/SELF-HOSTING.md](docs/SELF-HOSTING.md)** covers a local trial
+(nothing exposed), a server deployment with HTTPS, the GitHub App, upgrades, backups, resources and limitations.
+With the development prerequisites above (uv and PostgreSQL server binaries) and Docker, the quickest check that
+the image and stack work on your machine is:
+
+```bash
+make image-check
+```
+
+That builds the image and runs every process from it against a throwaway database with container networking
+disabled. Until the real model is approved, a live installation runs the fake provider and never names a root
+cause: a failed log with no recognised error line ends `inconclusive` (commit comment and Check Run), one with a
+recognised error line ends `could_not_complete` (Check Run only). It proves the GitHub pipeline, not diagnosis
+quality.
+
 ## Configuration
 
 All settings come from environment variables. [`.env.example`](.env.example) lists them with placeholders, and
@@ -204,9 +222,9 @@ Report vulnerabilities as described in [SECURITY.md](SECURITY.md). Findings and 
 | | Status |
 |---|---|
 | Offline implementation and tests | Complete for the specified MVP |
-| Live GitHub validation (stages S0–S5) | **Not done**; needs a test organisation and a development App |
+| Live GitHub validation (stages S0–S5) | **S0 exercised with the fake provider** (App installed 2026-10-22; publishing runs, re-runs and the redelivery 2026-10-23), from the local trial on a laptop through a tunnel, against a development App on one test repository: both fake-provider outcomes, re-runs updating the same Check Run, a redelivery rejected as a duplicate ([LIVE-VALIDATION-PLAN.md](docs/LIVE-VALIDATION-PLAN.md) §S0). G-PLAT-5 deferred. **S1–S5 not done** |
 | AI model | **Not connected.** OpenAI adapter implemented offline; a single smoke call, provider activation and the accuracy evaluation each need separate approval |
-| Hosting and deployment | **Not done**; a vendor-neutral blueprint exists |
+| Self-hosted deployment | Docker image and Compose bundle, rehearsed locally on amd64 (local trial and server layout); the local trial received live GitHub webhooks through a tunnel for S0; **not yet run on a real server**; no production deployment; arm64 unverified |
 | Accuracy, latency, cost | **No claims.** Nothing has been measured with a real model |
 | Privacy notice and terms | Draft only; not legally reviewed |
 
@@ -223,9 +241,9 @@ No dates are promised. In dependency order:
    (accuracy, injection resistance, cost, latency).
 3. **Owner decisions:** retention (D-12), database roles (D-11), publication on ambiguous final failures (D-14),
    benchmark policy items, alert threshold.
-4. **Hosting:** deployment, scheduling, alert routing and a staging soak.
-5. **Later features (P2):** failure history across runs, flaky-test detection from attempt history, dependency
-   drift, quotas.
+4. **Self-hosted beta:** a first real server (staging) with the live stages, scheduling, alert routing and a soak.
+5. **Later features (P2):** surfacing failure history across runs and dependency drift in reports (both computed,
+   not yet shown; they need a held-out evaluation first), flaky-test detection from attempt history.
 
 ## Contributing
 
@@ -235,7 +253,8 @@ and the rules for tenant isolation, offline tests and secrets. Please follow the
 
 ## Documentation
 
-The canonical documentation index is [docs/README.md](docs/README.md). Start with
+The canonical documentation index is [docs/README.md](docs/README.md). To run it yourself, start with
+[docs/SELF-HOSTING.md](docs/SELF-HOSTING.md). To work on it, start with
 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and
 [docs/SPEC.md](docs/SPEC.md). `research/` holds dated research and evidence, not current guidance.
 
