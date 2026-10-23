@@ -3,6 +3,55 @@
 > **Commit hashes in this file before 2026-10-20 (bb) are pre-rewrite hashes.** The history was rewritten once to
 > redact signed URLs before the first push; map them with [HISTORY-REWRITE.md](HISTORY-REWRITE.md).
 
+## Unreleased: live S0 with the fake provider (2026-10-22 to 2026-10-23)
+
+Local trial on a laptop, exposed through an ngrok tunnel, with a development App installed on one test repository;
+`LLM_PROVIDER=fake`, `TW_ENV=test`; no model call. Observations from one environment, not general guarantees.
+Timeline (UTC): 2026-10-22, App installed and the first two failing runs ingested, both cancelled by the 401
+below; 2026-10-23, replacement key, gzip fix, then the publishing runs, re-runs and the redelivery listed here.
+
+- **Fix (GitHub client):** `GitHubHTTP._send` rebuilt each response from the already-decoded body but kept the wire
+  headers, so httpx decoded gzip JSON a second time and every compressed GitHub response raised
+  `httpx.DecodingError` (first seen on `GET /app`). The rebuilt response now drops `Content-Encoding`,
+  `Content-Length` and `Transfer-Encoding`. `tests/unit/test_gzip_responses.py` serves every fake route gzip-encoded
+  (success, token mint, error mapping, pagination, the JSON cap after decoding, log download, anonymous client,
+  model adapter, retry headers); 10 of its first 12 tests failed before the fix.
+- **S0 observed:**
+  - Run 40008159332 (log with no recognised error line): `inconclusive` without a provider call; one commit comment
+    and one Check Run. Not a G-PLAT-5 pass (G-PLAT-5 stays deferred).
+  - Run 40011572580 (Python traceback), attempts 1–3: each attempt ingested once and analysed by its own job (three
+    provider failures, then `could_not_complete`); Check Run 120614188181 created on attempt 1 and updated in place
+    on attempts 2 and 3 (`source_attempt` 1 → 2 → 3); no commit comment, no second Check Run, no new publication row.
+  - Re-runs delivered only `in_progress` and `completed` (no `requested`), one `completed` per attempt (G-PLAT-2).
+  - Redelivering the processed attempt-3 delivery arrived with the same `X-GitHub-Delivery` GUID and was answered
+    `duplicate_delivery`: no job, no GitHub call, counts unchanged.
+- **Open finding (not changed):** a 401 on the installation-token mint is mapped to `InstallationUnavailable` and
+  the job ends `cancelled_uninstalled`, quietly, like an uninstall. Seen on 2026-10-22 (jobs 1 and 2); the likely
+  cause is a local private key whose key pair had been deleted in the App settings, since a replacement key
+  resolved it (`GET /app` 200 on 2026-10-23). The worker logs of 2026-10-22 were not retained, so the cause is
+  inferred, not shown by logs. Recorded in OWNER-DECISION-PACKET §4a.
+- **Corrections:** SELF-HOSTING §3b gave the retry delays as about 30 s and 60 s; the queue backs off about 30 s
+  and 120 s (±20%). The preflight warning for the fake provider no longer says every analysis ends "could not
+  complete". The two statements below marked *superseded* were wrong for a log without a recognised error line.
+
+## Unreleased: self-hosted beta documentation and local trial
+
+- **docs/SELF-HOSTING.md**, the authoritative self-hosting guide: what runs today (fake provider only; every
+  analysis ends "could not complete" — *superseded 2026-10-23: only when the log has a recognised error line; see
+  above*), local trial, server deployment, GitHub App, HTTPS, configuration and secrets,
+  upgrade and rollback, operations, real-model gate, resources (measured idle on amd64; estimates under load),
+  architectures (arm64 unverified), operator responsibilities, data handling, troubleshooting, limitations.
+- **deploy/staging/compose.local.yaml:** publishes the proxy on `127.0.0.1:8443` only; rehearsed (preflight exit 0,
+  readiness over HTTPS, signed ping, not reachable from the network address, data kept across `down`/`up`).
+- **Correction:** with the fake provider, S0 cannot show a commit comment (D-8 publishes `could_not_complete` on the
+  Check Run only). The bundle README and the handoff claimed otherwise; the plan now carries a note, and the choice
+  is a new owner decision ("S0 with the fake provider"). *Superseded 2026-10-23: the fake provider is invoked only
+  when the log has a recognised error line; a log without one ends `inconclusive`, a completed analysis that gets
+  the commit comment (observed on run 40008159332). The owner decision (a) and the G-PLAT-5 deferral stand.*
+- README: self-hosting section, current deployment status and roadmap.
+- **Stage 1 GitHub ping executed (2026-10-22):** a real GitHub App `ping` reached the local trial through an ngrok tunnel and was answered 200 `pong` after signature verification. Correction: the tunnel needs a `Host: localhost` rewrite (`deploy/staging/ngrok-local.yml`); without it Caddy returned an empty 200 and the request never reached Tracewise. The earlier statement that no rewrite was needed was wrong (a misread probe).
+- **Tunnel test prepared** (SELF-HOSTING §3a): ngrok v3 to `https://localhost:8443` (TLS name `localhost` required; a foreign `Host` header is served), `--inspect=false`, secret generated into the env file, shutdown and revocation steps, and what a laptop cannot validate. Local trial re-run on the current tree.
+
 ## Unreleased (uncommitted): offline completion toward live validation
 
 Offline only; nothing live was run. Every defect below was reproduced by a failing test before the fix.

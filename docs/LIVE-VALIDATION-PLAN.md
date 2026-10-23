@@ -75,7 +75,7 @@ conditions below.
 | Stage | Prerequisites | Action / command | Expected (observable) | On failure | Proceed when |
 |---|---|---|---|---|---|
 | Readiness | Owner inputs in the checklist above | `python -m tracewise.db.migrate upgrade`; `python -m tracewise.db.migrate status`; `python -m tracewise.preflight --process all --database`; start web and one worker | migrate status exit 0; preflight exit 0 (warnings allowed: fake provider, quota); `/readyz` 200; `worker.started` event | Fix the named check; nothing has reached GitHub | All four hold and every `manual` preflight line is confirmed by hand |
-| S0 | Readiness | Install the App on `tw-push`; push a failing commit; re-run twice | §S0 below: one comment, one Check Run updated in place, one `completed` per attempt | Uninstall the App | No abort condition; ids captured |
+| S0 | Readiness | Install the App on `tw-push`; push a failing commit; re-run twice | §S0 below: one comment, one Check Run updated in place, one `completed` per attempt. **Fake provider:** surfaces depend on the log (see the note under §S0) | Uninstall the App | No abort condition; ids captured |
 | S1 | S0 | Redeliver; stop web during a failure, then `python -m tracewise.recovery deliveries`; then `python -m tracewise.recovery runs` | §S1: `duplicate_delivery`; `"redelivered": 1`; second pass `already_received`; sweep `"enqueued": 1`, then `"duplicates": 1` | Stop recovery; no cleanup needed (dedupe) | No second job for any run attempt |
 | S2 | S1 | Decline a permission; failing PR on `tw-pr` | §S2: `publication.state = unpublished_permission` with `missing_permission`; record the mint result | Restore and re-approve permissions | Mint behaviour recorded; never more than requested |
 | S3 | S2 | Suspend, remove the repository, uninstall (see §S3 step 1 limits) | Jobs `cancelled` with `installation_suspended`, `repo_not_in_scope` or `cancelled_uninstalled`; installation `deleted` with `purge_after` | Reinstall; delete test PRs and branches | No write after `deleted`; old id stays a tombstone |
@@ -107,6 +107,20 @@ event. Offline tests (the first table) cover our side of each stage with fake Gi
 
 ## S0: Install and baseline (G-PLAT-6 partial, FS-INS-2)
 
+> **With the fake provider (the first live milestone), what step 2 publishes depends on the failed job's log.** No
+> root cause is ever named. **No recognised error line** (for example only `Process completed with exit code 1`):
+> the deterministic pre-pass ends the analysis `inconclusive` (`no_error_line`) without invoking the provider
+> (`investigate/loop.py`, `has_error_line`); that is a completed analysis, so the existing policy publishes the
+> write-once commit comment (FS-PUB-1) and the Check Run. **A recognised error line** (for example a Python
+> traceback): the investigation runs, the fake provider fails each attempt, and after the retries (about
+> 1–3 minutes) the run ends `could_not_complete`, published on the Check Run only (plus the PR comment on PR runs),
+> never as a commit comment (FS-ERR-1, D-8; `tests/db/test_analyze_worker.py::test_11_rel01_*`). Check Runs are
+> published in both cases. **Owner decision 2026-10-22: option (a)**: S0 runs with the fake provider; commit-comment
+> validation and G-PLAT-5 stay **deferred**, not passed (OWNER-DECISION-PACKET §4a). Observed 2026-10-23: run
+> 40008159332 (no error line) ended `inconclusive` and published one commit comment and one Check Run, consistent
+> with the policy above; this is recorded as an observation, not as a G-PLAT-5 pass. The stage definition below is
+> unchanged.
+
 1. Install the App on `tw-push` only.
    - **Expect:** `webhook.lifecycle` `processed`; `installation` active; repository rows for `tw-push`.
    - **Capture:** the installation id, and the granted permissions in GitHub's installation page.
@@ -123,11 +137,33 @@ event. Offline tests (the first table) cover our side of each stage with fake Gi
 
 **Cleanup:** none (S1 continues from here). **Abort if:** any duplicate commit comment, any write to another repository, or any token in the logs.
 
+> **Observed 2026-10-22 to 2026-10-23 (one environment, fake provider; observations, not guarantees).** Local
+> trial on a laptop behind an ngrok tunnel, development App on one test repository, not the `tw-push` organisation
+> layout above. Timeline (UTC): App installed on 2026-10-22, when the first two failing runs were ingested and
+> cancelled by a token-mint 401 (OWNER-DECISION-PACKET §4a); every run below and the redelivery in §S1 date from
+> 2026-10-23.
+> - Run 40008159332, log without a recognised error line: see the note at the top of this section.
+> - Run 40011572580, log with a Python traceback, attempts 1–3 (the first run plus two "Re-run failed jobs"): one
+>   `completed` delivery per attempt, each `enqueued` once (dedupe keys `…:40011572580:1`, `:2`, `:3`); every
+>   attempt's job hit three fake-provider failures and ended `could_not_complete`. Check Run 120614188181 was
+>   created on attempt 1 and updated in place on attempts 2 and 3 (one `update_check_run` 200 each;
+>   `source_attempt` 1 → 2 → 3). No commit comment, no second Check Run, no new publication row.
+> - **G-PLAT-2:** each re-run delivered `in_progress` and `completed` only (no `requested`, no `check_suite`
+>   event), with `run_attempt` incremented. This matches the gate's expectation for two re-runs; whether GitHub
+>   always delivers per attempt remains unknown.
+> - Final counts: 21 deliveries, 6 jobs, 6 workflow-run rows, 4 analyses, 3 publication rows; no live AI call; no
+>   token or secret found in the retained container logs (from 2026-10-23 17:58 UTC, when web and worker were last
+>   recreated; earlier logs were not kept); no GitHub write outside the test repository in those logs.
+> - G-PLAT-5 stays **deferred**; G-PLAT-10 (`performed_via_github_app.id`, `app.id`) was not captured.
+
 ## S1: Duplicate delivery, redelivery and listing (G-PLAT-12)
 
 1. Redeliver the S0 delivery from GitHub's App settings.
    - **Expect:** same `X-GitHub-Delivery` GUID → `duplicate_delivery`; no new job, no new write.
    - **Capture:** whether the GUID is really unchanged (EV-P06 says it is).
+   - **Observed 2026-10-23 (S0 environment above):** redelivering the processed attempt-3 `completed` delivery of
+     run 40011572580 arrived with the same GUID and was answered `duplicate_delivery`; no job claimed, no GitHub
+     call, all counts unchanged. One redelivery only; steps 2–4 not run, so S1 is not passed.
 2. Stop the test deployment's web process. Cause one CI failure, then restart.
    - **Expect:** GitHub lists the failed delivery under `GET /app/hook/deliveries?status=failure`.
    - **Run:** `python -m tracewise.recovery deliveries`.

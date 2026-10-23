@@ -125,7 +125,7 @@ def config_checks(st: Settings, process: str) -> list[Check]:
                     Check(
                         "llm_provider",
                         "warn",
-                        "fake provider (TW_ENV=test): analyses end 'could not complete'; publication is still exercised",
+                        "fake provider (TW_ENV=test): no root cause is named (inconclusive or could_not_complete)",
                     )
                 )
             else:
