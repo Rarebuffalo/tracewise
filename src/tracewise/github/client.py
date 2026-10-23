@@ -43,6 +43,8 @@ _LINE_KEEP = 2 * MAX_LINE_CHARS
 
 API = "https://api.github.com"
 API_VERSION = "2022-11-28"
+# Headers describing the wire form of a body that `_send` has already decoded; dropped when it rebuilds the response.
+_WIRE_HEADERS = frozenset({"content-encoding", "content-length", "transfer-encoding"})
 USER_AGENT = "tracewise-app"
 # Observed/assumed log-storage hosts. Not documented by GitHub; verified in the LIVE gate (G-PLAT).
 DEFAULT_LOG_HOST_SUFFIXES = (".actions.githubusercontent.com", ".blob.core.windows.net")
@@ -259,7 +261,11 @@ class GitHubHTTP:
                 continue
             finally:
                 resp.close()
-            resp = httpx.Response(resp.status_code, headers=resp.headers, content=body, request=req)
+            # `body` is already decoded (`iter_bytes`), so the rebuilt response must not claim the wire encoding:
+            # with `Content-Encoding: gzip` kept, httpx would decode plain JSON again (DecodingError on every
+            # compressed GitHub response; found in the first live check). Content-Length is recomputed.
+            decoded_headers = httpx.Headers([(k, v) for k, v in resp.headers.multi_items() if k.lower() not in _WIRE_HEADERS])
+            resp = httpx.Response(resp.status_code, headers=decoded_headers, content=body, request=req)
             status = resp.status_code
             self._log(ep, status, resp)
             if status < 300 or (status == 302 and ep.name == "download_job_logs"):
