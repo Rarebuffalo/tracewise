@@ -19,6 +19,12 @@
 - **Tests:** `test_github_auth.py` (mint 401, rate-limited mint), `test_github_client.py` (cached-token 401, then
   mint 401), `test_github_pulls.py` (token refusals propagate), `test_observability.py` (dead, event, failure
   rate, no publication, no JWT or body in logs), `test_recovery.py` (failed repository, not a lifecycle skip).
+- **Follow-up fix (2026-10-25):** the code-context lookup (git fetch and contents-API fallback,
+  `context/provider.py`) and the trigger diff lookup (`context/trigger.py`) caught every permanent GitHub error as
+  unavailable context, so an `AppAuthenticationFailed` from a token re-mint mid-job (a cached token reaching its
+  refresh point) became "code context unavailable" or an unknown diff. Both now re-raise it; every other error
+  keeps its fallback. Tests: `test_contents_api.py` and `test_trigger.py` (direct refusal, mid-job token refresh,
+  and an unchanged 404 fallback).
 - **Follow-up (open):** a run whose job died during a credential fault is not re-analysed after the key is fixed,
   because its run-attempt dedupe key is consumed.
 

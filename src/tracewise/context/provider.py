@@ -39,6 +39,8 @@ def open_code_context(
                 stack.close()  # remove the failed workspace before falling back
                 git_error = type(e).__name__
                 log.warning("git fetch failed; falling back to the contents API", extra={"tw": {"error": git_error}})
+            except gh_err.AppAuthenticationFailed:
+                raise  # the App JWT was rejected: an operator fault for the job to report, never missing context
             except gh_err.GitHubPermanent as e:  # token mint refused
                 stack.close()
                 git_error = type(e).__name__
@@ -47,6 +49,8 @@ def open_code_context(
             try:
                 api.entries()
                 source = api
+            except gh_err.AppAuthenticationFailed:
+                raise
             except (gh_err.GitHubPermanent, gh_err.GitHubRetryable) as e:
                 reason = f"git: {git_error or 'not attempted'}; contents API: {type(e).__name__}"
                 log.warning("code context unavailable", extra={"tw": {"reason": reason}})

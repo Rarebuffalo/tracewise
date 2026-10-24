@@ -13,6 +13,8 @@ from tests.github_fake import FakeGitHub, jresp
 from tracewise.context.contents_api import ContentsApiSource
 from tracewise.context.provider import open_code_context
 from tracewise.context.source import Limits, ReadStatus
+from tracewise.github import errors as gh_err
+from tracewise.github.auth import REFRESH_MARGIN_S
 from tracewise.github.client import RepoClient
 
 SHA = "c0ffee" + "0" * 34
@@ -134,6 +136,42 @@ def test_provider_unavailable_when_both_fail(ws_root, server) -> None:  # type: 
         assert "contents API: PermissionDenied" in src.reason  # type: ignore[attr-defined]
     with open_code_context(rc, "not-a-sha", fetcher=None) as src2:
         assert not src2.available
+
+
+TOKENS = __import__("re").compile(r"^/app/installations/\d+/access_tokens$")
+
+
+@pytest.mark.parametrize("with_git", [True, False])
+def test_provider_propagates_an_app_authentication_failure(ws_root, server, with_git: bool) -> None:  # type: ignore[no-untyped-def]
+    """A 401 on the mint (App JWT rejected) is an operator fault for the job to report, never "context unavailable"."""
+    gh, rc = setup()
+    gh.routes.insert(0, ("POST", TOKENS, lambda r: jresp(401, {"message": "Bad credentials"})))
+    with (
+        pytest.raises(gh_err.AppAuthenticationFailed),
+        open_code_context(rc, SHA, fetcher=make_fetcher(server, ws_root) if with_git else None),
+    ):
+        pass
+    assert not gh.calls("GET", r"/git/trees/") and not (ws_root.exists() and any(ws_root.iterdir()))
+
+
+def test_provider_propagates_an_app_authentication_failure_on_a_mid_job_token_refresh(ws_root, server) -> None:  # type: ignore[no-untyped-def]
+    """The analysis token was minted earlier in the job (cached); it reaches its refresh point before the context
+    step, and the re-mint is refused with 401 (for example the key was deleted meanwhile)."""
+    gh, rc = setup()
+    rc.git_fetch_token()  # minted and cached, as by the job's first GitHub call
+    gh.now += gh.token_ttl_s - REFRESH_MARGIN_S + 1
+    gh.routes.insert(0, ("POST", TOKENS, lambda r: jresp(401, {"message": "Bad credentials"})))
+    with pytest.raises(gh_err.AppAuthenticationFailed), open_code_context(rc, SHA, fetcher=make_fetcher(server, ws_root)):
+        pass
+    assert len(gh.calls("POST", r"/access_tokens$")) == 2
+
+
+def test_provider_still_falls_back_when_the_installation_refuses_the_mint(ws_root, server) -> None:  # type: ignore[no-untyped-def]
+    """Unchanged: an ordinary permanent refusal (404, InstallationUnavailable) still gives an unavailable source."""
+    gh, rc = setup()
+    gh.routes.insert(0, ("POST", TOKENS, lambda r: jresp(404, {"message": "Not Found"})))
+    with open_code_context(rc, SHA, fetcher=make_fetcher(server, ws_root)) as src:
+        assert not src.available and "contents API: InstallationUnavailable" in src.reason  # type: ignore[attr-defined]
 
 
 def test_provider_prefers_git_and_propagates_caller_errors(ws_root, server) -> None:  # type: ignore[no-untyped-def]

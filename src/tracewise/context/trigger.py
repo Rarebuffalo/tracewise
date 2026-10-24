@@ -89,6 +89,8 @@ def compute_trigger_diff(rc: RepoClient, head_sha: str, *, base_sha: str | None 
         doc = rc.request("compare", basehead=f"{base_sha}...{head_sha}")
     except UnsafePath:
         return _unknown(head_sha, base_sha, "invalid base or head SHA")
+    except gh_err.AppAuthenticationFailed:
+        raise  # the App JWT was rejected: an operator fault for the job to report, never an unknown diff
     except (gh_err.GitHubPermanent, gh_err.GitHubRetryable) as e:
         return _unknown(head_sha, base_sha, f"compare unavailable ({type(e).__name__})")
     return _parse_compare(doc, head_sha, base_sha)

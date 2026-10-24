@@ -12,6 +12,8 @@ from tests.context.memsource import MemSource
 from tests.github_fake import FakeGitHub, jresp, recorded
 from tracewise.context.tools import ToolBox
 from tracewise.context.trigger import ChangedFile, TriggerDiff, compute_trigger_diff, relevance, to_attribution
+from tracewise.github import errors as gh_err
+from tracewise.github.auth import REFRESH_MARGIN_S
 from tracewise.github.client import RepoClient
 
 C0, C1, C2 = "0" * 40, "1" * 40, "2" * 40
@@ -204,3 +206,34 @@ def test_malformed_line_counts_in_a_compare_file_are_zero_not_a_crash(bad: Any) 
     d = _parse_compare(doc, "b" * 40, "a" * 40)
     (f,) = d.files
     assert (f.path, f.additions, f.deletions, f.patch) == ("a.py", 0, 0, None)
+
+
+def _refuse_mints(gh: FakeGitHub, status: int) -> None:
+    refuse = jresp(status, {"message": "x"})
+    gh.routes.insert(0, ("POST", re.compile(r"^/app/installations/\d+/access_tokens$"), lambda r: refuse))
+
+
+def test_an_app_authentication_failure_propagates_instead_of_an_unknown_diff() -> None:
+    gh, rc = client()
+    _refuse_mints(gh, 401)
+    with pytest.raises(gh_err.AppAuthenticationFailed):
+        compute_trigger_diff(rc, C1)
+
+
+def test_an_app_authentication_failure_on_a_mid_job_token_refresh_propagates() -> None:
+    gh, rc = client()
+    gh.route("GET", rf"/commits/{C1}$", jresp(200, commit(C1, [C0])))
+    gh.route("GET", rf"/compare/{C0}\.\.\.{C1}$", jresp(200, compare([("a.py", "modified")])))
+    assert compute_trigger_diff(rc, C1).known  # token minted and cached
+    gh.now += gh.token_ttl_s - REFRESH_MARGIN_S + 1  # the cached token reaches its refresh point
+    _refuse_mints(gh, 401)
+    with pytest.raises(gh_err.AppAuthenticationFailed):
+        compute_trigger_diff(rc, C1)
+
+
+def test_an_installation_refusal_still_gives_an_unknown_diff() -> None:
+    """Unchanged: ordinary permanent refusals keep the honest "unknown" diff."""
+    gh, rc = client()
+    _refuse_mints(gh, 404)
+    diff = compute_trigger_diff(rc, C1)
+    assert not diff.known and "InstallationUnavailable" in (diff.reason or "")
