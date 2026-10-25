@@ -108,7 +108,7 @@ offline; decide after S2.
    - A-4: the account's data-retention and training settings;
    - A-5: approval of the synthetic content;
    - A-6: approval of the command;
-   - A-7: prices for the cost bound (under 4,500 input and 6,144 output tokens).
+   - A-7: prices for a cost **estimate** (about 4,500 input tokens expected, not limited; at most 6,144 output tokens if the provider applies its cap to all billed output). Only the request count, sizes and times are hard limits (SMOKE-RUNBOOK §4).
 2. **Provider activation** (`LLM_PROVIDER=openai` in `providers.py`): only after a passing smoke run.
 3. **T-605 evaluation** (benchmark with the real model, E-01, cost and latency): separately.
 

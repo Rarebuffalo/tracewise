@@ -37,22 +37,32 @@ def test_fake_in_test_env_fails_closed_and_there_is_no_fallback() -> None:
     assert src.count("return ") == 1  # one provider per configuration (the test-only fake)
 
 
-def test_no_code_path_can_reach_a_real_model_today() -> None:
-    """Phase 39: the only network-capable provider (HTTPProvider) is never constructed in product code, and the
-    benchmark CLI offers scripted providers only. Wiring a real provider must change this test deliberately."""
+def test_no_product_code_path_can_reach_a_real_model() -> None:
+    """Phase 39, revised deliberately for the benchmark's model mode (T-605 preparation): the only network-capable
+    provider (HTTPProvider) is constructed in exactly one place outside its own module, `bench/model_provider.py`,
+    which only the owner-run benchmark CLI imports. Product selection still never constructs it, and no product
+    module imports the benchmark's model mode or the key-file guards. Widening this must change this test again."""
     import re
     from pathlib import Path
 
     from tracewise.bench.providers import SCRIPTED
 
     src = Path(__file__).resolve().parents[2] / "src" / "tracewise"
-    constructs = [p for p in src.rglob("*.py") if re.search(r"\bHTTPProvider\(", p.read_text()) and p.name != "http_adapter.py"]
-    assert constructs == []
+
+    def mentioning(pattern: str, *, besides: str) -> list[str]:
+        return sorted(
+            str(p.relative_to(src)) for p in src.rglob("*.py") if p.name != besides and re.search(pattern, p.read_text())
+        )
+
+    assert mentioning(r"\bHTTPProvider\(", besides="http_adapter.py") == ["bench/model_provider.py"]
+    assert mentioning(r"\bmodel_provider\b", besides="model_provider.py") == ["bench/__main__.py"]
+    assert mentioning(r"\bmodel_access\b", besides="model_access.py") == ["bench/__main__.py", "bench/model_provider.py"]
     assert all("openai" not in name.lower() and "http" not in name.lower() for name in SCRIPTED)
     codecs = [
         p for p in src.rglob("*.py") if re.search(r"class \w*Wire\b|WireCodec\)", p.read_text()) and p.name != "http_adapter.py"
     ]
-    # Phase 45D: exactly one vendor codec ships, offline-tested only; it is never wired into selection.
+    # Phase 45D: exactly one vendor codec ships, offline-tested only; product selection never wires it.
     assert [p.name for p in codecs] == ["openai_responses.py"]
     selection = (src / "investigate" / "providers.py").read_text()
     assert "openai_responses" not in selection.split('"""', 2)[2] and "OpenAIResponsesWire" not in selection
+    assert "model_provider" not in selection and "HTTPProvider" not in selection

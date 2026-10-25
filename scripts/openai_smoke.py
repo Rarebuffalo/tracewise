@@ -32,21 +32,23 @@ import argparse
 import json
 import os
 import re
-import socket
-import stat
 import sys
-import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import httpcore
 import httpx
 from pydantic import SecretStr
 
 from tracewise.context.tools import TOOL_NAMES
+from tracewise.investigate import deadline_http, model_access
+from tracewise.investigate.deadline_http import (  # re-exported: the harness and its tests use these names
+    DeadlineBackend as DeadlineBackend,
+)
+from tracewise.investigate.deadline_http import DeadlineExceeded, DeadlineHTTPTransport
+from tracewise.investigate.deadline_http import DeadlineStream as DeadlineStream
 from tracewise.investigate.http_adapter import (
     AdapterConfig,
     HTTPProvider,
@@ -68,7 +70,6 @@ MAX_RESPONSE_BYTES = 262_144
 MAX_OUTPUT_CHARS = 2_048  # also sent as max_output_tokens
 STEP_TIMEOUT_S = 30.0
 TOTAL_DEADLINE_S = 90.0
-WATCHDOG_INTERVAL_S = 0.02  # how often the watchdog compares the wall clock with the deadline
 
 # ------------------------------------------------------------------ the fixed synthetic conversation (§3)
 INSTRUCTIONS = "You are a test fixture for an API compatibility check. Follow the user's instruction exactly."
@@ -79,7 +80,6 @@ FINAL_PROMPT = "Now reply with exactly the two letters OK and nothing else."
 
 OFFLINE_KEY = "offline-smoke-not-a-key"
 _ENUM = re.compile(r"^[a-z0-9_.]{1,64}$")
-_AUTH_REF = re.compile(r"^[A-Za-z0-9._:/ #-]{8,120}$")
 
 EXIT = {
     "pass": 0,
@@ -108,230 +108,16 @@ class SchemaViolation(Exception):
     """Valid JSON whose structure is not the recorded one: an unsupported response (exit 8)."""
 
 
-class DeadlineExceeded(Exception):
-    """The per-step or overall wall-clock deadline was reached; the in-flight exchange was abandoned (exit 10)."""
-
-
 # ------------------------------------------------------------------ wall-clock deadline
 
 
-class Deadline:
-    """One monotonic deadline shared by the run, the guarded transport and the socket backend.
+class Deadline(deadline_http.Deadline):
+    """The run's wall-clock deadline (§4a). The socket-level enforcement lives in
+    `tracewise.investigate.deadline_http` (shared with the benchmark's model mode); each step's deadline is
+    min(step start + STEP_TIMEOUT_S, run start + TOTAL_DEADLINE_S)."""
 
-    `at` is the current step's deadline: min(step start + STEP_TIMEOUT_S, run start + TOTAL_DEADLINE_S). The overall
-    deadline is fixed once per run and never restarts. `expired` is sticky."""
-
-    def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
-        self.clock = clock
-        self.at: float | None = None
-        self.expired = False
-
-    def start_step(self, overall_at: float) -> None:
-        now = self.clock()
-        if now >= overall_at:
-            self.expired = True
-            raise DeadlineExceeded()
-        self.at = min(now + STEP_TIMEOUT_S, overall_at)
-
-    def remaining(self) -> float:
-        if self.at is None:
-            return float("inf")
-        left = self.at - self.clock()
-        if left <= 0:
-            self.expired = True
-        return left
-
-
-def _clamp(deadline: Deadline, timeout: float | None, exc: type[Exception]) -> float:
-    """The socket timeout for one operation: never longer than the time left; nothing starts after the deadline."""
-    left = deadline.remaining()
-    if left <= 0:
-        raise exc("smoke deadline reached")
-    return left if timeout is None else min(timeout, left)
-
-
-def _bounded[T](deadline: Deadline, timeout: float | None, exc: type[Exception], op: Callable[[float], T]) -> T:
-    """Run one socket operation under the clamped timeout. If it times out while the deadline was the binding
-    limit, the deadline is what ended it, even if the clock reads a hair before `at` (socket timers are not exact)."""
-    t = _clamp(deadline, timeout, exc)
-    try:
-        return op(t)
-    except httpcore.TimeoutException:
-        if timeout is None or t < timeout:
-            deadline.expired = True
-        raise
-
-
-class DeadlineStream(httpcore.NetworkStream):
-    """Every blocking socket operation gets at most the remaining time; the watchdog can shut the socket down."""
-
-    def __init__(self, inner: httpcore.NetworkStream, deadline: Deadline, backend: DeadlineBackend | None = None) -> None:
-        self.inner, self.deadline, self.backend = inner, deadline, backend
-
-    def read(self, max_bytes: int, timeout: float | None = None) -> bytes:
-        return _bounded(self.deadline, timeout, httpcore.ReadTimeout, lambda t: self.inner.read(max_bytes, t))
-
-    def write(self, buffer: bytes, timeout: float | None = None) -> None:
-        _bounded(self.deadline, timeout, httpcore.WriteTimeout, lambda t: self.inner.write(buffer, t))
-
-    def close(self) -> None:
-        if self.backend is not None:
-            self.backend.untrack(self)
-        self.inner.close()
-
-    def start_tls(self, ssl_context: Any, server_hostname: str | None = None, timeout: float | None = None) -> DeadlineStream:
-        tls = _bounded(
-            self.deadline, timeout, httpcore.ConnectTimeout, lambda t: self.inner.start_tls(ssl_context, server_hostname, t)
-        )
-        upgraded = DeadlineStream(tls, self.deadline, self.backend)
-        if self.backend is not None:
-            self.backend.untrack(self)
-            self.backend.track(upgraded)
-        return upgraded
-
-    def get_extra_info(self, info: str) -> Any:
-        return self.inner.get_extra_info(info)
-
-
-class DeadlineBackend(httpcore.NetworkBackend):
-    """httpcore network backend for the live smoke run (no new dependency: httpcore ships with httpx).
-
-    * Name resolution runs in a worker thread that is abandoned at the deadline (getaddrinfo has no timeout).
-    * Connect, TLS handshake, every read and every write are clamped to the remaining time (`DeadlineStream`).
-    * A watchdog thread shuts down every open socket once the wall clock passes the deadline. That interrupts an
-      operation already blocked in the kernel (a slow multi-step TLS handshake, a write split into several sends, a
-      peer that trickles bytes) so that no exchange outlives the deadline by more than about WATCHDOG_INTERVAL_S."""
-
-    def __init__(
-        self,
-        deadline: Deadline,
-        inner: httpcore.NetworkBackend | None = None,
-        resolver: Callable[..., Any] = socket.getaddrinfo,
-    ) -> None:
-        self.deadline, self.resolver = deadline, resolver
-        self.inner = inner or httpcore.SyncBackend()
-        self._streams: set[DeadlineStream] = set()
-        self._lock = threading.Lock()
-        self._closed = threading.Event()
-        self._watchdog = threading.Thread(target=self._watch, name="smoke-deadline-watchdog", daemon=True)
-        self._watchdog.start()
-
-    def track(self, s: DeadlineStream) -> None:
-        with self._lock:
-            self._streams.add(s)
-
-    def untrack(self, s: DeadlineStream) -> None:
-        with self._lock:
-            self._streams.discard(s)
-
-    def close(self) -> None:
-        self._closed.set()
-
-    def _watch(self) -> None:
-        while not self._closed.wait(WATCHDOG_INTERVAL_S):
-            if self.deadline.at is not None and self.deadline.clock() >= self.deadline.at:
-                self.deadline.expired = True
-                with self._lock:
-                    streams = list(self._streams)
-                for s in streams:
-                    _shutdown(s)
-
-    def _resolve(self, host: str, port: int) -> list[Any]:
-        box: dict[str, Any] = {}
-
-        def work() -> None:
-            try:
-                box["addrs"] = self.resolver(host, port, type=socket.SOCK_STREAM)
-            except OSError as e:
-                box["error"] = e
-
-        t = threading.Thread(target=work, name="smoke-resolver", daemon=True)
-        t.start()
-        t.join(_clamp(self.deadline, None, httpcore.ConnectTimeout))
-        if t.is_alive():
-            self.deadline.expired = True
-            raise httpcore.ConnectTimeout("smoke deadline reached during name resolution")
-        if "error" in box or not box.get("addrs"):
-            raise httpcore.ConnectError("name resolution failed")
-        addrs: list[Any] = box["addrs"]
-        return addrs
-
-    def connect_tcp(
-        self,
-        host: str,
-        port: int,
-        timeout: float | None = None,
-        local_address: str | None = None,
-        socket_options: Any = None,
-    ) -> DeadlineStream:
-        last: Exception = httpcore.ConnectError("no address")
-        for *_info, sockaddr in self._resolve(host, port):
-            addr = str(sockaddr[0])
-
-            def connect(t: float, addr: str = addr) -> httpcore.NetworkStream:
-                return self.inner.connect_tcp(addr, port, t, local_address, socket_options)
-
-            try:  # a literal address: no further name lookup inside create_connection
-                raw = _bounded(self.deadline, timeout, httpcore.ConnectTimeout, connect)
-            except httpcore.ConnectTimeout:
-                if self.deadline.expired:
-                    raise
-                last = httpcore.ConnectTimeout("connect timed out")
-                continue
-            except httpcore.ConnectError as e:
-                last = e
-                continue
-            s = DeadlineStream(raw, self.deadline, self)
-            self.track(s)
-            return s
-        raise last
-
-    def connect_unix_socket(self, path: str, timeout: float | None = None, socket_options: Any = None) -> DeadlineStream:
-        raise httpcore.ConnectError("unix sockets are not used by the smoke harness")
-
-    def sleep(self, seconds: float) -> None:
-        time.sleep(max(0.0, min(seconds, self.deadline.remaining())))
-
-
-def _shutdown(s: DeadlineStream) -> None:
-    """Shut the connection down through a duplicate descriptor, so the (possibly TLS) socket object used by the
-    blocked thread is not touched from this thread; the blocked call then returns with an error."""
-    sock = s.get_extra_info("socket")
-    fd = sock.fileno() if sock is not None else -1
-    if fd < 0:
-        return
-    try:
-        dup = socket.socket(fileno=os.dup(fd))
-    except OSError:
-        return
-    try:
-        dup.shutdown(socket.SHUT_RDWR)
-    except OSError:
-        pass
-    finally:
-        dup.close()
-
-
-class DeadlineHTTPTransport(httpx.HTTPTransport):
-    """httpx's own transport with the connection pool rebuilt on `DeadlineBackend` (live mode only)."""
-
-    def __init__(self, deadline: Deadline) -> None:
-        super().__init__(trust_env=False, retries=0)
-        self._pool.close()
-        self.backend = DeadlineBackend(deadline)
-        self._pool = httpcore.ConnectionPool(
-            ssl_context=httpx.create_ssl_context(trust_env=False),
-            max_connections=1,
-            max_keepalive_connections=0,
-            http1=True,
-            http2=False,
-            retries=0,
-            network_backend=self.backend,
-        )
-
-    def close(self) -> None:
-        super().close()
-        self.backend.close()
+    def start_step(self, overall_at: float, step_timeout_s: float = STEP_TIMEOUT_S) -> None:
+        super().start_step(overall_at, step_timeout_s)
 
 
 # ------------------------------------------------------------------ guarded, recording transport
@@ -406,6 +192,12 @@ def response_shape(status: int, body: bytes, headers: httpx.Headers) -> dict[str
     usage = doc.get("usage")
     if isinstance(usage, dict):
         out["usage"] = {k: usage[k] for k in ("input_tokens", "output_tokens", "total_tokens") if type(usage.get(k)) is int}
+        # R-11 breakdowns, integers only: whether reasoning tokens sit inside `output_tokens` (and so inside the
+        # 2,048 `max_output_tokens` cap) and whether any input was billed as cached are unknowns the run should record.
+        for parent, key in (("output_tokens_details", "reasoning_tokens"), ("input_tokens_details", "cached_tokens")):
+            detail = usage.get(parent)
+            if isinstance(detail, dict) and type(detail.get(key)) is int:
+                out["usage"][key] = detail[key]
     elif usage is not None:
         violations.add("usage_not_object")
     if violations:
@@ -514,26 +306,12 @@ class GuardedTransport(httpx.BaseTransport):
 
 
 def read_key_file(path: str) -> SecretStr:
-    """The only key source: an owner-only regular file outside the repository. Never the environment."""
-    p = Path(path)
-    if p.is_symlink():
-        raise Refused("key file must not be a symlink")
+    """The only key source: an owner-only regular file outside the repository. Never the environment.
+    The rules live in `tracewise.investigate.model_access` (shared with the benchmark's model mode)."""
     try:
-        st = p.stat()
-    except OSError:
-        raise Refused("key file is not readable") from None
-    if not stat.S_ISREG(st.st_mode):
-        raise Refused("key file must be a regular file")
-    if st.st_mode & 0o077:
-        raise Refused("key file must be readable by its owner only (chmod 600)")
-    if p.resolve().is_relative_to(REPO_ROOT):
-        raise Refused("key file must be outside the repository")
-    if st.st_size > 512:
-        raise Refused("key file is too large")
-    key = p.read_text(encoding="utf-8").strip()
-    if len(key) < 8 or any(c.isspace() for c in key):
-        raise Refused("key file content is malformed")
-    return SecretStr(key)
+        return model_access.read_key_file(path, repo_root=REPO_ROOT)
+    except model_access.AccessRefused as e:
+        raise Refused(str(e)) from None
 
 
 # ------------------------------------------------------------------ the three steps (§2)
@@ -691,8 +469,10 @@ def build(args: argparse.Namespace, env: dict[str, str], deadline: Deadline) -> 
             raise Refused("live mode is never run by test runners or CI")
         if not args.key_file or not args.authorization_ref:
             raise Refused("live mode needs --key-file and --authorization-ref")
-        if not _AUTH_REF.match(args.authorization_ref):
-            raise Refused("authorization reference is malformed")
+        try:
+            model_access.check_authorization_ref(args.authorization_ref)
+        except model_access.AccessRefused as e:
+            raise Refused(str(e)) from None
         key = read_key_file(args.key_file)
         inner: httpx.BaseTransport = DeadlineHTTPTransport(deadline)
         mode = "live"

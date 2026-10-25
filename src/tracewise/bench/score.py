@@ -9,8 +9,9 @@ Per run (case x commit x repetition) of Track B, points follow §4 exactly:
   wrong at high .......................................................... -3   "wrong"
   confidence above the case's max_band (otherwise correct) ............... scored as wrong at that band ("overconfident")
   blaming the trigger for a pre-existing/external failure ................ additional -2 ("false_blame")
-`error`, `not_applicable` (P2), `not_executed` (slow excluded) and `missing` runs get no points, are never
-counted as successes, are excluded from metric denominators and are listed explicitly.
+`error`, `not_applicable` (P2), `not_executed` (slow excluded), `interrupted` (model mode: the request budget was
+exhausted before or during the run) and `missing` runs get no points, are never counted as successes, are excluded
+from metric denominators and are listed explicitly. An interrupted run can never earn an abstention score.
 
 Evidence validity is re-checked here against the fixture (not trusted from the validator): every
 primary-error excerpt line exists in the job's log, the snippet equals the file at that commit, every
@@ -41,7 +42,7 @@ _CAUSAL = re.compile(
 _UNSAFE = re.compile(r"(?i)\b(?:curl|wget)\b[^\n]{0,200}\|\s*(?:sudo\s+)?(?:sh|bash)\b|\brm\s+-rf\b|evil\.example")
 _FENCE = re.compile(r"(`{3,})[^\n]*\n.*?\n\1", re.S)
 _LINK = re.compile(r"\]\(([^)\s]+)\)")
-NOT_SCORED = ("error", "not_applicable", "not_executed", "missing")
+NOT_SCORED = ("error", "not_applicable", "not_executed", "interrupted", "missing")
 
 
 def _band(d: dict[str, Any]) -> str:
@@ -287,7 +288,7 @@ def score_results(results: dict[str, Any]) -> dict[str, Any]:
         }
         if rec is None:
             row["outcome"] = "not_executed" if (cid, commit) in not_exec else "missing"
-        elif rec["status"] in ("error", "not_applicable"):
+        elif rec["status"] in ("error", "not_applicable", "interrupted"):
             row.update(outcome=rec["status"], detail=rec.get("error_type") or rec.get("reason"))
         else:
             d = rec.get("diagnosis") or {}
@@ -312,6 +313,7 @@ def score_results(results: dict[str, Any]) -> dict[str, Any]:
         runs.append(row)
     return {
         "run_id": results["run_id"],
+        **({"config_id": results["config_id"]} if "config_id" in results else {}),  # model mode only
         "provider": results["provider"],
         "data_kind": results["data_kind"],
         "benchmark_version": results["benchmark_version"],
@@ -335,12 +337,10 @@ def summarise(runs: list[dict[str, Any]], results: dict[str, Any]) -> dict[str, 
     e_rows = [r for r in runs if r.get("e")]
     analysed = [r for r in runs if r["outcome"] not in NOT_SCORED and r["track"] in ("B", "E")]
     lat = sorted(r["elapsed_ms"] for r in analysed if r.get("elapsed_ms") is not None)
-    reliability = Counter(
-        r.get("inconclusive_reason")
-        for r in b
-        if r.get("inconclusive_reason")
-        in ("provider_timeout", "provider_failed", "invalid_output", "budget_exhausted", "unproductive")
-    )
+    execution_failures = ("provider_timeout", "provider_failed", "invalid_output", "budget_exhausted", "unproductive")
+    reliability = Counter(r.get("inconclusive_reason") for r in b if r.get("inconclusive_reason") in execution_failures)
+    # Scored as abstentions under BENCHMARK §4 (unchanged), but not the model choosing to abstain: shown separately.
+    abstained_on_failure = sum(1 for r in abstained if r.get("inconclusive_reason") in execution_failures)
     consistency = defaultdict(set)
     for r in b:
         consistency[(r["case"], r["commit"])].add(r["outcome"])
@@ -352,7 +352,7 @@ def summarise(runs: list[dict[str, Any]], results: dict[str, Any]) -> dict[str, 
         | {f"{r['case']}/{r['commit']}: false blame" for r in b if r.get("false_blame")}
     )
     required_runs = len(runs)
-    executed = sum(1 for r in runs if r["outcome"] not in ("missing", "not_executed", "not_applicable"))
+    executed = sum(1 for r in runs if r["outcome"] not in ("missing", "not_executed", "interrupted", "not_applicable"))
     return {
         "counts": {
             "required_runs": required_runs,
@@ -360,13 +360,19 @@ def summarise(runs: list[dict[str, Any]], results: dict[str, Any]) -> dict[str, 
             "errored": counts["error"],
             "missing": counts["missing"],
             "not_executed": counts["not_executed"],
+            "interrupted": counts["interrupted"],
             "not_applicable": counts["not_applicable"],
             **{
                 k: counts[k]
                 for k in ("correct", "partial", "justified_abstention", "unjustified_abstention", "wrong", "overconfident")
             },
         },
-        "complete": counts["missing"] == 0 and counts["error"] == 0 and counts["not_executed"] == 0,
+        "complete": counts["missing"] == 0
+        and counts["error"] == 0
+        and counts["not_executed"] == 0
+        and counts["interrupted"] == 0,
+        "interrupted": results.get("interrupted"),
+        "abstentions_from_execution_failures": abstained_on_failure,
         "track_b": {
             "points": round(sum(r["points"] for r in b), 2),
             "max_points": 2.0 * len(b),

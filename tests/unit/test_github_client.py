@@ -51,6 +51,13 @@ def test_sec01_every_endpoint_is_permitted_and_none_writes_forbidden_resources()
 # Offline benchmark plumbing (T-601): it SERVES replayed GitHub responses through an in-process
 # httpx.MockTransport and never opens a connection. Exempt by exact file, and checked below.
 BENCH_OFFLINE = {SRC / "bench" / "replay.py", SRC / "bench" / "harness.py"}
+# The benchmark's owner-run model mode (T-605 preparation): the key-file guards and the host-locked request budget, and
+# the one place that builds the real adapter for it. Checked below; product selection never reaches either.
+MODEL_MODE = {
+    SRC / "investigate" / "model_access.py",
+    SRC / "investigate" / "deadline_http.py",
+    SRC / "bench" / "model_provider.py",
+}
 # The early-access website's waitlist (a separate app, no GitHub access): Resend and Turnstile only. Checked below.
 WAITLIST_OUTBOUND = SRC / "waitlist" / "outbound.py"
 
@@ -58,7 +65,8 @@ WAITLIST_OUTBOUND = SRC / "waitlist" / "outbound.py"
 def test_sec01_no_http_or_github_urls_outside_the_client() -> None:
     # The two network modules: the GitHub client, and the model adapter core (T-605 prep), which may only reach
     # its codec's single endpoint (see test_model_adapter_is_the_only_other_network_module below).
-    allowed = {SRC / "github" / "client.py", SRC / "investigate" / "http_adapter.py", WAITLIST_OUTBOUND, *BENCH_OFFLINE}
+    network = {SRC / "github" / "client.py", SRC / "investigate" / "http_adapter.py", WAITLIST_OUTBOUND}
+    allowed = {*network, *BENCH_OFFLINE, *MODEL_MODE}
     fixtures = SRC / "bench" / "cases"  # benchmark fixture repositories: data, not product code
     for f in SRC.rglob("*.py"):
         if f in allowed or fixtures in f.parents:
@@ -73,6 +81,27 @@ def test_sec01_no_http_or_github_urls_outside_the_client() -> None:
         }
         assert not imported & {"httpx", "requests", "urllib3", "aiohttp", "http"}, f
         assert "api.github.com" not in text, f
+
+
+def test_sec01_model_mode_names_no_host_and_builds_only_a_locked_client() -> None:
+    """The model-mode modules name no host or URL themselves (the endpoint is the codec's recorded constant), never
+    follow redirects or read proxy settings, and only wrap a transport in the host-locked request budget."""
+    for f in MODEL_MODE:
+        text = f.read_text()
+        assert "api.github.com" not in text and "openai.com" not in text and "http://" not in text and "https://" not in text, f
+        for node in ast.walk(ast.parse(text)):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and ast.unparse(node.func.value) == "httpx":
+                assert node.func.attr in {"Client", "create_ssl_context"}, (f, node.func.attr)
+                if node.func.attr == "Client":
+                    kw = {k.arg: ast.unparse(k.value) for k in node.keywords}
+                    assert kw.get("follow_redirects") == "False" and kw.get("trust_env") == "False", f
+                    assert kw.get("transport") == "transport", f  # the EndpointBudgetTransport built just before
+    provider = (SRC / "bench" / "model_provider.py").read_text()
+    # The chain: host lock, body cap and request cap → per-request wall-clock deadline → the deadline socket backend.
+    assert "network = inner or deadline_http.DeadlineHTTPTransport(deadline)" in provider
+    assert "timed = deadline_http.RequestDeadlineTransport(network, deadline)" in provider
+    assert "EndpointBudgetTransport(timed, ENDPOINT, max_requests, max_request_bytes=MAX_REQUEST_BYTES)" in provider
+    assert "trust_env=False" in (SRC / "investigate" / "deadline_http.py").read_text()
 
 
 def test_sec01_bench_exemptions_only_use_in_process_transports() -> None:

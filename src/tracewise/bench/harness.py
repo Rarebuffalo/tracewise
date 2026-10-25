@@ -21,7 +21,7 @@ import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import httpx
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -291,6 +291,35 @@ def _run_analysis(
     }
 
 
+class RunBudget(Protocol):
+    """A hard request cap shared by the whole evaluation (the model mode's host-locked transport)."""
+
+    def exhausted(self) -> bool: ...
+
+    def refusals(self) -> int: ...  # requests refused because the cap was reached, so never sent
+
+    def oversized(self) -> int: ...  # requests refused because the body exceeded the byte cap, so never sent
+
+
+INTERRUPTED_DURING = "request budget exhausted during this run; its result is discarded"
+INTERRUPTED_BEFORE = "request budget exhausted before this run; not started"
+REQUEST_TOO_LARGE = "a request body exceeded the size cap and was not sent; its result is discarded"
+
+
+_IDENTITY = ("case", "case_version", "track", "commit", "repetition", "provider", "source_type", "phase", "elapsed_ms")
+
+
+def _interrupted(rec: dict[str, Any], reason: str) -> dict[str, Any]:
+    """Identity fields only: an interrupted run keeps no diagnosis, report or prepass, so nothing can score it."""
+    return {**{k: rec[k] for k in _IDENTITY if k in rec}, "status": "interrupted", "error_type": None, "reason": reason}
+
+
+def _too_large(rec: dict[str, Any]) -> dict[str, Any]:
+    """An error row (never scored): the outcome reflects the size cap, not the model."""
+    ident = {k: rec[k] for k in _IDENTITY if k in rec}
+    return {**ident, "status": "error", "error_type": "RequestTooLarge", "reason": REQUEST_TOO_LARGE}
+
+
 def run_suite(
     provider_name: str,
     factory: ProviderFactory,
@@ -300,8 +329,19 @@ def run_suite(
     repetitions: int = 3,
     include_slow: bool = False,
     label: str = "",
+    budget: RunBudget | None = None,
 ) -> dict[str, Any]:
-    """`provider_kind` is "scripted" (protocol validation) or "model" (a real provider, T-605)."""
+    """`provider_kind` is "scripted" (protocol validation) or "model" (a real provider, T-605).
+
+    With a `budget`, the evaluation stops when the cap is reached: the analysis run that was cut off (one of its
+    requests was refused, so its outcome reflects the cap, not the model) and every analysis run not yet started are
+    recorded as `interrupted`, never scored, and the results carry `interrupted`. Results already collected are kept.
+    Track A (pre-pass only) and P2 runs use no provider and still run. A run one of whose requests was refused for its
+    size becomes an `error` row (`RequestTooLarge`); the evaluation continues.
+
+    Identity: `config_id` hashes the configuration (stable across equivalent runs). With a budget, `run_id` equals it
+    for a complete evaluation and is `<config_id>-interrupted` for one stopped by the cap, so a partial run never
+    shares an identifier with a complete one."""
     if provider_kind not in ("scripted", "model"):
         raise ValueError("provider_kind must be 'scripted' or 'model'")
     problems = verify_lock()
@@ -310,6 +350,7 @@ def run_suite(
     ids = case_ids or list(REQUIRED_CASES)
     loaded: dict[str, tuple[CaseSpec, Truth, Reference | None]] = {}
     records: list[dict[str, Any]] = []
+    interrupted = False
     for cid in ids:
         try:
             loaded[cid] = load_case(cid)
@@ -346,9 +387,34 @@ def run_suite(
                     )
                 continue
             reps = 1 if spec.track == "A" else repetitions
+            uses_provider = spec.track != "A" and spec.phase != "p2"
             for commit in spec.runs:
                 for rep in range(1, reps + 1):
-                    records.append(run_one(ctx, spec, ref, commit, factory, provider_name, rep))
+                    if budget is None or not uses_provider:
+                        records.append(run_one(ctx, spec, ref, commit, factory, provider_name, rep))
+                        continue
+                    identity = {
+                        "case": spec.id,
+                        "case_version": spec.version,
+                        "track": spec.track,
+                        "commit": commit,
+                        "repetition": rep,
+                        "provider": provider_name,
+                        "source_type": spec.source_type,
+                        "phase": spec.phase,
+                    }
+                    if interrupted or budget.exhausted():
+                        interrupted = True
+                        records.append(_interrupted(identity, INTERRUPTED_BEFORE))
+                        continue
+                    before, before_size = budget.refusals(), budget.oversized()
+                    rec = run_one(ctx, spec, ref, commit, factory, provider_name, rep)
+                    if budget.refusals() > before:
+                        interrupted = True
+                        rec = _interrupted(rec, INTERRUPTED_DURING)
+                    elif budget.oversized() > before_size:
+                        rec = _too_large(rec)
+                    records.append(rec)
     ident = {
         "benchmark": BENCHMARK_VERSION,
         "truth_lock": lock_digest(),
@@ -358,8 +424,9 @@ def run_suite(
         "include_slow": include_slow,
         "label": label,
     }
-    return {
-        "run_id": hashlib.sha256(json.dumps(ident, sort_keys=True).encode()).hexdigest()[:16],
+    config_id = hashlib.sha256(json.dumps(ident, sort_keys=True).encode()).hexdigest()[:16]
+    out: dict[str, Any] = {
+        "run_id": config_id,
         "benchmark_version": BENCHMARK_VERSION,
         "truth_lock": lock_digest(),
         "data_kind": "synthetic",
@@ -369,3 +436,10 @@ def run_suite(
         "required_cases": ids,
         "records": records,
     }
+    if budget is not None:  # scripted runs have no budget and their results are unchanged
+        n = sum(1 for r in records if r["status"] == "interrupted")
+        out["interrupted"] = {"reason": "request_budget_exhausted", "runs": n} if interrupted else None
+        out["config_id"] = config_id
+        if interrupted:
+            out["run_id"] = f"{config_id}-interrupted"
+    return out

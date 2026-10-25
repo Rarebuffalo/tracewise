@@ -136,5 +136,85 @@ Each open question is classified using only the recorded contract. "Fails closed
 1. ~~Record C-1 to C-8 as evidence.~~ Done (Phase 45, §2b).
 2. ~~Write the codec and contract-test it offline.~~ Done (`OpenAIResponsesWire`, §2b).
 3. After the smoke call (G-4), wire `LLM_PROVIDER=openai` in `investigate/providers.py`.
-4. Provide a key **locally** (O-2). Run the benchmark with `--provider` set to the real model. Measure accuracy, cost (C-9) and latency, with at most 3 prompt/model iterations (TASKS rule 4). Run E-01 for injection resistance.
+4. Provide a key **locally** (O-2). Run the benchmark's model mode (below; prepared 2026-10-25, not run). Measure accuracy, cost (C-9) and latency, with at most 3 prompt/model iterations (TASKS rule 4). Run E-01 for injection resistance.
 5. Choose the model (UD-3). Write the privacy notice (T-1001).
+
+## 3a. Benchmark model mode (prepared 2026-10-25; NOT run)
+
+`python -m tracewise.bench run --kind model --model ID --key-file PATH --authorization-ref REF --max-requests N
+[--case ID ...] [--reps N] --out DIR` runs the frozen cases through the product's own `HTTPProvider` and
+`OpenAIResponsesWire` (`src/tracewise/bench/model_provider.py`). It needs the T-605 approval and is owner-run only.
+Product selection is unchanged: `LLM_PROVIDER=openai` still refuses.
+
+- **Refused before the key is read:** under a test runner or CI (`PYTEST_CURRENT_TEST` or `CI` set); without an
+  authorisation reference; without an explicit model id; without `--max-requests`. The flag accepts 1 to 2000:
+  2000 is an implementation safety maximum on the flag, **not an approved spend budget**. The owner sets the cap
+  for each run as part of the T-605 approval.
+- **Key:** only from an owner-only regular file outside the repository. A symlink, a group- or world-readable file,
+  or one inside the repository is refused. The rules are shared with the smoke harness
+  (`src/tracewise/investigate/model_access.py`).
+- **Requests:** `max_retries=0`. A host-locked transport allows only POST to the recorded endpoint and stops at N
+  requests for the whole run. A refused request is never sent.
+- **Request-body cap: 256 KiB** (`model_provider.MAX_REQUEST_BYTES`), checked on the actual serialised body before
+  it reaches the network, every turn of every investigation. Not the smoke harness's 32 KiB, which fits its
+  synthetic few-hundred-byte prompts but not an evidence bundle of up to 24,000 characters. The investigation's own
+  caps put a conversation at about 135,000 characters plus JSON escaping (bundle, up to 12 tool results of 8,000,
+  12 argument sets of 1,024, a 2,000-character repair turn, the ~1.6 kB policy); the rest is room for the model's
+  short turns and replayed reasoning items. An over-cap request is refused unsent with a fixed message, and that run
+  becomes an `error` row (`RequestTooLarge`, never scored); the evaluation continues. A model that writes long
+  texts alongside its tool calls can reach the cap.
+- **Wall-clock deadline per request** (`investigate/deadline_http.py`, shared with the smoke harness). Each
+  request's total deadline is its own timeout, which the adapter sets to the investigation's remaining time, so no
+  request outlives the investigation's 120 s budget. Enforced at the socket layer: name resolution in a thread
+  abandoned at the deadline; connect, TLS handshake, every read and write clamped to the time left; a watchdog
+  that shuts the socket down once the clock passes the deadline, which stops a peer that trickles bytes. Bound: the
+  deadline plus the 20 ms watchdog interval plus scheduling jitter. Not covered: the OS scheduler, and local work
+  between requests (the investigation loop checks its own deadline before each step).
+- **When the cap is reached the evaluation stops** (`run_suite(budget=...)`). The run whose request was refused is
+  recorded as `interrupted` (its diagnosis, report and pre-pass are discarded, because its outcome reflects the
+  cap, not the model). Every analysis run not yet started is `interrupted` too. Completed runs keep their results.
+  `interrupted` runs are never scored: no points, no abstention credit, no metric denominators. The summary is
+  `complete: false`, `results.json` carries `interrupted`, the report opens with an **INCOMPLETE** notice saying the
+  metrics cover only completed runs, and the exit code is 1. Track A (pre-pass only) and P2 runs use no provider
+  and still run.
+- **Run identity:** `config_id` hashes the configuration (benchmark version, truth lock, provider and model, cases,
+  repetitions, slow cases, label; not the request cap) and is stable across equivalent runs. A complete evaluation
+  has `run_id == config_id`; one stopped by the cap has `run_id = <config_id>-interrupted`, so it never shares an
+  identifier with a complete one. Both ids are in `results.json` and `scores.json`; the report title of an
+  interrupted run ends in "(INCOMPLETE)", and re-scoring (`score RESULTS.json`) keeps both.
+- **Abstentions versus failures:** a provider or execution failure (`provider_failed`, `provider_timeout`,
+  `invalid_output`, `budget_exhausted`, `unproductive`) is still scored as an abstention under BENCHMARK §4
+  (unchanged), but the report counts these separately from abstentions the model chose, and lists them by reason.
+- **Output:** results and the report are labelled "model-based evaluation, not proven model accuracy", with the
+  model id, the authorisation reference and the request counts. Nothing is written if any output would contain
+  the key: the check uses a `SecretCanary` built when the key file is read (`investigate/model_access.py`), so the
+  CLI never reads the adapter's private key field. It runs on the exact bytes of `results.json`, `scores.json` and
+  `report.md` before any of them is written, and only those checked bytes are written and printed. An unexpected
+  error ends with `error: the evaluation stopped unexpectedly (<type>)` and exit 3: no traceback, no message,
+  nothing written. Run as `python -m tracewise.bench`, logging is JSON to stderr at WARNING through the shared
+  secret filter, with which the adapter registers the key; `main()` itself never replaces a caller's log handlers.
+  The model never receives `reference.yaml` or `truth.yaml`.
+- **Smoke harness versus benchmark caps:** the smoke harness (SMOKE-RUNBOOK §4) sends a fixed synthetic
+  conversation: at most 3 requests, a 32 KiB request body, a 256 KiB response, 2,048 output tokens, 30 s per step
+  and 90 s in total. The benchmark sends real evidence: N requests (owner-set), a 256 KiB request body, a 1 MB
+  response, 16,000 output tokens, and the investigation's 120 s per request. Both use the same wall-clock deadline
+  backend (`investigate/deadline_http.py`) and key-file rules.
+- **Cost and usage: what is enforced, and what is not.**
+  - *Hard:* the number of requests for the whole run (N; refused requests are never sent), with no retries.
+  - *Per request, before sending:* the body ≤256 KiB; `max_output_tokens` = 16,000, deliberately the
+    16,000-character answer cap (`schema.MAX_FINAL_CHARS`) sent as a token count, enforced by the provider and
+    including reasoning tokens; a total wall-clock deadline equal to the investigation's remaining time.
+  - *Per request, while and after reading:* the response body ≤1 MB; the answer text ≤16,000 characters.
+  - *Per investigation:* at most 12 tool calls and 16 iterations; a 200,000-token budget (input plus output) that
+    is checked after each response, so a single response can overshoot it before the investigation stops.
+  - *Input size:* the 256 KiB body cap is a hard limit in bytes; there is **no per-request input-token limit** (the
+    token count of 256 KiB depends on the content and the model's tokenizer).
+  - *Usage:* the provider's `input_tokens` and `output_tokens` are required in every response. A response without
+    them, an `incomplete` response, a refusal or any unknown shape fails closed as `provider_failed`. Usage is
+    recorded per run in the diagnosis and reported as mean tokens per analysis run.
+  - *Cost:* **not computed and not limited.** No prices are configured (G-6, C-9), so the benchmark reports tokens
+    only. **There is no hard token or spend ceiling for the whole run**: only the request cap. The worst case is
+    roughly N requests × (one request's input + up to 16,000 output tokens), and one request's input depends on the
+    conversation. A dollar bound needs the approved model's prices and an owner-chosen limit.
+- **Tests:** `tests/bench/test_model_mode.py` (mock transport only), plus the structural guards in
+  `tests/investigate/test_providers.py` and `tests/unit/test_github_client.py`.

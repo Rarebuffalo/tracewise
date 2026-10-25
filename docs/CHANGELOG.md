@@ -3,6 +3,40 @@
 > **Commit hashes in this file before 2026-10-20 (bb) are pre-rewrite hashes.** The history was rewritten once to
 > redact signed URLs before the first push; map them with [HISTORY-REWRITE.md](HISTORY-REWRITE.md).
 
+## Unreleased: guarded benchmark model mode (2026-10-25; prepared, not run)
+
+- `python -m tracewise.bench run --kind model` runs the frozen benchmark through the product's OpenAI adapter and
+  codec. It is owner-run only and needs the T-605 approval; product selection still refuses `LLM_PROVIDER=openai`.
+  It refuses under CI or a test runner, without an authorisation reference, model id or request cap, and with a
+  key file that is a symlink, group/world-readable or inside the repository. Retries are 0, a host-locked
+  transport enforces the request cap, outputs are labelled as model-based evaluation (not proven accuracy), and
+  nothing is written if any output would contain the key (docs/MODEL-ADAPTER.md §3a).
+- The key-file and authorisation-reference rules moved to `investigate/model_access.py`, shared with the smoke
+  harness (its behaviour and messages are unchanged).
+- Structural guards updated deliberately: `bench/model_provider.py` is the only place outside the adapter that
+  builds an `HTTPProvider`, and no product module imports it.
+- **Request-budget exhaustion** stops the evaluation instead of being scored: the cut-off run and every unstarted
+  analysis run are `interrupted` (never scored, no abstention credit); completed results are kept; the summary is
+  incomplete and the report says the metrics are not full-evaluation results. The report also separates
+  abstentions that were provider or execution failures from abstentions the model chose (scoring unchanged).
+- The output leak check uses a `SecretCanary` created from the key file, not the adapter's private key field.
+- Cost limits documented as they are (docs/MODEL-ADAPTER.md §3a): a hard request cap only; no token or spend
+  ceiling for the whole run; the 2000 maximum on `--max-requests` is a safety bound, not an approved budget.
+- **Stage 3 hardening:** a real wall-clock deadline per request (the socket-level deadline backend moved from the
+  smoke harness to `investigate/deadline_http.py`, unchanged for the harness), so a trickling response cannot
+  outlive the investigation's budget; a 256 KiB request-body cap checked on the serialised body before sending (an
+  over-cap request is never sent and its run is an error row); and `run_id = <config_id>-interrupted` for an
+  evaluation stopped by the cap, while equivalent complete runs keep one stable id.
+- **Stage 4A:** the model mode's leak check runs on the exact bytes it then writes and prints; an unexpected error
+  ends with a fixed, content-free message (no traceback, nothing written); `python -m tracewise.bench` logs through
+  the shared secret filter at WARNING, without `main()` replacing a caller's handlers. Tests cover proxy variables,
+  redirects and a transport error whose message contains the key.
+- **Smoke cost wording:** SMOKE-RUNBOOK §4 now separates hard local limits (3 requests, 32 KiB, 256 KiB, deadlines,
+  host) from the provider-enforced 2,048 output-token cap and from estimates (about 4,500 input tokens; any dollar
+  figure). There is no input-token limit. A test now checks that every outgoing smoke request carries
+  `max_output_tokens: 2048`, and the evidence records `reasoning_tokens` and `cached_tokens` when present.
+- No key was used and no request was made: every test uses a mock transport or a loopback socket.
+
 ## Unreleased: App authentication failures are no longer treated as uninstalls (2026-10-24)
 
 - **Fix:** a 401 on the installation-token mint means GitHub rejected the App JWT (a wrong, deleted or mismatched

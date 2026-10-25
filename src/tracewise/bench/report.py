@@ -25,7 +25,12 @@ def render_report(scores: dict[str, Any]) -> str:
     s = scores["summary"]
     prov = scores["provider"]
     scripted = prov["kind"] == "scripted"
-    out = [f"# Tracewise synthetic benchmark: run `{scores['run_id']}`", ""]
+    title = f"# Tracewise synthetic benchmark: run `{scores['run_id']}`"
+    if s["counts"].get("interrupted"):
+        title += " (INCOMPLETE)"
+    out = [title, ""]
+    if scores.get("config_id") and scores["config_id"] != scores["run_id"]:
+        out.append(f"- Configuration `{scores['config_id']}`; this run is not a complete evaluation of it")
     out.append(f"- Benchmark version {scores['benchmark_version']}; truth lock `{scores['truth_lock'][:16]}`")
     out.append(f"- Provider: `{prov['name']}` ({prov['kind']}); data: **{scores['data_kind']}**")
     if scripted:
@@ -35,22 +40,45 @@ def render_report(scores: dict[str, Any]) -> str:
             "show that the harness, pipeline and scorer behave as designed; they are not evidence of diagnostic quality "
             "and must not be quoted as such. Real-model results require T-605."
         )
+    else:
+        req = prov.get("requests") or {}
+        out += [
+            "",
+            "> **Model-based evaluation, not proven model accuracy.** "
+            + str(prov.get("notice") or "One run of one model on synthetic cases."),
+            "",
+            f"- Model `{prov.get('model')}`; authorisation `{prov.get('authorization_ref')}`; retries "
+            f"{prov.get('max_retries')}; requests sent {req.get('sent')} of at most {req.get('max')}"
+            + ("; **request budget exhausted**" if req.get("budget_exhausted") else ""),
+        ]
+    if s["counts"].get("interrupted"):
+        out += [
+            "",
+            f"> **INCOMPLETE: stopped by the request budget.** {s['counts']['interrupted']} run(s) were cut off or never "
+            "started; they are listed as `interrupted` and are not scored. The metrics below cover only the runs that "
+            "completed and are **not** full-evaluation results.",
+        ]
     c = s["counts"]
     runs_row = " | ".join(
-        str(c[k]) for k in ("required_runs", "executed", "errored", "missing", "not_executed", "not_applicable")
+        str(c.get(k, 0))
+        for k in ("required_runs", "executed", "errored", "missing", "not_executed", "interrupted", "not_applicable")
     )
     outcome_keys = ("correct", "partial", "justified_abstention", "unjustified_abstention", "wrong", "overconfident")
     out += [
         "",
         "## Runs",
         "",
-        "| required | executed | errored | missing | not executed | not applicable (P2) | complete |",
-        "|---|---|---|---|---|---|---|",
+        "| required | executed | errored | missing | not executed | interrupted (budget) | not applicable (P2) | complete |",
+        "|---|---|---|---|---|---|---|---|",
         f"| {runs_row} | {'yes' if s['complete'] else '**no**'} |",
         "",
         "| " + " | ".join(k.replace("_", " ") for k in outcome_keys) + " |",
         "|---|---|---|---|---|---|",
         "| " + " | ".join(str(c[k]) for k in outcome_keys) + " |",
+        "",
+        f"Abstentions that were provider or execution failures, not the model choosing to abstain: "
+        f"{s.get('abstentions_from_execution_failures', 0)} (scored as abstentions under BENCHMARK §4; by reason under "
+        "Metrics).",
     ]
     b = s["track_b"]
     out += [

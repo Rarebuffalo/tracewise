@@ -21,7 +21,7 @@ which is approved separately.
 | A-4 | Confirmation of the OpenAI account's data-retention and training settings (C-8) | The owner, in writing. The harness also sends `store: false` |
 | A-5 | Approval of the synthetic request content in §3 | The owner, in writing |
 | A-6 | Approval of the exact command in §2 | The owner, in writing |
-| A-7 | The expected cost and request limit in §4 | The owner fills in the per-token prices (G-6) and accepts the bound |
+| A-7 | The expected cost and request limit in §4 | The owner fills in the per-token prices (G-6) and accepts the resulting **estimate** (§4: only the request count, sizes and times are hard limits) |
 
 ### Required after the smoke call, before a real evaluation
 
@@ -81,16 +81,32 @@ Every request uses the product's codec and adapter unchanged, with `store: false
 
 ## 4. Limits and cost
 
-| Limit | Value |
-|---|---|
-| HTTP requests | **at most 3** (enforced by the guarded transport); `max_retries = 0` |
-| Request size | 32 KiB |
-| Response size | 256 KiB |
-| `max_output_tokens` | 2,048 per request |
-| Time | **Wall-clock deadlines:** 30 s per step and 90 s for the whole run (the overall deadline is fixed at the start and never restarts; each step's deadline is the earlier of the two). See §4a. |
-| Host | only `POST https://api.openai.com/v1/responses`; any other URL is refused in-process; no redirects; proxy environment ignored |
+| Limit | Value | Kind |
+|---|---|---|
+| HTTP requests | **at most 3**; `max_retries = 0`; a refused request is never sent | **Hard, local** (guarded transport) |
+| Request body | 32 KiB | **Hard, local**, in bytes; refused unsent above it |
+| Response body | 256 KiB | **Hard, local** |
+| Time | **Wall-clock deadlines:** 30 s per step and 90 s for the whole run (the overall deadline is fixed at the start and never restarts; each step's deadline is the earlier of the two). See §4a. | **Hard, local** |
+| Host | only `POST https://api.openai.com/v1/responses`; any other URL is refused in-process; no redirects; proxy environment ignored | **Hard, local** |
+| `max_output_tokens` | 2,048, sent on every request (test `test_every_outgoing_request_carries_the_2048_output_token_cap`) | **Enforced by the provider**, not locally. A response cut off by it comes back `incomplete` and is rejected, but its tokens are still billed |
+| Input tokens | about 1,500 per request expected | **Estimate only.** There is no input-token limit: only the byte cap above |
 
-**Cost bound:** at most 3 requests × (under 1,500 input tokens + at most 2,048 output tokens), so under 4,500 input and 6,144 output tokens in total. The prices are not recorded (G-6). The owner multiplies these bounds by the approved model's prices (A-7).
+**Input tokens are not limited.** No local token limit is possible with this design: there is no tokenizer for the
+(not yet chosen) model in the project, the token count of a byte depends on that tokenizer, and step 3 replays
+opaque reasoning items (`encrypted_content`) whose billed size is not documented in the recorded contract. The
+32 KiB byte cap bounds request size, not tokens.
+
+**Reasoning tokens:** the recorded contract (R-3) quotes `max_output_tokens` only as "an upper bound for the number
+of tokens…", and records `usage.output_tokens_details.reasoning_tokens` as a breakdown under output tokens (R-11).
+Whether the 2,048 cap includes reasoning tokens, and how they are billed, is **not established** by the recorded
+evidence for any specific model. The run records `reasoning_tokens` and `cached_tokens` per exchange (§5) so the
+observation can answer it.
+
+**Cost: an estimate, not a guarantee.** Expected usage is about 3 × 1,500 = 4,500 input tokens and at most
+3 × 2,048 = 6,144 output tokens (if the provider applies the cap to everything it bills as output). Neither is a
+ceiling enforced by this harness, so no dollar figure derived from them is a hard limit. The prices are not
+recorded (G-6). For A-7 the owner supplies the approved model's input and output prices (and any cached-input or
+tier price that applies) and accepts the resulting figure **as an estimate**.
 
 ## 4a. How the deadlines are enforced (Phase 49)
 
@@ -130,7 +146,7 @@ recorded as `deadline_exceeded: true`, with no response shape and no claim of co
   - request byte size, top-level keys, `store`, tool count, `tool_choice`, `max_output_tokens`, input item types;
   - HTTP status and response byte size, top-level keys, `object`, `status`, `incomplete_details.reason`;
   - output item types: for reasoning items, whether `encrypted_content` is present and the summary part count; for function calls, the call id **length**, a known-tool flag, and whether arguments are a string;
-  - usage token counts;
+  - usage token counts (`input_tokens`, `output_tokens`, `total_tokens`, and the integer breakdowns `reasoning_tokens` and `cached_tokens` when present);
   - error `code`, `type` and key names, and rate-limit header **names**.
 
 Enum-like values are recorded only if they match `[a-z0-9_.]{1,64}`; anything else becomes `<other>`.
@@ -172,6 +188,6 @@ An exchange that did not complete is never recorded with a response shape.
 
 ## 7. No other network activity or GitHub action
 
-- The harness imports the codec and adapter only. It reads no database, GitHub App key or webhook secret, and no GitHub code path is reachable from it.
+- The harness imports only the model-side modules: the codec and adapter, the tool declarations, the provider types, and (since 2026-10-25) the shared key-file rules (`investigate/model_access.py`) and wall-clock deadline backend (`investigate/deadline_http.py`, moved out of the harness unchanged). It reads no database, GitHub App key or webhook secret, and no GitHub code path is reachable from it.
 - The guarded transport refuses every URL other than the endpoint, and the HTTP client ignores proxy environment variables.
 - Run it in a shell with no `DATABASE_URL`, GitHub App credentials or other tokens set. Optionally, observe the process's connections at the OS level (for example `ss -tp`): the only peer should be `api.openai.com:443`.

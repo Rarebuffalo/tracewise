@@ -157,17 +157,75 @@ def test_key_file_rules(tmp_path: Path) -> None:
 def test_guarded_transport_allows_only_the_recorded_endpoint_and_budget() -> None:
     import httpx
 
-    g = S.GuardedTransport(httpx.MockTransport(lambda r: httpx.Response(200, json={})), S.Deadline())
+    forwarded: list[httpx.Request] = []
+
+    def inner(req: httpx.Request) -> httpx.Response:
+        forwarded.append(req)
+        return httpx.Response(200, json={})
+
+    g = S.GuardedTransport(httpx.MockTransport(inner), S.Deadline())
     with pytest.raises(S.Refused):
         g.handle_request(httpx.Request("POST", "https://example.invalid/v1/responses", content=b"{}"))
     with pytest.raises(S.Refused):
         g.handle_request(httpx.Request("GET", S.ENDPOINT))
     with pytest.raises(S.Refused):
         g.handle_request(httpx.Request("POST", S.ENDPOINT, content=b"x" * (S.MAX_REQUEST_BYTES + 1)))
-    for _ in range(S.MAX_REQUESTS):
+    assert forwarded == [] and g.sent == 0  # destination, method and size refusals never reach the inner transport
+    at_cap = b'{"p":"' + b"x" * (S.MAX_REQUEST_BYTES - 8) + b'"}'
+    assert len(at_cap) == S.MAX_REQUEST_BYTES
+    g.handle_request(httpx.Request("POST", S.ENDPOINT, content=at_cap))  # exactly at the cap: forwarded
+    for _ in range(S.MAX_REQUESTS - 1):
         g.handle_request(httpx.Request("POST", S.ENDPOINT, content=b"{}"))
     with pytest.raises(S.Refused, match="budget"):
         g.handle_request(httpx.Request("POST", S.ENDPOINT, content=b"{}"))
+    assert len(forwarded) == g.sent == S.MAX_REQUESTS  # the over-budget request was not forwarded either
+
+
+def test_every_outgoing_request_carries_the_2048_output_token_cap() -> None:
+    """Through the real path: run_steps → product adapter → OpenAIResponsesWire.encode → guarded transport, captured
+    as serialised bytes by the offline transport (no network). Every one of the three requests carries the cap, and
+    the recorded evidence reports the same value per exchange."""
+    args = S.parse(["--offline", "pass", "--model", "offline-model"])
+    deadline = S.Deadline(lambda: 0.0)
+    provider, guarded, _ = S.build(args, {}, deadline)
+    try:
+        assert S.run_steps(S.Run(provider, guarded, deadline, 60.0)) == "pass"
+    finally:
+        provider.close()
+    bodies = [json.loads(b) for b in guarded.inner.bodies]
+    assert len(bodies) == S.MAX_REQUESTS == 3
+    assert [b["max_output_tokens"] for b in bodies] == [2048, 2048, 2048]
+    assert [rec["request"]["max_output_tokens"] for rec in guarded.records] == [2048, 2048, 2048]
+
+
+def test_usage_breakdowns_are_recorded_as_integers_only() -> None:
+    """Reasoning and cached token counts (R-11) are recorded when present, so the authorised run can show whether
+    reasoning tokens fall inside `output_tokens`; anything that is not an integer is ignored, never echoed."""
+    usage = {
+        "input_tokens": 40,
+        "output_tokens": 30,
+        "total_tokens": 70,
+        "output_tokens_details": {"reasoning_tokens": 24},
+        "input_tokens_details": {"cached_tokens": 0},
+    }
+    shape = S.response_shape(200, json.dumps({**S.OK, "usage": usage}).encode(), httpx_headers())
+    assert shape["usage"] == {
+        "input_tokens": 40,
+        "output_tokens": 30,
+        "total_tokens": 70,
+        "reasoning_tokens": 24,
+        "cached_tokens": 0,
+    }
+    odd = {**usage, "output_tokens_details": {"reasoning_tokens": "LEAK-text"}, "input_tokens_details": "x"}
+    shape = S.response_shape(200, json.dumps({**S.OK, "usage": odd}).encode(), httpx_headers())
+    assert "reasoning_tokens" not in shape["usage"] and "cached_tokens" not in shape["usage"]
+    assert "LEAK-text" not in json.dumps(shape)
+
+
+def httpx_headers() -> object:
+    import httpx
+
+    return httpx.Headers({})
 
 
 # ------------------------------------------------------------------ isolation (cannot run by accident)
