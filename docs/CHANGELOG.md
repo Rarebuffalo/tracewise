@@ -3,6 +3,18 @@
 > **Commit hashes in this file before 2026-10-20 (bb) are pre-rewrite hashes.** The history was rewritten once to
 > redact signed URLs before the first push; map them with [HISTORY-REWRITE.md](HISTORY-REWRITE.md).
 
+## Unreleased: Gemini native `generateContent` codec (2026-10-26; offline only, not run)
+
+- `investigate/gemini_generate.py`: a separate wire codec for the native API, reached only through the benchmark model
+  mode (`--api gemini-generate-content`; the default remains `openai-responses`). Product selection is unchanged and
+  still refuses `LLM_PROVIDER=openai`; Gemini is not a product option.
+- Fail-closed decoding (one candidate, `STOP` only, supported part kinds only, required usage), id-only call pairing
+  with no invented ids, and verbatim replay of the model's own content as an HMAC-authenticated, instance- and
+  model-bound `SignedTurn` that must match the validated tool calls and is never displayed (docs/MODEL-ADAPTER.md §3b).
+- `Diagnosis.usage.provider` accepts `gemini` (contracts.py, SPEC example); provider-name types include `gemini`.
+- Structural guards widened deliberately to exactly two offline codecs, imported only by the benchmark model mode.
+- 92 new tests with synthetic fixtures and mock transports; no key was used and no request was made.
+
 ## Unreleased: guarded benchmark model mode (2026-10-25; prepared, not run)
 
 - `python -m tracewise.bench run --kind model` runs the frozen benchmark through the product's OpenAI adapter and

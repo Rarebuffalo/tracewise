@@ -218,3 +218,53 @@ Product selection is unchanged: `LLM_PROVIDER=openai` still refuses.
     conversation. A dollar bound needs the approved model's prices and an owner-chosen limit.
 - **Tests:** `tests/bench/test_model_mode.py` (mock transport only), plus the structural guards in
   `tests/investigate/test_providers.py` and `tests/unit/test_github_client.py`.
+
+## 3b. Gemini native `generateContent` codec (2026-10-26; offline only, NOT run)
+
+`src/tracewise/investigate/gemini_generate.py` (`GeminiGenerateContentWire`), written against the recorded contract
+in `research/gemini-api-reference-2026-10-26/README.md` (Addendum A). It is reached only through the benchmark's model
+mode, `--api gemini-generate-content` (`--api` defaults to `openai-responses`, the unchanged OpenAI path). Product
+selection does not know it: `LLM_PROVIDER` accepts only `openai` (refused) and `fake`. Tests:
+`tests/investigate/test_gemini_generate.py` (synthetic fixtures, mock transports). Nothing has been observed from the
+real endpoint.
+
+- **Endpoint and key:** `POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent` with
+  the key only in `x-goog-api-key`. The model id is explicit and restricted to lowercase dotted or dashed names, so it
+  cannot alter the path; the host lock compares the whole URL, model included. All transport guards are the shared
+  ones (§3a): request cap, 256 KiB body cap, per-request deadline, no redirects, no proxies, zero retries.
+- **Request:** system messages → `systemInstruction`; user messages → `user` content; tools →
+  `functionDeclarations` with `toolConfig` mode `AUTO`; the tool-free final step keeps the declarations the history
+  uses and sets mode `NONE`; `generationConfig` `maxOutputTokens` (the answer cap) and `candidateCount: 1`.
+  `maxOutputTokens` semantics are undocumented for this API (NG-1), so it is a requested upper bound, not a
+  guarantee. Per-model maxima are documented (`outputTokenLimit` from `models.get`; 65,536-token output budgets for
+  the Gemini 3 and 2.5 families on the token guide), but not the default when the field is unset, nor whether it
+  includes thinking tokens here (research record, Addendum B). No thinking configuration is sent (undocumented here).
+- **Response (fail closed):** exactly one candidate; finish reason `STOP` only, every other documented value and
+  any unknown or missing one refused; a prompt block refused; parts limited to `text`, `thought`, `thoughtSignature`
+  and `functionCall` (anything else refused); thought parts are never answer text; usage requires
+  `promptTokenCount` and `candidatesTokenCount`, with `thoughtsTokenCount` counted as output.
+- **Call ids:** a function call without an id is refused (never invented, NG-4); duplicate ids are refused; results
+  are paired by id only: an unmatched, missing or duplicate result is refused.
+- **Replay boundary (owner policy, 2026-10-26):** the model's own returned content is kept verbatim so thought
+  signatures stay where the model put them (N-15, N-16). It travels in `Message.replay`, which skips P-2 redaction,
+  only as a `SignedTurn` that the same codec instance produced for the same model, authenticated with an HMAC key
+  that never leaves the instance, and only on a turn whose validated `tool_calls` match its function calls exactly
+  (ids, names, arguments, order). It is also bound to its exchange: the MAC covers a digest of the exact request
+  that produced it, and it is accepted only directly after that same history, so it cannot be repeated in the same
+  conversation. It is bound to its conversation as well: every request without a signed turn starts a new
+  conversation with a fresh random epoch, and a turn is accepted only in the epoch that minted it, so a stale turn is
+  refused even when an identical history is reconstructed (the same benchmark case run again). Decoding consumes the
+  request binding, so a second response for one request is never replayable. The codec handles one exchange at a
+  time; it is not for concurrent use. A
+  forged, modified, reused, other-instance, other-model or OpenAI item is refused, and the OpenAI codec refuses a
+  `SignedTurn`. It is never displayed (`repr` masked) and refuses JSON serialisation, pickling and copying; it never
+  reaches the diagnosis, results or report. Tools still run only through the investigator's validated `tool_calls`.
+- **Known limits:** the role of function-response content is `user` (NG-3: the only non-model role the reference
+  allows); a signature on a final text answer is not replayed if the investigator asks for a repair turn, so a
+  provider that then demands it ends `provider_failed`; `generateContent` error bodies are undocumented (NG-5), so
+  errors are classified by HTTP status only and no 429 is treated as permanent; the tool declarations reuse the
+  product's JSON Schema (`additionalProperties`, `maxLength`, `minimum`) under `parameters`, while the reference says
+  only "a subset of the OpenAPI schema is supported", so a refusal of those keywords would be an HTTP 400 and fail
+  closed; `toolUsePromptTokenCount` is not counted as input (no built-in tools are used).
+- **Contract change:** `Diagnosis.usage.provider` gained the value `gemini` (contracts.py and the SPEC example), used
+  only by this benchmark path.

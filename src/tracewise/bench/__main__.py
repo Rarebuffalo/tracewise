@@ -10,6 +10,7 @@ except `run --kind model` (below), which is owner-run only.
                                  Refused under a test runner or CI, without a written authorisation reference, or
                                  with a key file that is a symlink, group/world-readable or inside the repository.
                                  Retries 0; at most N requests in total. Owner-run only (T-605 approval).
+                                 --api openai-responses (default) or gemini-generate-content (offline-tested only).
   score RESULTS.json --out DIR   re-score saved results
   meta --recorded DIR [--out F]  META cases P-01..P-03 from anonymous metadata recorded earlier, read in place from
                                  DIR (bench/meta.py RECORDED_INDEX). Separate from the synthetic benchmark; no network
@@ -74,6 +75,7 @@ def _run_model(a: argparse.Namespace, env: Mapping[str, str], inner: Any) -> int
             max_requests=a.max_requests,
             env=env,
             inner=inner,
+            api=a.api or "openai-responses",
         )
     except AccessRefused as e:
         print(f"refused: {e}", file=sys.stderr)  # fixed text; never a key or a response
@@ -122,6 +124,11 @@ def main(argv: list[str] | None = None, *, env: Mapping[str, str] | None = None,
     r.add_argument("--key-file", help="model kind only: owner-only key file outside the repository")
     r.add_argument("--authorization-ref", help="model kind only: the owner's written authorisation reference")
     r.add_argument("--max-requests", type=int, help="model kind only: hard cap on requests for the whole run")
+    r.add_argument(
+        "--api",
+        choices=("openai-responses", "gemini-generate-content"),
+        help="model kind only: wire codec (default openai-responses); gemini-generate-content is offline-tested only",
+    )
     r.add_argument("--case", action="append", dest="cases")
     r.add_argument("--reps", type=int, default=3)
     r.add_argument("--include-slow", action="store_true")
@@ -162,7 +169,7 @@ def main(argv: list[str] | None = None, *, env: Mapping[str, str] | None = None,
         print("\n".join(diffs) or ("logs reproduce exactly" if a.check else "logs written"))
         return 1 if diffs else 0
     if a.cmd == "run":
-        model_opts = (a.model, a.key_file, a.authorization_ref, a.max_requests)
+        model_opts = (a.model, a.key_file, a.authorization_ref, a.max_requests, a.api)
         if a.kind == "scripted" and (a.provider is None or any(o is not None for o in model_opts)):
             ap.error("--kind scripted needs --provider and takes no model options")
         if a.kind == "model" and a.provider is not None:

@@ -258,7 +258,7 @@ class Limits(_Strict):
 
 
 class Usage(_Strict):
-    provider: Literal["openai", "fake", "none"] = "none"
+    provider: Literal["openai", "gemini", "fake", "none"] = "none"  # gemini: the benchmark model mode only
     model: str | None = None
     input_tokens: int = 0
     output_tokens: int = 0

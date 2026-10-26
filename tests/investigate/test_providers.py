@@ -61,8 +61,11 @@ def test_no_product_code_path_can_reach_a_real_model() -> None:
     codecs = [
         p for p in src.rglob("*.py") if re.search(r"class \w*Wire\b|WireCodec\)", p.read_text()) and p.name != "http_adapter.py"
     ]
-    # Phase 45D: exactly one vendor codec ships, offline-tested only; product selection never wires it.
-    assert [p.name for p in codecs] == ["openai_responses.py"]
+    # Phase 45D, widened deliberately on 2026-10-26: exactly two vendor codecs ship, both offline-tested only; product
+    # selection wires neither, and only the benchmark's model mode imports them.
+    assert sorted(p.name for p in codecs) == ["gemini_generate.py", "openai_responses.py"]
+    assert mentioning(r"\bgemini_generate\b", besides="gemini_generate.py") == ["bench/model_provider.py"]
     selection = (src / "investigate" / "providers.py").read_text()
     assert "openai_responses" not in selection.split('"""', 2)[2] and "OpenAIResponsesWire" not in selection
     assert "model_provider" not in selection and "HTTPProvider" not in selection
+    assert "gemini" not in selection.lower()

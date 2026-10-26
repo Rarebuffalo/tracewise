@@ -171,7 +171,7 @@ Version 2.0, 2026-10-18. Supersedes all earlier specs (see `research/README.md` 
   "attribution": {"trigger_sha": "…", "trigger_changed_files": ["README.md"], "touches_implicated": "true | false | null", "statement": "…", "basis": ["trigger_diff"]},
   "confidence": {"band": "high|medium|low", "basis": ["…"]},
   "limits": {"log_truncated": false, "files_skipped": [], "budget_exhausted": false, "diff_truncated": false},
-  "usage": {"provider": "openai|fake", "model": "…", "input_tokens": 0, "output_tokens": 0, "tool_calls": 0, "latency_ms": 0},
+  "usage": {"provider": "openai|gemini|fake", "model": "…", "input_tokens": 0, "output_tokens": 0, "tool_calls": 0, "latency_ms": 0},
   "inconclusive_reason": "fixed code, e.g. location_not_examined | provider_timeout | budget_exhausted | null",
   "validation_flags": ["fixed codes for what the validator stripped or downgraded"]
 }

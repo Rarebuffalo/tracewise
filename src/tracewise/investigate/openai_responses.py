@@ -30,7 +30,7 @@ PERMANENT_429_TYPES = frozenset({"insufficient_quota"})
 
 
 class OpenAIResponsesWire:
-    name: Literal["openai", "fake"] = "openai"
+    name: Literal["openai", "gemini", "fake"] = "openai"
     endpoint = ENDPOINT
 
     def auth_headers(self, key: str) -> dict[str, str]:

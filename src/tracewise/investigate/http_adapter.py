@@ -62,7 +62,7 @@ class ProviderUnavailable(ProviderError):
 
 
 class WireCodec(Protocol):
-    name: Literal["openai", "fake"]
+    name: Literal["openai", "gemini", "fake"]
     endpoint: str
 
     def auth_headers(self, key: str) -> dict[str, str]: ...
@@ -120,7 +120,7 @@ class HTTPProvider:
         self._rnd = rnd or random.Random()  # noqa: S311 - backoff jitter only
 
     @property
-    def name(self) -> Literal["openai", "fake"]:
+    def name(self) -> Literal["openai", "gemini", "fake"]:
         return self.codec.name
 
     @property

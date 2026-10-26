@@ -100,7 +100,10 @@ def test_sec01_model_mode_names_no_host_and_builds_only_a_locked_client() -> Non
     # The chain: host lock, body cap and request cap → per-request wall-clock deadline → the deadline socket backend.
     assert "network = inner or deadline_http.DeadlineHTTPTransport(deadline)" in provider
     assert "timed = deadline_http.RequestDeadlineTransport(network, deadline)" in provider
-    assert "EndpointBudgetTransport(timed, ENDPOINT, max_requests, max_request_bytes=MAX_REQUEST_BYTES)" in provider
+    compact = "".join(provider.split())
+    # The exact endpoint is the chosen codec's (for Gemini it embeds the validated model id); the lock compares the URL.
+    assert "EndpointBudgetTransport(timed,codec.endpoint,max_requests,max_request_bytes=MAX_REQUEST_BYTES)" in compact
+    assert "HTTPProvider(codec, key, config, client=client)" in provider
     assert "trust_env=False" in (SRC / "investigate" / "deadline_http.py").read_text()
 
 

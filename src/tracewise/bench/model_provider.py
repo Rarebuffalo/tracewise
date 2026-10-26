@@ -1,4 +1,8 @@
-"""Benchmark model mode (T-605 preparation): the product's own adapter and OpenAI codec, owner-run, guarded.
+"""Benchmark model mode (T-605 preparation): the product's own adapter with an explicit wire codec, owner-run, guarded.
+
+Codecs (`--api`): `openai-responses` (default; `OpenAIResponsesWire`) or `gemini-generate-content`
+(`GeminiGenerateContentWire`, offline-tested only). The exact endpoint comes from the codec; for Gemini it embeds the
+explicit model id, and the host lock compares the whole URL.
 
 This is the only module outside `investigate/http_adapter.py` that constructs an `HTTPProvider`. It is reached only
 from `python -m tracewise.bench run --kind model`; product provider selection (`investigate/providers.py`) still
@@ -32,10 +36,12 @@ import httpx
 from tracewise.bench.model import CaseSpec, Reference
 from tracewise.bench.providers import ProviderFactory
 from tracewise.investigate import deadline_http, model_access
-from tracewise.investigate.http_adapter import AdapterConfig, HTTPProvider
-from tracewise.investigate.openai_responses import ENDPOINT, OpenAIResponsesWire
+from tracewise.investigate.gemini_generate import GeminiGenerateContentWire
+from tracewise.investigate.http_adapter import AdapterConfig, HTTPProvider, WireCodec
+from tracewise.investigate.openai_responses import OpenAIResponsesWire
 from tracewise.investigate.provider import Provider
 
+APIS = ("openai-responses", "gemini-generate-content")
 MAX_REQUESTS_CEILING = 2000  # a sanity bound on the flag; the owner sets the actual cap for each run
 # Request-body cap. Not the smoke harness's 32 KiB: its prompts are a few hundred bytes, while the evidence bundle
 # alone may be 24,000 characters (prompt.MAX_BUNDLE_CHARS). The investigation's own caps bound the conversation:
@@ -57,6 +63,7 @@ class ModelRun:
     model: str
     authorization_ref: str
     leak_check: model_access.SecretCanary  # checks outputs for the key; never exposes it
+    api: str = "openai-responses"
 
     # `bench.harness.RunBudget`: the harness stops the evaluation once the cap is reached.
     def exhausted(self) -> bool:
@@ -82,6 +89,7 @@ class ModelRun:
         t = self.transport
         return {
             "model": self.model,
+            "api": self.api,
             "authorization_ref": self.authorization_ref,
             "max_retries": 0,
             "requests": {
@@ -109,6 +117,7 @@ def build_model_run(
     env: Mapping[str, str],
     inner: httpx.BaseTransport | None = None,
     repo_root: Path = model_access.REPO_ROOT,
+    api: str = "openai-responses",
 ) -> ModelRun:
     """Every check runs before the key is read or a client exists. `inner` is a test seam for a mock transport; the
     automation refusal applies regardless, so tests pass an explicit empty `env`."""
@@ -120,15 +129,18 @@ def build_model_run(
         raise model_access.AccessRefused(f"--max-requests must be between 1 and {MAX_REQUESTS_CEILING}")
     if key_file is None:
         raise model_access.AccessRefused("a key file is required")
+    if api not in APIS:
+        raise model_access.AccessRefused("--api must be openai-responses or gemini-generate-content")
     try:
         config = AdapterConfig(model, max_retries=0)  # validates the model id shape
+        codec: WireCodec = OpenAIResponsesWire() if api == "openai-responses" else GeminiGenerateContentWire(model)
     except ValueError:
         raise model_access.AccessRefused("model id is malformed") from None
     key = model_access.read_key_file(key_file, repo_root=repo_root)
     deadline = deadline_http.Deadline()
     network = inner or deadline_http.DeadlineHTTPTransport(deadline)  # `inner`: a test seam for a mock transport
     timed = deadline_http.RequestDeadlineTransport(network, deadline)
-    transport = model_access.EndpointBudgetTransport(timed, ENDPOINT, max_requests, max_request_bytes=MAX_REQUEST_BYTES)
+    transport = model_access.EndpointBudgetTransport(timed, codec.endpoint, max_requests, max_request_bytes=MAX_REQUEST_BYTES)
     client = httpx.Client(transport=transport, follow_redirects=False, trust_env=False)
-    provider = HTTPProvider(OpenAIResponsesWire(), key, config, client=client)
-    return ModelRun(provider, transport, model, ref, model_access.SecretCanary(key))
+    provider = HTTPProvider(codec, key, config, client=client)
+    return ModelRun(provider, transport, model, ref, model_access.SecretCanary(key), api)
