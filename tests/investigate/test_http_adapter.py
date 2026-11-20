@@ -19,6 +19,7 @@ from tracewise.analysis.diagnose import diagnose
 from tracewise.contracts import Status
 from tracewise.investigate.http_adapter import (
     AdapterConfig,
+    CodecCapabilities,
     HTTPProvider,
     ProviderAuthError,
     ProviderRequestError,
@@ -44,6 +45,7 @@ class TestWire:
     __test__ = False
     name: Literal["openai", "fake"] = "fake"
     endpoint = ENDPOINT
+    capabilities = CodecCapabilities(tool_choice_none=True, replay_scope="tool_turns", usage_breakdown=False)
 
     def auth_headers(self, key: str) -> dict[str, str]:
         return {"authorization": f"Bearer {key}"}

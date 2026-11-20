@@ -13,6 +13,7 @@ from tracewise.context.paths import UnsafePath, validate_sha
 from tracewise.context.source import CodeSource, Limits, UnavailableSource
 from tracewise.github import errors as gh_err
 from tracewise.github.client import RepoClient
+from tracewise.observe import event
 
 log = logging.getLogger(__name__)
 
@@ -54,7 +55,10 @@ def open_code_context(
             except (gh_err.GitHubPermanent, gh_err.GitHubRetryable) as e:
                 reason = f"git: {git_error or 'not attempted'}; contents API: {type(e).__name__}"
                 log.warning("code context unavailable", extra={"tw": {"reason": reason}})
-                source = UnavailableSource(head_sha, reason)
+                transient = isinstance(e, gh_err.GitHubRetryable)  # the code exists but could not be reached now
+                if transient:
+                    event(log, "context.source_unavailable", logging.WARNING, stage="collect", error_type=type(e).__name__)
+                source = UnavailableSource(head_sha, reason, transient=transient)
         log.info("code context opened", extra={"tw": {"kind": source.kind}})
         # Exceptions raised by the caller propagate from here; the ExitStack removes the workspace.
         yield source

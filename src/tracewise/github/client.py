@@ -16,10 +16,17 @@
   **no** Authorization header and follows no further redirects. Bodies are streamed with a cap.
 * JSON bodies are capped (`max_json_bytes`); pagination follows `Link: rel="next"` only on the API
   host and up to `max_pages`.
+* Attempt deadline (O-2): a `RepoClient` bound to a budget (the attempt's `AttemptDeadline`, or anything with
+  `remaining()`) runs every request it makes, including the token mint behind it, under that budget. No request
+  starts with less than `MIN_REQUEST_S` left (`DeadlineExhausted`, nothing sent); connect and read timeouts are cut to
+  what is left; a body still arriving when the budget ends is abandoned as a transport failure; inline retries and
+  rate-limit waits happen only if they end with time to spare. The budget never extends a client limit.
 """
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import itertools
 import json
 import logging
@@ -28,7 +35,7 @@ import re
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 from urllib.parse import quote, urlsplit
 
 import httpx
@@ -68,6 +75,27 @@ class Limits:
     connect_timeout_s: float = 5.0
 
 
+class Budget(Protocol):
+    """What the client needs from a deadline: the seconds left (`analysis.attempt.AttemptDeadline` satisfies it)."""
+
+    def remaining(self) -> float: ...
+
+
+# O-2: no request starts with less than this left; a GitHub call cannot do useful work in less.
+MIN_REQUEST_S = 2.0
+_BUDGET: contextvars.ContextVar[Budget | None] = contextvars.ContextVar("tracewise_github_budget", default=None)
+
+
+@contextlib.contextmanager
+def budget(b: Budget | None) -> Iterator[None]:
+    """Run the enclosed GitHub calls under `b` (None: client limits only). Nested budgets: the inner one applies."""
+    token = _BUDGET.set(b)
+    try:
+        yield
+    finally:
+        _BUDGET.reset(token)
+
+
 class LogLines:
     """Iterator over a streamed job log. `truncated` is True once the download cap cut it."""
 
@@ -80,6 +108,12 @@ class LogLines:
 
     def __next__(self) -> str:
         return next(self._it)
+
+    def close(self) -> None:
+        """Stop early (e.g. the attempt deadline): closes the underlying HTTP stream now, not at garbage collection."""
+        close = getattr(self._it, "close", None)
+        if close is not None:
+            close()
 
 
 class GitHubHTTP:
@@ -146,7 +180,12 @@ class GitHubHTTP:
         ep = ENDPOINTS[name]
         if ep.auth != "app" or ep.method != "POST" or name == "create_installation_token":
             raise ValueError(f"{name} is not an App-JWT action endpoint")
-        return self._send(ep, _fill(ep.path, params), app_jwt).status_code
+        try:
+            return self._send(ep, _fill(ep.path, params), app_jwt).status_code
+        except err.GitHubPermanent as e:
+            if e.status == 401:  # the App JWT was rejected (expired in a long pass, or a key fault): nothing was applied
+                raise err.AppAuthenticationFailed(f"GitHub App authentication failed (401) on {name}", 401) from None
+            raise
 
     def call(
         self, ep: Endpoint, path: str, token: str, *, query: dict[str, Any] | None = None, json_body: dict[str, Any] | None = None
@@ -180,12 +219,15 @@ class GitHubHTTP:
         The returned iterator's `.truncated` becomes True when the cap cut the download (FS-LOG-4), so a partial
         log can never be taken for a complete one."""
         out = LogLines()
-        out._it = self._stream_log(location, out)
+        out._it = self._stream_log(location, out, _BUDGET.get())  # the budget of the call that obtained the URL
         return out
 
-    def _stream_log(self, location: str, owner: LogLines) -> Iterator[str]:
+    def _stream_log(self, location: str, owner: LogLines, b: Budget | None) -> Iterator[str]:
         self._check_log_url(location)
-        with self._client.stream("GET", location, headers={"User-Agent": USER_AGENT}, follow_redirects=False) as resp:
+        timeout = self._timeout(b, "download_job_logs")  # the caller's stream loop stops at the deadline (C-4)
+        with self._client.stream(
+            "GET", location, headers={"User-Agent": USER_AGENT}, follow_redirects=False, timeout=timeout
+        ) as resp:
             if resp.status_code in (404, 410):
                 raise (err.Gone if resp.status_code == 410 else err.NotFound)("log blob unavailable", resp.status_code)
             if resp.status_code != 200:
@@ -242,26 +284,28 @@ class GitHubHTTP:
         }
         attempt = 0
         secondary_streak = 0
+        b = _BUDGET.get()
         while True:
             attempt += 1
+            timeout = self._timeout(b, ep.name, sent=attempt > 1)  # O-2: refuses to start without enough time
             try:
-                req = self._client.build_request(ep.method, url, params=query, json=json_body, headers=headers)
+                req = self._client.build_request(ep.method, url, params=query, json=json_body, headers=headers, timeout=timeout)
                 resp = self._client.send(req, follow_redirects=False, stream=True)
             except httpx.TransportError as e:
                 if ep.method == "POST" or attempt > self.limits.max_retries:
                     # A POST may have been applied even though no response arrived: never repeat it inline.
                     # The job retries later and the publisher reconciles before creating (T-502).
                     raise err.GitHubRetryable(f"{ep.name}: transport error ({type(e).__name__})") from None
-                self._sleep(self._backoff(attempt))
+                self._pause(b, self._backoff(attempt), ep.name)
                 continue
             try:
-                body = self._read_capped(resp)
+                body = self._read_capped(resp, b)
             except httpx.TransportError as e:
                 # The connection broke while the body was being read (after the status and headers): the same
                 # transport failure as above, so the same rules apply (Phase 57). Never a raw httpx error.
                 if ep.method == "POST" or attempt > self.limits.max_retries:
                     raise err.GitHubRetryable(f"{ep.name}: transport error reading body ({type(e).__name__})") from None
-                self._sleep(self._backoff(attempt))
+                self._pause(b, self._backoff(attempt), ep.name)
                 continue
             finally:
                 resp.close()
@@ -279,16 +323,32 @@ class GitHubHTTP:
                 secondary_streak += 1
                 if wait > self.limits.inline_wait_max_s or secondary_streak > self.limits.max_retries:
                     raise err.GitHubRetryable(f"{ep.name}: rate limited", retry_after_s=wait)
-                self._sleep(wait)
+                self._pause(b, wait, ep.name, retry_after_s=wait)
                 continue
             if status >= 500:
                 if ep.method == "POST" or attempt > self.limits.max_retries:  # same reasoning as above
                     raise err.GitHubRetryable(f"{ep.name}: server error {status}")
-                self._sleep(self._backoff(attempt))
+                self._pause(b, self._backoff(attempt), ep.name)
                 continue
             raise self._error(ep, resp)
 
-    def _read_capped(self, resp: httpx.Response) -> bytes:
+    def _timeout(self, b: Budget | None, name: str, *, sent: bool = False) -> httpx.Timeout:
+        """The client timeouts, cut to the budget's remaining time; no request with less than MIN_REQUEST_S left."""
+        read, connect = self.limits.read_timeout_s, self.limits.connect_timeout_s
+        if b is None:
+            return httpx.Timeout(read, connect=connect)
+        left = b.remaining()
+        if left < MIN_REQUEST_S:
+            raise err.DeadlineExhausted(f"{name}: attempt deadline reached; request not started", sent=sent)
+        return httpx.Timeout(min(read, left), connect=min(connect, left))
+
+    def _pause(self, b: Budget | None, wait: float, name: str, *, retry_after_s: float | None = None) -> None:
+        """An inline wait before retrying, only if a useful request can still follow it within the budget."""
+        if b is not None and b.remaining() - wait < MIN_REQUEST_S:
+            raise err.GitHubRetryable(f"{name}: no time left for an inline retry", retry_after_s=retry_after_s)
+        self._sleep(wait)
+
+    def _read_capped(self, resp: httpx.Response, b: Budget | None = None) -> bytes:
         cap = self.limits.max_json_bytes
         declared = resp.headers.get("content-length")
         if declared and declared.isdigit() and int(declared) > cap:
@@ -298,6 +358,10 @@ class GitHubHTTP:
             out += chunk
             if len(out) > cap:
                 raise err.ResponseTooLarge(f"response larger than {cap} bytes")
+            if b is not None and b.remaining() <= 0:
+                # A body still trickling in when the budget ends: abandoned like a broken connection (the request
+                # may have been applied; the transport rules above decide what follows). Bounds the total time.
+                raise httpx.ReadTimeout("attempt deadline reached while reading the response")
         return bytes(out)
 
     def _rate_limit_wait(self, resp: httpx.Response, streak: int) -> float | None:
@@ -355,8 +419,12 @@ class GitHubHTTP:
     def _check_log_url(self, location: str) -> None:
         u = urlsplit(location)
         host = (u.hostname or "").lower()
-        if u.scheme != "https" or u.username or u.password or not host:
-            raise err.UnsafeRedirect("log redirect must be https without credentials")
+        try:
+            port = u.port
+        except ValueError:
+            port = -1
+        if u.scheme != "https" or u.username or u.password or not host or port not in (None, 443):
+            raise err.UnsafeRedirect("log redirect must be https on port 443 without credentials")
         if not any(host.endswith(s) for s in self._log_hosts):
             raise err.UnsafeRedirect(f"log redirect host not allowed: {host}")
 
@@ -394,7 +462,20 @@ def _fill(template: str, params: dict[str, Any]) -> str:
 class RepoClient:
     """All installation-token calls for ONE repository of ONE installation, with ONE token scope."""
 
-    def __init__(self, http: GitHubHTTP, tokens: Any, *, installation_id: int, repo_id: int, full_name: str, scope: str) -> None:
+    def __init__(
+        self,
+        http: GitHubHTTP,
+        tokens: Any,
+        *,
+        installation_id: int,
+        repo_id: int,
+        full_name: str,
+        scope: str,
+        deadline: Budget | None = None,
+    ) -> None:
+        """`deadline` (O-2): every request of this client, and the token mint behind it, runs within it. The analysis
+        handler gives the analysis client the work deadline (job deadline less the publication reserve) and the
+        publish client the job deadline itself, so reads and validation can never use the publication reserve."""
         owner, _, repo = full_name.partition("/")
         if not owner or not repo or "/" in repo:
             raise ValueError("full_name must be owner/repo")
@@ -403,9 +484,23 @@ class RepoClient:
         self.http, self.tokens = http, tokens
         self.installation_id, self.repo_id, self.scope = installation_id, repo_id, scope
         self._owner, self._repo = owner, repo
+        self.deadline = deadline
 
     def _token(self) -> str:
         return str(self.tokens.token(self.installation_id, self.repo_id, self.scope).value)
+
+    def for_scope(self, scope: str, *, deadline: Budget | None = None) -> RepoClient:
+        """The same installation and repository with another token scope (G-PLAT-11: per publication surface). The
+        deadline is this client's unless one is given."""
+        return RepoClient(
+            self.http,
+            self.tokens,
+            installation_id=self.installation_id,
+            repo_id=self.repo_id,
+            full_name=self.full_name,
+            scope=scope,
+            deadline=deadline if deadline is not None else self.deadline,
+        )
 
     @property
     def full_name(self) -> str:
@@ -415,7 +510,8 @@ class RepoClient:
         """The analysis-scope token for a read-only git fetch of this one repository (T-304)."""
         if self.scope != "analysis":
             raise ValueError("git fetch uses the analysis-scope token only")
-        return self._token()
+        with budget(self.deadline):
+            return self._token()
 
     def invalidate_token(self) -> None:
         self.tokens.invalidate(self.installation_id, self.repo_id, self.scope)
@@ -428,6 +524,10 @@ class RepoClient:
         return _fill(ep.path, {**params, "owner": self._owner, "repo": self._repo})
 
     def _with_reauth(self, fn: Callable[[str], Any]) -> Any:
+        with budget(self.deadline):  # O-2: the mint and the request share the client's deadline
+            return self._reauth(fn)
+
+    def _reauth(self, fn: Callable[[str], Any]) -> Any:
         # A 401 from the mint itself (AppAuthenticationFailed) is an App credential fault: re-minting cannot help, and
         # it must not be relabelled as a rejected installation token.
         try:
@@ -495,7 +595,8 @@ class RepoClient:
         if resp.status_code != 302:
             raise err.GitHubPermanent("log endpoint did not redirect", resp.status_code)
         location = resp.headers.get("location", "")
-        return self.http.stream_log(location)
+        with budget(self.deadline):  # the stream keeps this client's deadline for its own request
+            return self.http.stream_log(location)
 
 
 def safe_error_text(e: BaseException) -> str:

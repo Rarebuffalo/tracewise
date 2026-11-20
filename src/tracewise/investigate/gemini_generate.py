@@ -39,8 +39,9 @@ import re
 import secrets
 from typing import Any, Literal
 
-from tracewise.investigate.http_adapter import WireError
+from tracewise.investigate.http_adapter import CodecCapabilities, WireError, WireRefusal, WireTruncated
 from tracewise.investigate.provider import StepRequest, StepResponse, StepUsage, ToolCallRequest, ToolSpec
+from tracewise.prepass.sanitize import redact
 
 HOST = "https://generativelanguage.googleapis.com"  # N-1
 # DECISION: model ids are lowercase dotted/dashed names (as listed on S-9); anything else, including '/', ':' or '?',
@@ -48,6 +49,8 @@ HOST = "https://generativelanguage.googleapis.com"  # N-1
 _MODEL = re.compile(r"^[a-z0-9]+(?:[.-][a-z0-9]+)*$")
 _ALLOWED_PART_KEYS = frozenset({"text", "thought", "thoughtSignature", "functionCall"})
 ACCEPTED_FINISH = "STOP"  # N-13: the only accepted finish reason; every other value fails closed
+# N-13 content-blocking reasons (text output). Reported as a refusal; MAX_TOKENS as truncation; the rest stay generic.
+_BLOCKED_FINISH = frozenset({"SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII"})
 
 
 class SignedTurn:
@@ -66,9 +69,20 @@ class SignedTurn:
     def __reduce_ex__(self, protocol: object) -> Any:  # pickle, copy and deepcopy all go through here
         raise TypeError("SignedTurn cannot be serialised or copied")
 
+    def __replay_bytes__(self) -> bytes:
+        """Exact identity for the shared replay ledger (size cap and integrity, O-5); never logged or shown."""
+        return json.dumps(
+            [self._model, self._content, self._epoch.hex(), self._prefix.hex() if self._prefix else None, self._mac.hex()],
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+
 
 class GeminiGenerateContentWire:
     name: Literal["openai", "gemini", "fake"] = "gemini"
+    # N-8 NONE; N-15 signatures on the model turns this codec replays (text-part signatures, NG-2, are unrecorded);
+    # N-23 cached and thoughts counts; whether maxOutputTokens includes thinking is undocumented (NG-1).
+    capabilities = CodecCapabilities(tool_choice_none=True, replay_scope="tool_turns", usage_breakdown=True)
 
     def __init__(self, model: str) -> None:
         if not isinstance(model, str) or len(model) > 64 or not _MODEL.match(model):
@@ -110,10 +124,12 @@ class GeminiGenerateContentWire:
     # ------------------------------------------------------------------ request
 
     def encode(self, model: str, request: StepRequest) -> dict[str, Any]:
+        # State changes only when the whole request encodes: a failed encode never moves the conversation epoch, the
+        # decode binding or the declaration cache (review D4, D5); any earlier unconsumed binding is dropped first.
+        self._last_request = None
         if model != self.model:
             raise WireError("request model differs from the codec's model")
-        if not any(m.role == "assistant" and m.tool_calls for m in request.messages):
-            self._epoch = secrets.token_bytes(16)  # a new conversation: every earlier turn becomes stale
+        new_conversation = not any(m.role == "assistant" and m.tool_calls for m in request.messages)
         system: list[str] = []
         contents: list[dict[str, Any]] = []
         pending: dict[str, str] = {}  # call id -> name, awaiting a result
@@ -165,21 +181,28 @@ class GeminiGenerateContentWire:
         }
         if system:
             body["systemInstruction"] = {"parts": [{"text": "\n\n".join(system)}]}
-        self._last_request = self._request_digest(system, contents)
-        if request.allow_tools and request.tools:
+        declared = dict(self._declared)
+        if request.tools:
+            # The investigator sends the same tools on every step; a tool-free step keeps them and forbids calls (N-8
+            # NONE) instead of omitting them, which can end in UNEXPECTED_TOOL_CALL (N-13).
             decls = [_declaration(t) for t in request.tools]
-            for d in decls:
-                self._declared[d["name"]] = d
+            declared.update((d["name"], d) for d in decls)
             body["tools"] = [{"functionDeclarations": decls}]
-            body["toolConfig"] = {"functionCallingConfig": {"mode": "AUTO"}}  # N-8
-        elif called:
+            mode = "AUTO" if request.allow_tools else "NONE"
+            body["toolConfig"] = {"functionCallingConfig": {"mode": mode}}  # N-8
+        else:
             # The tool-free final step: keep the declarations the history refers to and forbid new calls (N-8 NONE),
-            # rather than omitting tools, which can end in UNEXPECTED_TOOL_CALL (N-13).
-            missing = sorted(called - set(self._declared))
-            if missing:
-                raise WireError("history refers to a tool this codec never declared")
-            body["tools"] = [{"functionDeclarations": [self._declared[n] for n in sorted(called)]}]
-            body["toolConfig"] = {"functionCallingConfig": {"mode": "NONE"}}
+            # rather than omitting tools, which can end in UNEXPECTED_TOOL_CALL (N-13). A call to a name that was never
+            # declared was refused by the investigator ("REJECTED"); no declaration is invented for it (review D3).
+            known = [declared[n] for n in sorted(called) if n in declared]
+            if known:
+                body["tools"] = [{"functionDeclarations": known}]
+                body["toolConfig"] = {"functionCallingConfig": {"mode": "NONE"}}
+        # Commit: this request is now the one a decode may bind to.
+        self._declared = declared
+        if new_conversation:
+            self._epoch = secrets.token_bytes(16)  # a new conversation: every earlier turn becomes stale
+        self._last_request = self._request_digest(system, contents)
         return body
 
     def _replayed_turn(self, replay: tuple[Any, ...], tool_calls: tuple[ToolCallRequest, ...], prefix: bytes) -> dict[str, Any]:
@@ -190,11 +213,7 @@ class GeminiGenerateContentWire:
         if len(calls) != len(tool_calls):
             raise WireError("replayed calls differ from the validated tool calls")
         for fc, tc in zip(calls, tool_calls, strict=True):
-            try:
-                args = json.loads(tc.arguments) if isinstance(tc.arguments, str) else tc.arguments
-            except ValueError:
-                raise WireError("tool-call arguments are not JSON") from None
-            if fc.get("id") != tc.id or fc.get("name") != tc.name or fc.get("args", {}) != args:
+            if fc.get("id") != tc.id or fc.get("name") != tc.name or not _same_args(fc.get("args", {}), tc.arguments):
                 raise WireError("replayed calls differ from the validated tool calls")
         return content  # verbatim: thought signatures stay exactly where the model put them
 
@@ -208,17 +227,22 @@ class GeminiGenerateContentWire:
             raise WireError("response is not an object")
         feedback = doc.get("promptFeedback")
         if feedback is not None and (not isinstance(feedback, dict) or feedback.get("blockReason") is not None):
-            raise WireError("the prompt was blocked")  # N-14; never quote the reason or ratings
+            raise WireRefusal("the prompt was blocked")  # N-14; never quote the reason or ratings
         candidates = doc.get("candidates")
         if not isinstance(candidates, list) or len(candidates) != 1:
             raise WireError("expected exactly one candidate")
         cand = candidates[0]
         if not isinstance(cand, dict):
             raise WireError("candidate is not an object")
-        if cand.get("finishReason") != ACCEPTED_FINISH:
+        finish = cand.get("finishReason")
+        if finish == "MAX_TOKENS":
+            raise WireTruncated("finish reason is MAX_TOKENS")  # N-13
+        if finish in _BLOCKED_FINISH:
+            raise WireRefusal("finish reason reports a blocked response")  # N-13; never quote the reason or ratings
+        if finish != ACCEPTED_FINISH:
             raise WireError("finish reason is not STOP")  # missing, blocked, truncated, malformed call, continuation, unknown
         content = cand.get("content")
-        if not isinstance(content, dict) or content.get("role", "model") != "model":
+        if not isinstance(content, dict) or content.get("role") != "model":  # replayed verbatim: never patched (D6)
             raise WireError("candidate content is missing or not from the model")
         parts = content.get("parts")
         if not isinstance(parts, list) or not parts:
@@ -248,11 +272,16 @@ class GeminiGenerateContentWire:
         usage = doc.get("usageMetadata")
         if not isinstance(usage, dict) or not all(_count(usage.get(k)) for k in ("promptTokenCount", "candidatesTokenCount")):
             raise WireError("usage missing")  # never invented
-        thoughts = usage.get("thoughtsTokenCount", 0)
-        if not _count(thoughts):
+        thoughts = usage.get("thoughtsTokenCount")  # absent: not reported (None), added to the total as 0
+        tool_use = usage.get("toolUsePromptTokenCount", 0)
+        cached = usage.get("cachedContentTokenCount")  # N-23: part of the prompt count; absent: not reported
+        if not all(_count(v) for v in (thoughts, tool_use, cached) if v is not None):
             raise WireError("usage malformed")
-        # Billed as output: response pricing is output plus thinking tokens (N-24).
-        out = StepUsage(usage["promptTokenCount"], usage["candidatesTokenCount"] + thoughts)
+        if cached is not None and cached > usage["promptTokenCount"]:
+            raise WireError("usage malformed")
+        # Input: prompt plus tool-use prompt (separate terms of the documented total, N-23/N-30). Output: candidates plus
+        # thoughts (response pricing is output plus thinking tokens, N-24). Cached tokens are part of the prompt count.
+        out = StepUsage(usage["promptTokenCount"] + tool_use, usage["candidatesTokenCount"] + (thoughts or 0), cached, thoughts)
         replay: tuple[Any, ...] = ()
         if calls:
             replay = (SignedTurn(content, self.model, self._epoch, prefix, self._mac(content, self._epoch, prefix)),)
@@ -265,7 +294,19 @@ class GeminiGenerateContentWire:
 
 
 def _declaration(t: ToolSpec) -> dict[str, Any]:
-    return {"name": t.name, "description": t.description, "parameters": t.parameters}
+    # The tool specs are JSON Schema (`additionalProperties`, lower-case types). `parameters` takes the OpenAPI Schema
+    # subset, which has neither; `parametersJsonSchema` takes JSON Schema and is mutually exclusive with it (Addendum C).
+    return {"name": t.name, "description": t.description, "parametersJsonSchema": t.parameters}
+
+
+def _same_args(signed: Any, arguments: Any) -> bool:
+    """The signed `args` equal the validated call's arguments, as decoded (`json.dumps(args, sort_keys=True)`), or as
+    the investigator hands them over after its redaction of the provider view (`provider_view`): the same
+    deterministic `redact` applied to the same string. Anything else is a mismatch."""
+    if isinstance(arguments, str):
+        canonical = json.dumps(signed, sort_keys=True)
+        return arguments in (canonical, redact(canonical))
+    return isinstance(arguments, dict) and signed == arguments
 
 
 def _call(fc: Any, seen: list[ToolCallRequest]) -> ToolCallRequest:

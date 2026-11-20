@@ -10,8 +10,10 @@ import posixpath
 import re
 import unicodedata
 
+from tracewise.contracts import OWNER
+
 MAX_PATH_BYTES = 1024
-_OWNER = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$")
+_OWNER = re.compile(rf"^{OWNER}$")  # the same owner rule as the webhook contracts
 _REPO = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 

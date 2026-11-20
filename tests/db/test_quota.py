@@ -94,7 +94,11 @@ def test_a_new_utc_day_gets_one_new_notice(world: World) -> None:
 def test_last_months_analyses_do_not_count(world: World) -> None:
     for i in range(3):
         run(world, enqueue_run(world, 300 + i))
-    world.owner.execute("UPDATE analysis SET created_at = date_trunc('month', now()) - interval '1 hour'")
+    # The quota month is the UTC calendar month: compute its start in UTC, not in the session's time zone (a session
+    # east of UTC put "last month" inside the current UTC month in the first hours of each local month).
+    world.owner.execute(
+        "UPDATE analysis SET created_at = (date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC') - interval '1 hour'"
+    )
     assert run(world, enqueue_run(world, 310))["result"]["outcome"] == "diagnosed"
 
 

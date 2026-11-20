@@ -29,7 +29,9 @@ from tracewise.investigate.provider import (
     StepRequest,
     ToolCallRequest,
 )
+from tracewise.investigate.replay import ReplayContext, ReplayError, ReplayLedger
 from tracewise.investigate.schema import MAX_FINAL_CHARS, DraftError, ModelDraft, parse_draft
+from tracewise.observe import event
 from tracewise.prepass.sanitize import redact
 
 log = logging.getLogger(__name__)
@@ -86,27 +88,39 @@ class InvestigationResult:
     input_tokens: int = 0
     output_tokens: int = 0
     latency_ms: int = 0
+    cached_input_tokens: int | None = None  # part of input_tokens; None unless every step reported it
+    reasoning_output_tokens: int | None = None  # part of output_tokens; same rule
+    # no_call: the provider was never asked; provider: every step reported its usage; partial: a step failed (its
+    # usage, if any was spent, is unknown), so the totals cover the completed steps only.
+    usage_source: Literal["no_call", "provider", "partial"] = "no_call"
 
     @property
     def budget_exhausted(self) -> bool:
         return self.outcome in ("budget_exhausted", "unproductive")
 
 
-def provider_view(messages: list[Message]) -> tuple[Message, ...]:
+def provider_view(messages: list[Message], ledger: ReplayLedger) -> tuple[Message, ...]:
     """The ONLY form in which the conversation crosses the provider boundary (P-2, approved option A).
 
     Every message text and every string inside replayed tool-call arguments goes through the same redaction as logs
     (`prepass.sanitize.redact`). That covers the evidence bundle, all tool results (`read_file` windows, `grep`
     lines, `list_dir` names, `get_diff` patches), the model's own replayed turns and repair prompts, and anything
     added later. Internal state (duplicate detection, the validator) keeps the original text. Pattern-based: encoded,
-    split or unfamiliar secrets can still pass (P-4)."""
+    split or unfamiliar secrets can still pass (P-4).
+
+    Exception: `Message.replay` passes through unredacted. It is provider-issued state the provider requires back
+    verbatim (OpenAI reasoning items; the Gemini codec's signed copy of the whole model turn, including its text and
+    call arguments). It was produced by the same provider from already-redacted input. Whether this exception is
+    accepted as policy is owner decision O-5 (research/product-strategy/decision-notes/O-5-reasoning-state-replay.md).
+    In the loop's history it is held only as sealed envelopes; `ledger.open` checks their binding, origin and integrity
+    here, at the one place the raw items are handed to the provider (`ReplayError` otherwise)."""
     return tuple(
         Message(
             m.role,
             redact(m.content),
             tool_call_id=m.tool_call_id,
             tool_calls=tuple(ToolCallRequest(tc.id, tc.name, _redact_args(tc.arguments)) for tc in m.tool_calls),
-            replay=m.replay,  # opaque provider-originated items (encrypted); redaction would corrupt them
+            replay=ledger.open(m.replay),  # verified, then verbatim: redaction would corrupt provider state
         )
         for m in messages
     )
@@ -167,8 +181,17 @@ def investigate(
     *,
     clock: Callable[[], float] = time.monotonic,
     delimiter: Delimiter | None = None,
+    replay_context: ReplayContext | None = None,
 ) -> InvestigationResult:
+    """`replay_context` binds the provider's continuation state (O-5) to this investigation; by default a fresh one
+    for this provider and model. A context for another provider or model is a programming error."""
     lim = limits or InvestigationLimits()
+    rctx = replay_context or ReplayContext(provider.name, provider.model)
+    if (rctx.provider, rctx.model) != (provider.name, provider.model):
+        raise ValueError("replay context does not match the provider")
+    ledger = ReplayLedger(rctx)
+    # Which assistant turns must carry the provider's state back (the provider's declared protocol, O-5).
+    scope = getattr(provider, "replay_scope", "tool_turns")
     if not has_error_line(ev):
         return InvestigationResult("no_error_line", None, provider.name, provider.model)
     d = delimiter or Delimiter.new()
@@ -178,12 +201,27 @@ def investigate(
     ]
     start = clock()
     deadline = start + lim.timeout_s
-    calls = rejected = duplicates = unproductive = tokens_in = tokens_out = 0
+    calls = rejected = duplicates = unproductive = tokens_in = tokens_out = cached_in = reasoning_out = steps = 0
+    cached_known = reasoning_known = True
+    step_failed = False
     seen: dict[str, ToolResult] = {}
     repaired = final_only = False
 
     def result(outcome: Outcome, draft: ModelDraft | None = None, ignored: tuple[str, ...] = ()) -> InvestigationResult:
-        log.info("investigation finished", extra={"tw": {"outcome": outcome, "tool_calls": calls, "rejected": rejected}})
+        # Replay sizes (bytes and envelope count only, never content): the staging evidence for the O-5 caps.
+        log.info(
+            "investigation finished",
+            extra={
+                "tw": {
+                    "outcome": outcome,
+                    "tool_calls": calls,
+                    "rejected": rejected,
+                    "replay_bytes": ledger.total,
+                    "replay_envelopes": ledger.sealed,
+                    "replay_largest_bytes": ledger.largest,
+                }
+            },
+        )
         return InvestigationResult(
             outcome,
             draft,
@@ -197,38 +235,75 @@ def investigate(
             tokens_in,
             tokens_out,
             int((clock() - start) * 1000),
+            cached_in if steps and cached_known else None,
+            reasoning_out if steps and reasoning_known else None,
+            "partial" if step_failed else ("provider" if steps else "no_call"),
         )
+
+    def seal(items: tuple[Any, ...]) -> tuple[Any, ...]:
+        if not items:
+            return ()
+        if scope == "none":
+            raise ReplayError("unexpected")  # a provider that declared no state returned some
+        return (ledger.seal(items),)
+
+    def refused(e: ReplayError) -> InvestigationResult:
+        # Fail closed (P10): inconclusive, never a guessed diagnosis. The usage of steps already taken is complete.
+        event(log, "investigation.replay_refused", logging.WARNING, reason=e.reason, provider=provider.name)
+        return result("provider_failed")
 
     for _ in range(lim.max_iterations):
         remaining = deadline - clock()
         if remaining <= 0:
             return result("budget_exhausted")
         allow_tools = not final_only and calls < lim.max_tool_calls
-        req = StepRequest(
-            provider_view(messages), TOOL_SPECS if allow_tools else (), allow_tools, lim.max_output_chars, remaining
-        )
+        # The tool list is constant for the whole conversation; a tool-free step is `allow_tools=False`, which each codec
+        # maps to its provider's "none" mode. Removing the tools instead changes the request prefix, which invalidates
+        # earlier reasoning state on providers that check it (multi-provider design, step 2).
+        try:
+            view = provider_view(messages, ledger)
+        except ReplayError as e:
+            return refused(e)
+        req = StepRequest(view, TOOL_SPECS, allow_tools, lim.max_output_chars, remaining)
         try:
             resp = provider.step(req)
         except ProviderTimeout:
+            step_failed = True
             return result("provider_timeout")
-        except ProviderError:
+        except ProviderError as e:
+            # Same outcome for every kind (inconclusive); the kind tells a refusal from a truncation from an outage.
+            step_failed = True
+            log.info("provider step failed", extra={"tw": {"kind": type(e).__name__}})
             return result("provider_failed")
         except Exception:
             # Deliberately broad: any adapter defect becomes a provider failure (an inconclusive result),
             # never a crash or a guessed diagnosis. BaseException (cancellation) still propagates.
+            step_failed = True
             log.warning("provider raised an unexpected exception", exc_info=False)
             return result("provider_failed")
+        steps += 1
         tokens_in += max(0, resp.usage.input_tokens)
         tokens_out += max(0, resp.usage.output_tokens)
+        u = resp.usage
+        cached_known = cached_known and u.cached_input_tokens is not None
+        reasoning_known = reasoning_known and u.reasoning_output_tokens is not None
+        cached_in += u.cached_input_tokens or 0
+        reasoning_out += u.reasoning_output_tokens or 0
         if tokens_in + tokens_out > lim.max_total_tokens or clock() > deadline:
             return result("budget_exhausted")
+        try:
+            sealed = seal(resp.replay)
+        except ReplayError as e:
+            return refused(e)
 
         if resp.tool_calls:
             if not allow_tools or calls + len(resp.tool_calls) > lim.max_tool_calls:
                 return result("budget_exhausted")  # the model tried to exceed its budget (FS-DX-8)
-            messages.append(Message("assistant", resp.text or "", tool_calls=resp.tool_calls, replay=resp.replay))
+            messages.append(Message("assistant", resp.text or "", tool_calls=resp.tool_calls, replay=sealed))
             productive = False
             for tc in resp.tool_calls:
+                if clock() > deadline:  # a batch of tool calls cannot run past the investigation's wall clock
+                    return result("budget_exhausted")
                 calls += 1
                 checked = validate_call(tc, lim.max_args_chars)
                 if isinstance(checked, str):
@@ -257,7 +332,11 @@ def investigate(
             if repaired:
                 return result("invalid_output")
             repaired = final_only = True
-            messages.append(Message("assistant", (resp.text or "")[:2000]))
+            if scope == "all_turns":
+                # The provider checks the exact earlier turns (A-38): its text and state go back unaltered.
+                messages.append(Message("assistant", resp.text or "", replay=sealed))
+            else:
+                messages.append(Message("assistant", (resp.text or "")[:2000]))
             messages.append(
                 Message(
                     "user",

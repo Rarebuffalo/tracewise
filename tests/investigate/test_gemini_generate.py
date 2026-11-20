@@ -118,7 +118,10 @@ def test_encode_maps_system_user_tools_and_limits() -> None:
     assert body["systemInstruction"] == {"parts": [{"text": "policy"}]}
     assert body["contents"] == [{"role": "user", "parts": [{"text": "evidence"}]}]
     decls = body["tools"][0]["functionDeclarations"]
-    assert [d["name"] for d in decls] == [t.name for t in TOOL_SPECS] and decls[0]["parameters"] == TOOL_SPECS[0].parameters
+    assert [d["name"] for d in decls] == [t.name for t in TOOL_SPECS]
+    # JSON Schema goes in parametersJsonSchema, never in the OpenAPI-subset `parameters` (Addendum C, review D1)
+    assert all("parameters" not in d for d in decls)
+    assert [d["parametersJsonSchema"] for d in decls] == [t.parameters for t in TOOL_SPECS]
     assert body["toolConfig"] == {"functionCallingConfig": {"mode": "AUTO"}}
     assert body["generationConfig"] == {"maxOutputTokens": 4000, "candidateCount": 1}
     no_tools = w.encode(MODEL, req(Message("user", "evidence"), tools=False))
@@ -552,3 +555,104 @@ def test_one_decode_per_encode_a_second_response_is_never_replayable() -> None:
         w.encode(
             MODEL, req(Message("user", "e"), Message("assistant", "", tool_calls=second.tool_calls, replay=second.replay), result)
         )
+
+
+# ------------------------------------------------------------------ contract audit fixes (2026-10-30)
+
+
+def test_the_final_tool_free_step_also_uses_json_schema_declarations() -> None:
+    w = GeminiGenerateContentWire(MODEL)
+    w.encode(MODEL, req(Message("user", "e")))
+    r = w.decode(gresp([call("c1", "list_dir", {"path": "src"}, SIG)]))
+    h = (
+        Message("user", "e"),
+        Message("assistant", "", tool_calls=r.tool_calls, replay=r.replay),
+        Message("tool", "x", tool_call_id="c1"),
+    )
+    decl = w.encode(MODEL, req(*h, tools=False))["tools"][0]["functionDeclarations"][0]
+    assert "parameters" not in decl and decl["parametersJsonSchema"]["additionalProperties"] is False
+
+
+def test_secret_shaped_arguments_survive_the_provider_view_redaction() -> None:
+    """D2: the investigator redacts tool-call arguments in the view sent to the provider. The replay check must accept
+    the redacted form of exactly the signed arguments (and nothing else), while the signed, unredacted turn is what is
+    replayed."""
+    from tracewise.investigate.loop import investigate
+
+    turn = [call("c1", "grep", {"pattern": "password=\\w+"}, SIG)]
+    s = Server(gresp(turn), gresp([{"text": json.dumps(B02_ANSWER)}]))
+    p, _ = provider(s)
+    res = investigate(evidence(files=B02_FILES), p)
+    assert res.outcome == "answered" and len(s.requests) == 2  # not provider_failed at the replay check
+    second = json.loads(s.requests[1].content)
+    assert second["contents"][-2] == {"role": "model", "parts": turn}  # the signed turn, verbatim
+    w = GeminiGenerateContentWire(MODEL)
+    w.encode(MODEL, req(Message("user", "e")))
+    r = w.decode(gresp([call("c1", "grep", {"pattern": "password=\\w+"}, SIG)]))
+    for forged_args in ('{"pattern": "password=[REDACTED] or more"}', '{"pattern": "other"}'):
+        tcs = (ToolCallRequest("c1", "grep", forged_args),)
+        with pytest.raises(WireError, match="differ"):
+            w.encode(MODEL, req(Message("user", "e"), Message("assistant", "", tool_calls=tcs, replay=r.replay),
+                                Message("tool", "x", tool_call_id="c1")))  # fmt: skip
+
+
+def test_a_rejected_call_to_an_undeclared_tool_does_not_break_the_final_step() -> None:
+    """D3: the model calls a name that was never declared; the investigator answers REJECTED. The tool-free step must
+    still encode, declaring only the known names, and never invent a declaration."""
+    w = GeminiGenerateContentWire(MODEL)
+    w.encode(MODEL, req(Message("user", "e")))
+    r = w.decode(gresp([call("c1", "rm_rf", {}, SIG), call("c2", "list_dir", {"path": "."})]))
+    h = (
+        Message("user", "e"),
+        Message("assistant", "", tool_calls=r.tool_calls, replay=r.replay),
+        Message("tool", "REJECTED: unknown tool 'rm_rf'", tool_call_id="c1"),
+        Message("tool", "a.py", tool_call_id="c2"),
+        Message("user", "answer now"),
+    )
+    body = w.encode(MODEL, req(*h, tools=False))
+    assert [d["name"] for d in body["tools"][0]["functionDeclarations"]] == ["list_dir"]
+    assert body["toolConfig"] == {"functionCallingConfig": {"mode": "NONE"}}
+    w2 = GeminiGenerateContentWire(MODEL)
+    w2.encode(MODEL, req(Message("user", "e"), tools=False))  # nothing declared at all
+    r2 = w2.decode(gresp([call("c1", "rm_rf", {}, SIG)]))
+    h2 = (Message("user", "e"), Message("assistant", "", tool_calls=r2.tool_calls, replay=r2.replay),
+          Message("tool", "REJECTED", tool_call_id="c1"))  # fmt: skip
+    assert "tools" not in w2.encode(MODEL, req(*h2, tools=False))  # nothing known: no invented declaration
+
+
+def test_a_failed_encode_changes_no_codec_state() -> None:
+    """D4/D5: a failed encode neither starts a new conversation nor leaves a decode binding to a request never sent."""
+    w = GeminiGenerateContentWire(MODEL)
+    w.encode(MODEL, req(Message("user", "e")))
+    r = w.decode(gresp([call("c1", "list_dir", {"path": "src"}, SIG)]))
+    live = (
+        Message("user", "e"),
+        Message("assistant", "", tool_calls=r.tool_calls, replay=r.replay),
+        Message("tool", "x", tool_call_id="c1"),
+    )
+    with pytest.raises(WireError):
+        w.encode(MODEL, req(Message("system", "s")))  # no content: fails, and must not start a new conversation
+    assert w.encode(MODEL, req(*live))  # the live conversation continues
+    with pytest.raises(WireError):
+        w.encode(MODEL, req(Message("user", "e"), Message("tool", "x", tool_call_id="zz")))  # fails after a good encode
+    orphan = w.decode(gresp([call("c9", "list_dir", {"path": "src"}, SIG)]))  # its request binding was dropped
+    with pytest.raises(WireError, match="conversation"):
+        w.encode(MODEL, req(*live, Message("assistant", "", tool_calls=orphan.tool_calls, replay=orphan.replay),
+                            Message("tool", "x", tool_call_id="c9")))  # fmt: skip
+
+
+def test_a_model_turn_must_carry_the_model_role() -> None:
+    """D6: content is replayed verbatim, so a turn without role 'model' is refused rather than patched."""
+    doc = gresp([call("c1", "list_dir", {"path": "src"}, SIG)])
+    del doc["candidates"][0]["content"]["role"]
+    with pytest.raises(WireError, match="model"):
+        GeminiGenerateContentWire(MODEL).decode(doc)
+
+
+def test_tool_use_prompt_tokens_count_as_input() -> None:
+    usage = {"promptTokenCount": 40, "candidatesTokenCount": 7, "thoughtsTokenCount": 3, "toolUsePromptTokenCount": 5}
+    r = GeminiGenerateContentWire(MODEL).decode(gresp([{"text": "a"}], usage=usage))
+    assert (r.usage.input_tokens, r.usage.output_tokens) == (45, 10)
+    for bad in ("5", -1, True):
+        with pytest.raises(WireError):
+            GeminiGenerateContentWire(MODEL).decode(gresp([{"text": "a"}], usage={**usage, "toolUsePromptTokenCount": bad}))

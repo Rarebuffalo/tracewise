@@ -74,7 +74,7 @@ pages state no API version string. `platform.openai.com` returned 403, so only `
 |---|---|---|---|
 | C-1 | **Offline done**; reachability open (G-4) | R-1 | `ENDPOINT`; each request goes only to it (`test_full_investigation_*`, `test_overload_503_*`) |
 | C-2 | **Offline done** | R-3, R-4, R-6, R-10 | System messages → `instructions`; tool results → `function_call_output` paired by `call_id`; reasoning items replayed verbatim (`Message.replay`); `store: false` (`test_encode_maps_*`) |
-| C-3 | **Offline done** | R-7, R-8, R-9 | The 4 read-only tools only, `strict: false` (our specs have optional fields, R-8); tools and `tool_choice` omitted on the final step (`test_encode_without_tools_*`). The loop still refuses tool calls on that step. |
+| C-3 | **Offline done** | R-7, R-8, R-9 | The 4 read-only tools only, `strict: false` (our specs have optional fields, R-8); on a tool-free step the same tools are sent with `tool_choice: "none"` (R-9; constant declarations, multi-provider design step 2; `tests/investigate/test_codec_contract.py`). The loop still refuses tool calls on that step. |
 | C-4 | **Offline done**; real frequency open (G-1, G-4) | R-5, R-11, R-13 | Any status other than `completed`, refusal, unknown item or content part, malformed call → `WireError` → `provider_failed`, never a diagnosis (`test_decode_fails_closed_*`) |
 | C-5 | **Decided: not used** | R-3 | No `text.format`; the investigator's own JSON validation and repair path stays authoritative. `json_schema` is a possible later improvement. |
 | C-6 | **Offline done**; billing reconciliation open | R-11 | `input_tokens`/`output_tokens` required integers; missing usage → `WireError` (never invented) |
@@ -87,6 +87,15 @@ existing `max_output_chars` cap as an upper bound (characters ≥ tokens for thi
 provider-issued call ids are sent back exactly (Phase 46 corrected an earlier 64-character cap that could merge two
 distinct ids); a duplicate, missing or unpaired id fails closed before anything is sent (G-5); a refusal is never a
 diagnosis.
+
+**Continuation-state envelope (O-5, 2026-11-02):** the loop seals each step's replay items in a
+`replay.ReplayEnvelope`. The envelope is bound to provider, model, tenant, job, job attempt and a random
+investigation id. It has a 64 KiB cap per envelope and a 192 KiB cap per conversation, and a SHA-256 fingerprint
+detects any change. It is masked in `repr` and refuses pickling and copying. `provider_view` opens envelopes only
+when building the next request, so a codec receives the same raw items as before. A refusal (`ReplayError`, a fixed
+reason code) ends the investigation as `provider_failed`. A provider's `replay_scope` (`tool_turns` or `all_turns`)
+decides which assistant turns carry state. With `all_turns`, the repair turn keeps its exact text and state. The
+engine accepts `all_turns`; no such codec exists, and Anthropic and DeepSeek stay unselectable.
 
 **Reasoning replay (Phase 46 audit):** `Message.replay` is the one channel that skips P-2 redaction. It carries only
 `reasoning` items decoded from the provider's own response, with a non-empty `id` and `encrypted_content`. They
@@ -120,7 +129,7 @@ Each open question is classified using only the recorded contract. "Fails closed
 | G-2 error body | R-12: `error.code`, `error.type`, `error.param` named, no example | Tolerant read; documented quota codes and types → `ProviderQuotaError` (never retried); anything else on 429/5xx retryable within bounds; 401/403 permanent | `test_quota_429_*`, `test_rate_limit_429_*`, `test_overload_503_*`; harness `quota`, `rate_limited`, `auth` | Safe by failing closed; shape needs observation | Records error key names, `code` and `type` (no message) only if an error occurs |
 | G-3 / G-8 reasoning items | R-10: pass back reasoning items; with `store: false` they carry `encrypted_content` by default | Only reasoning items with `id` and `encrypted_content` are kept and replayed verbatim; otherwise fail closed | `test_reasoning_*`, `test_decode_refuses_reasoning_*`; harness `missing_encrypted_content` | Needs observation | Step 2: whether reasoning items appear, and whether `encrypted_content` is present |
 | G-5 call ids | R-5/R-6: pairing by `call_id`; no length documented | Exact ids; duplicate, missing or unpaired → fail closed | `test_ids_*`, `test_encode_refuses_*`; harness `pass` (an id longer than 64 characters) | Resolved offline for our side; real lengths need observation | Step 2: call id length; step 3: the pairing is accepted |
-| G-7 tools omitted on the final step | Not documented; R-9 offers `tool_choice: "none"` | `tools` omitted when `allow_tools` is false | harness `pass`, `final_step_rejects_without_tools` | Needs observation | Step 3 accepted (exit 0) or 400 (exit 7). If 400, fix in the codec with tests before T-605. |
+| G-7 earlier calls on the final step | Omitting `tools` is not documented; R-9 offers `tool_choice: "none"` | Since 2026-11-01 the same `tools` with `tool_choice: "none"` when `allow_tools` is false (previously omitted) | harness `pass`, `final_step_rejects_without_tools` | Needs observation | Step 3 accepted (exit 0) or 400 (exit 7). If 400, fix in the codec with tests before T-605. |
 | `store: false` | R-3: `store` defaults to true | Always `false` | `test_encode_maps_*`; harness requests record `store` | Resolved (decision); account-level retention is C-8 | Nothing in code; the owner confirms account settings (A-4) |
 | Quota versus rate limit | R-12, R-14 | See G-2 | See G-2 | Resolved offline from R-12 | Only if it occurs |
 | Bounded rounds, time, retries | Ours (FS-DX-3) | `InvestigationLimits`; adapter `max_retries` ≤3 and deadline; the harness uses 0 retries and at most 3 requests | `test_loop*`, `test_http_adapter*`, harness budget test | Resolved offline | Nothing |
@@ -211,7 +220,11 @@ Product selection is unchanged: `LLM_PROVIDER=openai` still refuses.
     token count of 256 KiB depends on the content and the model's tokenizer).
   - *Usage:* the provider's `input_tokens` and `output_tokens` are required in every response. A response without
     them, an `incomplete` response, a refusal or any unknown shape fails closed as `provider_failed`. Usage is
-    recorded per run in the diagnosis and reported as mean tokens per analysis run.
+    recorded per run in the diagnosis and reported as mean tokens per analysis run. Since 2026-11-01 the codec also
+    maps the recorded breakdown (R-11: `input_tokens_details.cached_tokens`, `output_tokens_details.reasoning_tokens`)
+    into `StepUsage` as subsets of the totals; a detail larger than its total, negative or malformed fails closed. The
+    error kind distinguishes `ProviderTruncated` (`incomplete` with reason `max_output_tokens`, R-13) and
+    `ProviderRefusal` (a `refusal` part) from other failures; the outcome is unchanged.
   - *Cost:* **not computed and not limited.** No prices are configured (G-6, C-9), so the benchmark reports tokens
     only. **There is no hard token or spend ceiling for the whole run**: only the request cap. The worst case is
     roughly N requests × (one request's input + up to 16,000 output tokens), and one request's input depends on the
@@ -233,23 +246,31 @@ real endpoint.
   cannot alter the path; the host lock compares the whole URL, model included. All transport guards are the shared
   ones (§3a): request cap, 256 KiB body cap, per-request deadline, no redirects, no proxies, zero retries.
 - **Request:** system messages → `systemInstruction`; user messages → `user` content; tools →
-  `functionDeclarations` with `toolConfig` mode `AUTO`; the tool-free final step keeps the declarations the history
-  uses and sets mode `NONE`; `generationConfig` `maxOutputTokens` (the answer cap) and `candidateCount: 1`.
+  `functionDeclarations` (the JSON Schema specs in `parametersJsonSchema`, never `parameters`, which takes the
+  OpenAPI subset: research record Addendum C) with `toolConfig` mode `AUTO`; a tool-free step keeps the same declarations and
+  sets mode `NONE` (constant declarations, multi-provider design step 2; a request without tools keeps only the
+  known tools the history uses, never inventing one for a name the investigator rejected); `generationConfig` `maxOutputTokens` (the answer cap) and `candidateCount: 1`.
   `maxOutputTokens` semantics are undocumented for this API (NG-1), so it is a requested upper bound, not a
   guarantee. Per-model maxima are documented (`outputTokenLimit` from `models.get`; 65,536-token output budgets for
   the Gemini 3 and 2.5 families on the token guide), but not the default when the field is unset, nor whether it
   includes thinking tokens here (research record, Addendum B). No thinking configuration is sent (undocumented here).
 - **Response (fail closed):** exactly one candidate; finish reason `STOP` only, every other documented value and
   any unknown or missing one refused; a prompt block refused; parts limited to `text`, `thought`, `thoughtSignature`
-  and `functionCall` (anything else refused); thought parts are never answer text; usage requires
-  `promptTokenCount` and `candidatesTokenCount`, with `thoughtsTokenCount` counted as output.
+  and `functionCall` (anything else refused); the model turn must carry role `model`; thought parts are never answer
+  text; usage requires `promptTokenCount` and `candidatesTokenCount`; input adds `toolUsePromptTokenCount`, output
+  adds `thoughtsTokenCount`. Breakdown (subsets of the totals): `cachedContentTokenCount` → cached input,
+  `thoughtsTokenCount` → reasoning output. `MAX_TOKENS` → `ProviderTruncated`; `SAFETY`, `RECITATION`, `BLOCKLIST`,
+  `PROHIBITED_CONTENT`, `SPII` and a prompt block → `ProviderRefusal`; every other non-`STOP` reason stays a generic
+  `ProviderError`. All three give the same `provider_failed` outcome.
 - **Call ids:** a function call without an id is refused (never invented, NG-4); duplicate ids are refused; results
   are paired by id only: an unmatched, missing or duplicate result is refused.
 - **Replay boundary (owner policy, 2026-10-26):** the model's own returned content is kept verbatim so thought
   signatures stay where the model put them (N-15, N-16). It travels in `Message.replay`, which skips P-2 redaction,
   only as a `SignedTurn` that the same codec instance produced for the same model, authenticated with an HMAC key
   that never leaves the instance, and only on a turn whose validated `tool_calls` match its function calls exactly
-  (ids, names, arguments, order). It is also bound to its exchange: the MAC covers a digest of the exact request
+  (ids, names, arguments, order; arguments are compared exactly as signed, or as the investigator's deterministic
+  redaction of exactly those arguments, so a secret-shaped `grep` pattern does not break the round trip). A failed
+  encode changes no codec state (epoch, decode binding, declarations). It is also bound to its exchange: the MAC covers a digest of the exact request
   that produced it, and it is accepted only directly after that same history, so it cannot be repeated in the same
   conversation. It is bound to its conversation as well: every request without a signed turn starts a new
   conversation with a fresh random epoch, and a turn is accepted only in the epoch that minted it, so a stale turn is
@@ -262,9 +283,7 @@ real endpoint.
 - **Known limits:** the role of function-response content is `user` (NG-3: the only non-model role the reference
   allows); a signature on a final text answer is not replayed if the investigator asks for a repair turn, so a
   provider that then demands it ends `provider_failed`; `generateContent` error bodies are undocumented (NG-5), so
-  errors are classified by HTTP status only and no 429 is treated as permanent; the tool declarations reuse the
-  product's JSON Schema (`additionalProperties`, `maxLength`, `minimum`) under `parameters`, while the reference says
-  only "a subset of the OpenAPI schema is supported", so a refusal of those keywords would be an HTTP 400 and fail
-  closed; `toolUsePromptTokenCount` is not counted as input (no built-in tools are used).
+  errors are classified by HTTP status only and no 429 is treated as permanent; whether the server honours every
+  JSON Schema keyword the specs use (`maxLength`, `minimum`) is not stated.
 - **Contract change:** `Diagnosis.usage.provider` gained the value `gemini` (contracts.py and the SPEC example), used
   only by this benchmark path.

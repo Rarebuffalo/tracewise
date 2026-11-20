@@ -29,9 +29,14 @@ _PIP_REPORT_SPAN = 15
 _NPM_PREFIXES = ("npm error", "npm ERR!")
 _PREFIX = re.compile(r"^(?:Error|ERROR|error|fatal|FATAL|npm ERR!|npm error)(?::|!)? (.{1,2000})$")
 _KILLED = re.compile(r"(?:exit code 137|Killed$|signal 9\b|out of memory|OOMKilled)", re.IGNORECASE)
+# A container registry's refusal as the Docker CLI prints it: the registry error code, lower-cased, at the start of the
+# line (`denied: requested access to the resource is denied`, `unauthorized: authentication required`). Only these two
+# codes, only at the line start, and only followed by words: "Permission denied" inside a sentence, or a `denied: 3`
+# counter, never match. The line is reported as observed; what caused the refusal is left to the investigation.
+_REGISTRY = re.compile(r"^(?:denied|unauthorized): (?=.{0,200}[A-Za-z]{3})(.{1,2000})$")
 
 
-_FIRST = frozenset("#EefFn×")  # first characters of every prefix above
+_FIRST = frozenset("#EefFn×du")  # first characters of every prefix above
 _KILL_HINTS = ("137", "Killed", "signal 9", "emory", "OOM")
 
 
@@ -80,6 +85,8 @@ def generic(job_id: int, lines: Lines) -> list[Candidate]:
             out.append(Candidate("annotation", "generic", job_id, no, m.group(1).strip()))
         elif _PREFIX.match(t):
             out.append(Candidate("generic", "generic", job_id, no, t))
+        elif _REGISTRY.match(t):
+            out.append(Candidate("registry", "generic", job_id, no, t))
         elif _KILLED.search(t):
             out.append(Candidate("runner", "generic", job_id, no, t, code="oom"))
         if in_npm and npm_block_owner is None and out and out[-1].log_line == no:

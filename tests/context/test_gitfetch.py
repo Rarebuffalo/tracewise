@@ -229,7 +229,8 @@ def test_input_validation_and_fixed_host(ws_root) -> None:  # type: ignore[no-un
 
 def test_read_budget(server, ws_root, repo) -> None:  # type: ignore[no-untyped-def]
     head, _ = repo
-    with make_fetcher(server, ws_root, limits=Limits(max_reads=1)).fetch("acme/app", head, server.token) as src:
+    limits = Limits(max_reads=2, validation_reads=1)  # one tool read
+    with make_fetcher(server, ws_root, limits=limits).fetch("acme/app", head, server.token) as src:
         assert src.read("src/app.py").status is ReadStatus.ok
         assert src.read("README.md").status is ReadStatus.budget_exhausted
 
@@ -274,3 +275,21 @@ def test_sec06_sigkill_mid_fetch_then_startup_sweep(server, ws_root, repo) -> No
     assert len(left) == 1 and left[0].name.startswith(f"tw-ws-{p.pid}-")
     assert GitFetcher(workspace_root=ws_root).sweep_workspaces() == 1
     assert not any(ws_root.iterdir())
+
+
+@pytest.mark.parametrize("kind", ["group_readable", "symlink"])
+def test_a_workspace_root_that_is_not_private_is_refused_before_any_git(server, tmp_path, kind) -> None:  # type: ignore[no-untyped-def]
+    """C-8: a pre-existing root owned or opened by someone else, or a symlink, could let a local user swap a live
+    workspace. The fetch is refused (the code source then falls back to the contents API)."""
+    real = tmp_path / "real"
+    real.mkdir(mode=0o700)
+    root = tmp_path / "ws"
+    if kind == "group_readable":
+        root.mkdir()
+        root.chmod(0o755)
+    else:
+        root.symlink_to(real, target_is_directory=True)
+    f = make_fetcher(server, root)
+    with pytest.raises(GitFetchError, match="workspace root"), f.fetch("acme/app", "a" * 40, server.token):
+        pass
+    assert list(real.iterdir()) == [] and (kind == "symlink" or list(root.iterdir()) == [])

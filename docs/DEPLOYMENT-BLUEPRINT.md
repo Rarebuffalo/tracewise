@@ -114,27 +114,27 @@ Inject secrets through the platform's secret store. Never bake them into images 
   - the app role has DML on tenant tables, filtered by RLS, and no recovery tables;
   - the system role has DML on all tables, no DELETE on content, audit append-only, and EXECUTE on `tracewise_purge` only;
   - neither runtime role can write `alembic_version` or create objects.
-- **Privilege matrix (as migrated through 0010; checked against the live catalogue by `tests/db/test_privilege_matrix.py`; D-11 input).** S = SELECT, I = INSERT, U = UPDATE, D = DELETE. RLS applies to the app role on every tenant table; the system role bypasses it.
+- **Privilege matrix (as migrated through 0015; checked against the live catalogue by `tests/db/test_privilege_matrix.py`; D-11 input).** S = SELECT, I = INSERT, U = UPDATE, D = DELETE. RLS applies to the app role on every tenant table; the system role bypasses it.
 
   <!-- privilege-matrix:start -->
   | Table | `tracewise_app` | `tracewise_system` |
   |---|---|---|
-  | alembic_version | S | S |
+  | alembic_version | — | S |
   | analysis | SIU | SIU |
-  | audit_event | SI | SI |
-  | failure_signature | SIUD | SIUD |
-  | installation | SIU | SIU |
-  | job | SIUD | SIUD |
+  | audit_event | — | SI |
+  | failure_signature | — | SIU |
+  | installation | S | SIU |
+  | job | — | SIU |
   | publication | SIU | SIU |
   | recovery_checkpoint | — | SIU |
   | redelivery_request | — | SIU |
-  | repository | SIU | SIU |
-  | usage_event | SIUD | SIUD |
-  | webhook_delivery | SIUD | SIUD |
+  | repository | S | SIU |
+  | usage_event | — | SIU |
+  | webhook_delivery | — | SIU |
   | workflow_run | SIU | SIU |
   <!-- privilege-matrix:end -->
 
-  EXECUTE on `tracewise_purge(integer)`: system role only. **Observation for D-11 (not changed):** the app role's code paths use only the tenant tables of the analyze handler and publisher, yet it keeps the 0001 grants on the system-plane tables (`job`, `webhook_delivery`, `usage_event`, `failure_signature`, including DELETE). RLS confines those rows to the current tenant. Revoking them is part of the D-11 role design and needs that decision.
+  EXECUTE: `tracewise_purge(integer)` system role only; `tracewise_job_owned(...)` both runtime roles; `tracewise_requeue(...)` the `tracewise_operator` group only (0013). **D-11 option C (migration 0015):** the app role keeps only what the analyze handler and publisher use (above); USAGE only on the `workflow_run`, `analysis` and `publication` sequences; no runtime role may DELETE (the purge deletes as the definer).
 - **Connection budget:**
   - web: 10 × uvicorn workers per replica;
   - worker: 20 per process (two pools);

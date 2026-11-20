@@ -57,6 +57,7 @@ REASON_TEXT = {
     "provider_timeout": "the AI investigation timed out",
     "provider_failed": "the AI investigation could not be completed",
     "budget_exhausted": "the investigation reached its tool-call or time budget",
+    "attempt_deadline_exhausted": "the analysis ran out of time before the investigation could start",
     "unproductive": "the investigation stopped making progress",
     "invalid_output": "the AI answer did not match the required structure",
     "model_abstained": "the evidence was not sufficient to name a cause",
@@ -65,6 +66,8 @@ REASON_TEXT = {
     "location_invalid_range": "the proposed line range was invalid",
     "location_beyond_eof": "the proposed lines do not exist in the file",
     "location_unreadable": "the proposed file could not be read at this commit",
+    "source_unavailable": "the repository's code could not be read (a temporary GitHub failure that outlasted the retries)",
+    "location_validation_budget_exhausted": "the proposed location could not be checked within the validation read budget",
     "no_location_for_code_category": "a code cause was proposed without a verified code location",
     "primary_error_unresolved": "the error lines could not be verified in the retained log",
     "no_failed_jobs": "no failed job was found for this run attempt",
@@ -267,7 +270,10 @@ def render(vd: ValidatedDiagnosis, *, max_chars: int = DEFAULT_MAX_CHARS, marker
     if d.limits.diff_truncated:
         notes.append("The push's diff was truncated.")
     if d.limits.files_skipped:
-        notes.append(f"{len(d.limits.files_skipped)} file(s) were skipped (too large, binary, submodule or unsafe link).")
+        notes.append(
+            f"{len(d.limits.files_skipped)} file(s) were skipped "
+            "(too large, binary, submodule, unsafe link or over the read budget)."
+        )
     if d.validation_flags:
         notes.append("Some details proposed by the AI could not be verified and were removed or downgraded.")
     if d.run.event == "pull_request":
@@ -324,8 +330,12 @@ class CheckOutput:
     annotations: tuple[dict[str, object], ...] = ()
 
 
-def check_output(vd: ValidatedDiagnosis, text: str) -> CheckOutput:
-    """Check Run fields (FS-PUB-3). `text` is the rendered report; title/summary state the uncertainty."""
+SUPERSEDED_SUMMARY = "This check is the current result; the commit comment on this commit is from an earlier attempt."
+
+
+def check_output(vd: ValidatedDiagnosis, text: str, *, superseded: bool = False) -> CheckOutput:
+    """Check Run fields (FS-PUB-3). `text` is the rendered report; title/summary state the uncertainty. `superseded`:
+    the write-once commit comment shows an earlier attempt's report, said first so the summary cannot be misread."""
     d = vd.verify()
     if d.status is Status.diagnosed:
         title = f"{CATEGORY_LABEL[d.category]} ({d.confidence.band.value} confidence)"
@@ -348,6 +358,8 @@ def check_output(vd: ValidatedDiagnosis, text: str) -> CheckOutput:
                 "message": redact(_CTRL.sub("", d.root_cause or ""))[:1000] or "See the Tracewise report.",
             }
         )
+    if superseded:
+        summary = f"{SUPERSEDED_SUMMARY}\n\n{summary}"
     return CheckOutput(title[:120], summary[:2000], text[:CHECK_TEXT_MAX], tuple(annotations[:10]))
 
 
@@ -377,15 +389,22 @@ def render_could_not_complete(
     return redact(f"{head}## Tracewise: {title}\n\n{body}\n\n{links}\n")
 
 
-def publication_notes(text: str, missing: dict[str, str | None]) -> str:
-    """Append which surfaces could not be written and why (AT-REL-05), within the Check Run limit."""
-    if not missing:
+SUPERSEDED_NOTE = (
+    "- The commit comment on this commit shows an earlier attempt of this analysis. It cannot be edited (the app has "
+    "read-only access to repository contents), so **this check shows the current result**."
+)
+
+
+def publication_notes(text: str, missing: dict[str, str | None], *, superseded: bool = False) -> str:
+    """Append which surfaces could not be written and why (AT-REL-05), and whether the write-once commit comment
+    shows an earlier attempt's report (never left unexplained), within the Check Run limit."""
+    if not missing and not superseded:
         return text
     label = {"pr_comment": "pull request comment", "commit_comment": "commit comment"}
     rows = [
         f"- The {label.get(s, s)} could not be posted: the app lacks "
         f"**{esc(_PERMISSION_TEXT.get((p or '').split('=')[0].split(':')[0], p or 'a required permission'))}**."
         for s, p in sorted(missing.items())
-    ]
+    ] + ([SUPERSEDED_NOTE] if superseded else [])
     note = "\n\n### Publication\n\n" + "\n".join(rows) + "\n"
     return (text[: CHECK_TEXT_MAX - len(note) - 1] + note) if len(text) + len(note) > CHECK_TEXT_MAX else text + note

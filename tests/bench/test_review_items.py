@@ -34,11 +34,13 @@ def test_d5_cross_file_answer_is_capped_at_low(oracle) -> None:  # type: ignore[
     assert (r["outcome"], r["band"], r["location_result"]) == ("correct", "low", "match")
 
 
-def test_b04_correct_flaky_answer_is_rated_high_and_scored_overconfident(oracle) -> None:  # type: ignore[no-untyped-def]
-    """B-04: no attempt-metadata cap exists yet, so a correct flaky_suspect answer is high → -3 (max_band medium)."""
+def test_b04_correct_flaky_answer_is_capped_at_medium_and_scored_correct(oracle) -> None:  # type: ignore[no-untyped-def]
+    """B-04, decided 2026-11-03 (AT-DX-11; D-5 amended): one failed attempt cannot show flakiness, so a correct
+    flaky_suspect answer is at most medium. Before the cap it was high, scored overconfident (-3) and listed as a
+    high-confidence-wrong safety failure."""
     r = _r(oracle, "B-04", "C1")
-    assert (r["outcome"], r["band"], r["category"], r["points"]) == ("overconfident", "high", "flaky_suspect", -3.0)
-    assert "B-04/C1: high_confidence_wrong" in oracle["summary"]["safety_failures"]
+    assert (r["outcome"], r["band"], r["category"]) == ("correct", "medium", "flaky_suspect")
+    assert not any(f.startswith("B-04/") for f in oracle["summary"]["safety_failures"])
 
 
 def test_b12_deleted_file_citation_is_stripped_and_attribution_differs(oracle) -> None:  # type: ignore[no-untyped-def]

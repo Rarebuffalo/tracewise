@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 from typing import Any, Literal
 
-from tracewise.investigate.http_adapter import WireError
+from tracewise.investigate.http_adapter import CodecCapabilities, WireError, WireRefusal, WireTruncated
 from tracewise.investigate.provider import StepRequest, StepResponse, StepUsage, ToolCallRequest
 
 ENDPOINT = "https://api.openai.com/v1/responses"  # R-1 (POST /v1/responses; host from the official example)
@@ -32,6 +32,8 @@ PERMANENT_429_TYPES = frozenset({"insufficient_quota"})
 class OpenAIResponsesWire:
     name: Literal["openai", "gemini", "fake"] = "openai"
     endpoint = ENDPOINT
+    # R-9 "none"; R-10 reasoning items accompany function calls (later models may need more: unrecorded); R-11 details.
+    capabilities = CodecCapabilities(tool_choice_none=True, replay_scope="tool_turns", usage_breakdown=True)
 
     def auth_headers(self, key: str) -> dict[str, str]:
         return {"authorization": f"Bearer {key}"}  # R-2
@@ -81,7 +83,7 @@ class OpenAIResponsesWire:
         }
         if instructions:
             body["instructions"] = instructions
-        if request.allow_tools and request.tools:
+        if request.tools:
             body["tools"] = [
                 {
                     "type": "function",  # R-7
@@ -93,7 +95,9 @@ class OpenAIResponsesWire:
                 }
                 for t in request.tools
             ]
-            body["tool_choice"] = "auto"  # R-9
+            # R-9. A tool-free step keeps the same declarations and forbids calls ("none"), rather than omitting the tools
+            # while the history holds function_call items (G-7, undocumented either way).
+            body["tool_choice"] = "auto" if request.allow_tools else "none"
         return body
 
     # ------------------------------------------------------------------ response
@@ -103,6 +107,9 @@ class OpenAIResponsesWire:
             raise WireError("not a response object")
         status = doc.get("status")
         if status != "completed":  # R-11 statuses; R-13 incomplete (e.g. max_output_tokens): fail closed
+            details = doc.get("incomplete_details")
+            if status == "incomplete" and isinstance(details, dict) and details.get("reason") == "max_output_tokens":
+                raise WireTruncated("response stopped at max_output_tokens")  # R-13: the one documented reason
             raise WireError("response status is not completed")  # never quote the document (WireError contract)
         output = doc.get("output")
         if not isinstance(output, list):
@@ -121,7 +128,7 @@ class OpenAIResponsesWire:
                     if ptype == "output_text" and isinstance(part.get("text"), str):
                         texts.append(part["text"])
                     elif ptype == "refusal":
-                        raise WireError("the model refused")  # DECISION: a refusal is never a diagnosis
+                        raise WireRefusal("the model refused")  # DECISION: a refusal is never a diagnosis
                     else:
                         raise WireError("unknown message content part")
             elif kind == "function_call":  # R-5
@@ -140,10 +147,16 @@ class OpenAIResponsesWire:
         usage = doc.get("usage")
         if not isinstance(usage, dict) or not all(isinstance(usage.get(k), int) for k in ("input_tokens", "output_tokens")):
             raise WireError("usage missing")  # R-11; never invented
+        cached = _detail(usage, "input_tokens_details", "cached_tokens")  # R-11: part of input_tokens
+        reasoning = _detail(usage, "output_tokens_details", "reasoning_tokens")  # R-11: part of output_tokens
+        try:
+            step_usage = StepUsage(usage["input_tokens"], usage["output_tokens"], cached, reasoning)
+        except ValueError:
+            raise WireError("usage malformed") from None
         return StepResponse(
             "".join(texts) if texts else None,
             tuple(calls),
-            StepUsage(usage["input_tokens"], usage["output_tokens"]),
+            step_usage,
             tuple(replay) if calls else (),  # R-10: needed only alongside function calls
         )
 
@@ -155,6 +168,22 @@ class OpenAIResponsesWire:
             return False
         err = doc["error"]
         return err.get("code") in PERMANENT_429_CODES or err.get("type") in PERMANENT_429_TYPES
+
+
+def _detail(usage: dict[str, Any], group: str, key: str) -> int | None:
+    """An optional usage detail: absent means unknown (None), never 0; present but not a non-negative integer fails
+    closed."""
+    details = usage.get(group)
+    if details is None:
+        return None
+    if not isinstance(details, dict):
+        raise WireError("usage malformed")
+    if key not in details:
+        return None
+    v = details[key]
+    if type(v) is not int or v < 0:
+        raise WireError("usage malformed")
+    return v
 
 
 def _is_reasoning_item(item: Any) -> bool:

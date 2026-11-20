@@ -33,7 +33,7 @@ from pydantic import ValidationError
 
 from tracewise.analysis.collect import Evidence
 from tracewise.context.paths import UnsafePath, validate_repo_path
-from tracewise.context.source import ReadStatus
+from tracewise.context.source import FileRead, ReadStatus
 from tracewise.context.trigger import relevance, to_attribution
 from tracewise.contracts import (
     Band,
@@ -84,11 +84,15 @@ _PATH_TOKEN = re.compile(
     r"(?<![\w/.@-])((?:[\w.-]+/)*[\w.-]+\.(?:py|pyi|ts|tsx|js|jsx|mjs|cjs|json|ya?ml|toml|cfg|ini|txt|md|lock|sh|go|rs|"
     r"java|rb|php|c|h|cpp|css|html|vue|svelte|sql|env))(?::(\d{1,7}))?(?![\w/])"
 )
-_SENTENCE = re.compile(r"[^.!?\n]+[.!?]?")
+# A sentence ends at a terminator followed by whitespace or the end of the text, so the dot in a file name
+# (`pricing.py`) or a version does not split a causal claim into harmless-looking fragments (H-1).
+_SENTENCE = re.compile(r"(?:[^.!?\n]|[.!?](?![\s]|$))+[.!?]*")
 _CAUSAL_VERB = re.compile(
     r"(?i)\b(?:caus(?:ed|es|ing)|introduc(?:ed|es|ing)|broke|broken by|responsible for|regress(?:ed|ion))\b"
 )
 _TRIGGER_REF = re.compile(r"(?i)\b(?:push|commit|pull request|PR)\b|\b(?:this|latest|recent|last|triggering|new)\s+change\b")
+# A sentence whose subject is a bare pronoun that can refer back to the previous sentence (H-1, split claims).
+_ANAPHOR_START = re.compile(r"(?i)\s*(?:it|this|that|these|those|they)\b(?!\s+(?:test|file|function|module|line)s?\b)")
 _DANGEROUS = re.compile(
     r"(?i)(?:\b(?:curl|wget|iwr|invoke-webrequest)\b[^\n|]{0,200}\|\s*(?:sudo\s+)?(?:sh|bash|zsh|python\d?|perl|iex)\b"
     r"|\brm\s+-[a-z]*r[a-z]*f?\s+(?:/|~|\*)|\bbase64\s+-d[^\n|]{0,100}\|\s*(?:sh|bash)\b|\binvoke-expression\b|\biex\s*\("
@@ -109,18 +113,51 @@ GENERIC_NEXT_STEPS = [
 
 
 @dataclass(frozen=True)
+class UsageDetail:
+    """Provider usage beyond the totals in `Diagnosis.usage`, for persistence only (never rendered). `None` subsets:
+    not reported by the provider. `source` says whether the totals are complete (see `InvestigationResult`)."""
+
+    source: str = "no_call"
+    cached_input_tokens: int | None = None
+    reasoning_output_tokens: int | None = None
+
+    @classmethod
+    def of(cls, inv: InvestigationResult | None) -> UsageDetail:
+        if inv is None:
+            return cls()
+        return cls(inv.usage_source, inv.cached_input_tokens, inv.reasoning_output_tokens)
+
+
+@dataclass(frozen=True)
 class ValidatedDiagnosis:
     diagnosis: Diagnosis
     digest: str
+    usage: UsageDetail = UsageDetail()
 
     def verify(self) -> Diagnosis:
         if _digest(self.diagnosis) != self.digest:
             raise ValueError("diagnosis changed after validation")
         return self.diagnosis
 
+    @classmethod
+    def from_record(cls, d: Diagnosis) -> ValidatedDiagnosis:
+        """A diagnosis that `finalize` validated and the attempt fence let persist, read back to finish publishing it
+        (F1). The caller has just re-parsed it against the strict contract. No usage detail: that was recorded then."""
+        return cls(d, _digest(d))
+
 
 def _digest(d: Diagnosis) -> str:
     return hashlib.sha256(json.dumps(d.model_dump(mode="json"), sort_keys=True).encode()).hexdigest()
+
+
+# Inconclusive reason for an investigation that could not see the code it needed because of a transient failure.
+SOURCE_UNAVAILABLE = "source_unavailable"
+
+
+class ValidationUnavailable(Exception):
+    """D-B: a file the validator needs could not be read because of a temporary failure that outlasted the in-place
+    retries. This is an infrastructure failure, not an invalid answer: the model's answer is not judged on it. The
+    attempt is retried as a whole; answers are never reused across attempts (another attempt may see other code)."""
 
 
 class _Text:
@@ -128,13 +165,25 @@ class _Text:
 
     def __init__(self, ev: Evidence, flags: list[str]) -> None:
         self.ev, self.flags = ev, flags
-        self._eof: dict[str, int | None] = {}
+        self._reads: dict[str, FileRead] = {}
+
+    def read(self, path: str) -> FileRead:
+        """Every validator read: its own reserved budget (tools cannot exhaust it, C-3), the same path and size rules
+        as the tools, and one read per path (the location check and line checks share it)."""
+        if path not in self._reads:
+            r = self.ev.source.read(path, purpose="validation")
+            if r.status is ReadStatus.temporarily_unavailable:
+                raise ValidationUnavailable("a file needed for validation is temporarily unavailable")
+            if r.status is ReadStatus.budget_exhausted:
+                self._flag("validation_budget_exhausted")  # whatever depended on it stays unverified, and says why
+            self._reads[path] = r
+        return self._reads[path]
 
     def _lines(self, path: str) -> int | None:
-        if path not in self._eof:
-            r = self.ev.source.read(path) if self.ev.source.available else None
-            self._eof[path] = len(r.text.splitlines()) if r and r.status is ReadStatus.ok and r.text is not None else None
-        return self._eof[path]
+        if not self.ev.source.available:
+            return None
+        r = self.read(path)
+        return len(r.text.splitlines()) if r.status is ReadStatus.ok and r.text is not None else None
 
     def clean(self, text: str | None, limit: int) -> str | None:
         if text is None:
@@ -144,9 +193,17 @@ class _Text:
             out = _URL.sub("[link removed]", out)
             self._flag("url_removed")
 
+        prev_ref = False  # did the previous sentence name the push, commit, PR or change?
+
         def causal(m: re.Match[str]) -> str:
+            nonlocal prev_ref
             sentence = m.group(0)
-            if _CAUSAL_VERB.search(sentence) and _TRIGGER_REF.search(sentence):
+            ref = bool(_TRIGGER_REF.search(sentence))
+            # H-1, including a claim split across sentences: "Commit abc. It caused the failure." The pronoun
+            # sentence is removed only when it opens with a bare pronoun and directly follows a trigger reference.
+            split_claim = prev_ref and _ANAPHOR_START.match(sentence) is not None
+            prev_ref = ref
+            if _CAUSAL_VERB.search(sentence) and (ref or split_claim):
                 self._flag("causal_claim_removed")
                 return " [attribution claim removed; see the attribution line]."
             return sentence
@@ -229,7 +286,7 @@ def _examined(ev: Evidence, draft: ModelDraft | None, text: _Text) -> list[FileE
     return out
 
 
-def _location(ev: Evidence, draft: ModelDraft, examined: list[FileExamined]) -> tuple[Location, str] | str:
+def _location(ev: Evidence, draft: ModelDraft, examined: list[FileExamined], text: _Text) -> tuple[Location, str] | str:
     """Rule 2 + FS-DX-4. Returns (location, system-copied snippet) or a failure code."""
     loc = draft.problem_location
     assert loc is not None
@@ -241,7 +298,9 @@ def _location(ev: Evidence, draft: ModelDraft, examined: list[FileExamined]) -> 
         return "location_invalid_range"
     if not any(fe.path == path and fe.start <= loc.line_start and loc.line_end <= fe.end for fe in examined):
         return "location_not_examined"
-    r = ev.source.read(path)
+    r = text.read(path)
+    if r.status is ReadStatus.budget_exhausted:
+        return "location_validation_budget_exhausted"  # never reported as an unreadable file
     if r.status is not ReadStatus.ok or r.text is None:
         return "location_unreadable"
     lines = r.text.splitlines(keepends=True)
@@ -291,7 +350,9 @@ def _next_steps(draft: ModelDraft | None, text: _Text, flags: list[str]) -> list
     return out[:3]
 
 
-def finalize(ev: Evidence, inv: InvestigationResult | None, *, pr_number: int | None = None) -> ValidatedDiagnosis:
+def finalize(
+    ev: Evidence, inv: InvestigationResult | None, *, pr_number: int | None = None, not_run_reason: str | None = None
+) -> ValidatedDiagnosis:
     flags: list[str] = []
     text = _Text(ev, flags)
     run = _run_info(ev, pr_number)
@@ -302,7 +363,7 @@ def finalize(ev: Evidence, inv: InvestigationResult | None, *, pr_number: int | 
     limits = Limits(
         log_truncated=ev.log_truncated,
         files_skipped=sorted(ev.source.skipped)[:50],
-        budget_exhausted=bool(inv and inv.budget_exhausted),
+        budget_exhausted=bool(inv and inv.budget_exhausted) or not_run_reason == "attempt_deadline_exhausted",
         diff_truncated=ev.trigger.truncated,
     )
     usage = Usage(
@@ -325,13 +386,13 @@ def finalize(ev: Evidence, inv: InvestigationResult | None, *, pr_number: int | 
     elif ev.status == "no_failed_jobs":
         status, reason = Status.inconclusive, "no_failed_jobs"
     elif inv is None or inv.outcome != "answered" or draft is None:
-        status, reason = Status.inconclusive, inv.outcome if inv else "not_investigated"
+        status, reason = Status.inconclusive, inv.outcome if inv else (not_run_reason or "not_investigated")
     elif primaries == [] and ev.prepass is not None and ev.prepass.primaries:
         status, reason = Status.inconclusive, "primary_error_unresolved"  # rule 1 → rule 6
     elif draft.category is Category.unknown:
         status, reason = Status.inconclusive, "model_abstained"  # H-3
     if status is Status.diagnosed and draft is not None and draft.problem_location is not None:
-        got = _location(ev, draft, examined)
+        got = _location(ev, draft, examined, text)
         if isinstance(got, str):
             status, reason = Status.inconclusive, got  # rule 2 → rule 6
             flags.append(got)
@@ -339,6 +400,13 @@ def finalize(ev: Evidence, inv: InvestigationResult | None, *, pr_number: int | 
             location, snippet = got
     if status is Status.diagnosed and draft is not None and location is None and draft.category in conf.CODE_CATEGORIES:
         status, reason = Status.inconclusive, "no_location_for_code_category"  # H-3
+    if status is Status.inconclusive and reason != SOURCE_UNAVAILABLE and ev.source.transient_failure:
+        # I-3: reads that failed transiently (after the in-place retries) say nothing about the repository or the
+        # answer. An inconclusive result reached without them is an incomplete investigation, not a verdict: it is
+        # retried, and reported as "could not complete" if the source stays unreachable. A validated diagnosis
+        # stands; the unread files stay listed in `files_skipped`.
+        flags.append(f"inconclusive_before:{reason}")
+        reason = SOURCE_UNAVAILABLE
 
     category = draft.category if draft is not None and status is Status.diagnosed else Category.unknown
     root_cause = text.clean(draft.root_cause, 300) if draft and status is Status.diagnosed else None
@@ -407,4 +475,4 @@ def finalize(ev: Evidence, inv: InvestigationResult | None, *, pr_number: int | 
             inconclusive_reason="internal_inconsistency",
             validation_flags=sorted(set(flags))[:40],
         )
-    return ValidatedDiagnosis(d, _digest(d))
+    return ValidatedDiagnosis(d, _digest(d), UsageDetail.of(inv))

@@ -34,40 +34,59 @@ def _first(w: World, req: httpx.Request, skip: Any) -> httpx.Response:
     return jresp(404, {})
 
 
-def test_g_plat_11_bundled_publish_token_refusal_also_blocks_the_check_run(pool, owner, server, tmp_path, head) -> None:  # type: ignore[no-untyped-def]  # noqa: F811
+def _declining(w: World, permission: str) -> list[dict[str, str]]:
     """SIMULATED: GitHub refuses (422) a token request that includes a permission the installation has not granted.
-
-    The recorded docs only say a token "cannot be granted permissions that the app was not granted"; the
-    response for an installation that declined a permission is undocumented. Under this simulation the bundled
-    `publish` scope (pull_requests:write + checks:write) blocks the Check Run too, which AT-REL-05 intends to
-    keep publishing (and the commit comment, which needs only Contents read).
-    This test pins today's behaviour so that a change (per-surface tokens) is deliberate.
-    """
-    w = World(pool, owner, server, tmp_path / "ws", head)
-    w.state.commit_pulls[w.head] = [w.state.pr(12, w.head)]
+    The recorded docs only say a token "cannot be granted permissions that the app was not granted"; the exact
+    response for an installation that declined one is undocumented (live gate G-PLAT-7)."""
     mints: list[dict[str, str]] = []
 
     def mint(req: httpx.Request) -> httpx.Response:
         perms = json.loads(req.content)["permissions"]
         mints.append(perms)
-        if perms.get("pull_requests") == "write":
+        if permission in perms:
             return jresp(422, {"message": "The permissions requested are not granted to this installation."})
         return _first(w, req, mint)
 
     w.gh.routes.insert(0, ("POST", TOKENS, mint))
+    return mints
+
+
+def test_g_plat_11_a_declined_pull_requests_permission_blocks_only_the_pr_surface(pool, owner, server, tmp_path, head) -> None:  # type: ignore[no-untyped-def]  # noqa: F811
+    """Before G-PLAT-11 was fixed, one bundled publish token carried every surface's permission, so this refusal also
+    blocked the Check Run and the commit comment (all three ended `unpublished_permission`, nothing published)."""
+    w = World(pool, owner, server, tmp_path / "ws", head)
+    w.state.commit_pulls[w.head] = [w.state.pr(12, w.head)]
+    mints = _declining(w, "pull_requests")
     jid = w.enqueue()
     w.run()
     j = w.jobrow(jid)
     assert j["status"] == "succeeded" and j["attempts"] == 1  # no crash, no retry loop
-    # PR association also uses the publish token, so it fails too; D-4 then falls back to the commit comment,
-    # which needs only Contents read but shares the same refused token. Every surface is blocked.
+    # Association needs Pull requests: it is refused, so D-4 falls back to the commit comment (Contents read).
     assert j["result"]["publications"] == {
         "pr_comment": "unpublished_permission",
-        "commit_comment": "unpublished_permission",
-        "check_run": "unpublished_permission",
+        "commit_comment": "published",
+        "check_run": "published",
     }
-    assert w.state.check_runs == [] and w.all_prcs() == [] and w.state.writes == []  # the gap: no Check Run at all
-    assert sum(1 for m in mints if m.get("pull_requests") == "write") <= 4  # bounded: one refused mint per surface try
+    (cr,) = w.state.check_runs  # AT-REL-05: the Check Run is published and names what is missing
+    assert "Pull requests" in cr["output"]["text"] and cr["conclusion"] == "neutral"
+    assert len(w.all_ccs()) == 1 and w.all_prcs() == []
+    assert all(set(m) <= {"metadata", "contents", "actions", "checks", "pull_requests"} for m in mints)
+    assert not any("contents" in m and m["contents"] != "read" for m in mints)  # never more than Contents read
+    assert all(len(set(m) - {"metadata"}) == 1 for m in mints if "checks" in m or "pull_requests" in m)  # one per token
+
+
+def test_g_plat_11_a_declined_checks_permission_blocks_only_the_check_run(pool, owner, server, tmp_path, head) -> None:  # type: ignore[no-untyped-def]  # noqa: F811
+    w = World(pool, owner, server, tmp_path / "ws", head)
+    _declining(w, "checks")
+    jid = w.enqueue()
+    w.run()
+    j = w.jobrow(jid)
+    assert j["status"] == "succeeded"
+    assert j["result"]["publications"] == {"commit_comment": "published", "check_run": "unpublished_permission"}
+    assert w.state.check_runs == [] and len(w.all_ccs()) == 1
+    assert owner.execute("SELECT state, missing_permission FROM publication WHERE surface = 'check_run'").fetchone()[0] == (
+        "unpublished_permission"
+    )
 
 
 def test_suspend_mid_job_cancels_without_any_publication(pool, owner, server, tmp_path, head) -> None:  # type: ignore[no-untyped-def]  # noqa: F811
@@ -147,3 +166,49 @@ def test_run_cancelled_by_suspension_is_not_reanalysed_after_unsuspend(pool, own
     assert owner.execute("SELECT status, last_error FROM job").fetchall() == [("cancelled", "installation_suspended")]
     assert ingest_workflow_run(pool, "redelivered-later", ev).outcome == "duplicate_run"
     assert owner.execute("SELECT count(*) FROM job").fetchone() == (1,)
+
+
+def test_a_refused_commit_comment_is_reported_on_the_check_run_and_nothing_else_is_blocked(  # type: ignore[no-untyped-def]
+    pool,
+    owner,
+    server,  # noqa: F811
+    tmp_path,
+    head,  # noqa: F811
+) -> None:
+    """Partial publication: the commit comment's write is refused (403; e.g. Contents read not honoured for the write,
+    which G-PLAT-5 must confirm live). The Check Run is still published, names what is missing, and the job ends with
+    an accurate per-surface result, never as a full success claim."""
+    w = World(pool, owner, server, tmp_path / "ws", head)
+    w.state.fault("POST", "cc", 403)
+    jid = w.enqueue()
+    w.run()
+    j = w.jobrow(jid)
+    assert j["status"] == "succeeded" and j["attempts"] == 1
+    assert j["result"]["publications"] == {"commit_comment": "unpublished_permission", "check_run": "published"}
+    (cr,) = w.state.check_runs
+    assert "commit comment could not be posted" in cr["output"]["text"] and w.all_ccs() == []
+    assert owner.execute("SELECT state, missing_permission FROM publication WHERE surface = 'commit_comment'").fetchone() == (
+        "unpublished_permission",
+        "contents=read",
+    )
+
+
+def test_a_refused_check_run_write_leaves_the_comment_published_and_the_result_accurate(  # type: ignore[no-untyped-def]
+    pool,
+    owner,
+    server,  # noqa: F811
+    tmp_path,
+    head,  # noqa: F811
+) -> None:
+    w = World(pool, owner, server, tmp_path / "ws", head)
+    w.state.fault("POST", "cr", 403)
+    jid = w.enqueue()
+    w.run()
+    j = w.jobrow(jid)
+    assert j["status"] == "succeeded" and j["attempts"] == 1  # a permission refusal is final: no retry loop
+    assert j["result"]["publications"] == {"commit_comment": "published", "check_run": "unpublished_permission"}
+    assert len(w.all_ccs()) == 1 and w.state.check_runs == []
+    assert owner.execute("SELECT state, missing_permission FROM publication WHERE surface = 'check_run'").fetchone() == (
+        "unpublished_permission",
+        "checks=write",
+    )

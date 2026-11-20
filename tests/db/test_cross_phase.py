@@ -9,6 +9,8 @@ from __future__ import annotations
 import secrets
 from typing import Any
 
+import psycopg
+import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
@@ -99,13 +101,15 @@ def test_sweep_across_tenants_lifecycle_then_worker_under_rls(pool, tenant_pool,
     s = sweep(pool, hub)  # system plane: crosses tenants by design
     assert (s.completed, s.enqueued, s.repos_swept) == (True, 2, 2)
 
-    # The tenant plane sees each installation's swept rows only.
-    for me, other in ((9, 10), (10, 9)):
+    # The tenant plane sees each installation's swept rows only, and no queue or intake rows at all (D-11, 0015).
+    for me, _other in ((9, 10), (10, 9)):
         with transaction(tenant_pool, tenant=me) as c:
-            for t in ("workflow_run", "job", "webhook_delivery", "repository"):
+            for t in ("workflow_run", "repository"):
                 ids = {r["installation_id"] for r in c.execute(f"SELECT installation_id FROM {t}").fetchall()}  # noqa: S608
                 assert ids == {me}, (t, ids)
-            assert c.execute("SELECT count(*) AS n FROM job WHERE installation_id = %s", (other,)).fetchone() == {"n": 0}
+        for t in ("job", "webhook_delivery"):
+            with pytest.raises(psycopg.errors.InsufficientPrivilege), transaction(tenant_pool, tenant=me) as c:
+                c.execute(f"SELECT installation_id FROM {t}")  # noqa: S608
 
     with _client(pool) as c:  # installation 10 is suspended before its job runs
         assert send(c, "installation", inst("suspend", 10)).json() == {"outcome": "processed", "cancelled_jobs": 1}

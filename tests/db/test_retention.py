@@ -141,7 +141,8 @@ def test_age_boundaries_mixed_eligible_and_ineligible(pool, owner) -> None:  # t
     assert {r[0] for r in owner.execute("SELECT delivery_id FROM webhook_delivery")} == {"d-9-1", "d-9-2"}
     assert {r[0] for r in owner.execute("SELECT fingerprint FROM failure_signature")} == {"0000000900000001", "0000000900000002"}
     assert {r[0] for r in owner.execute("SELECT dedupe_key FROM job")} == {"j-9-1", "j-9-2"}  # queued j-9-2 never touched
-    assert owner.execute("SELECT count(*) FROM audit_event").fetchone() == (2,)
+    assert owner.execute("SELECT count(*) FROM audit_event WHERE action <> 'retention.run'").fetchone() == (2,)
+    assert owner.execute("SELECT count(*) FROM audit_event WHERE action = 'retention.run'").fetchone() == (1,)  # this run
     assert owner.execute("SELECT count(*) FROM redelivery_request").fetchone() == (0,)
     assert owner.execute("SELECT count(*) FROM workflow_run").fetchone() == (2,)  # a_old's run (unreferenced now) went
     assert dict(s.deleted) | {} == {
@@ -440,3 +441,79 @@ def test_rows_without_an_expiry_timestamp_are_kept(pool, owner) -> None:  # type
     run(pool)
     assert owner.execute("SELECT count(*) FROM redelivery_request WHERE guid = 'never'").fetchone() == (1,)
     assert owner.execute("SELECT count(*) FROM job").fetchone() == (1,)
+
+
+# ------------------------------------------------------------------ fifth batch: dry run, audit, live runs (0017)
+
+
+def test_a_dry_run_reports_exactly_what_a_run_deletes_and_changes_nothing(pool, owner) -> None:  # type: ignore[no-untyped-def]
+    a_old, a_mid, _ = seed(pool, 9, 1, n=3)
+    age(owner, "analysis", "updated_at", 181, f"id = {a_old}")
+    age(owner, "analysis", "updated_at", 91, f"id = {a_mid}")
+    age(owner, "webhook_delivery", "received_at", 15, "delivery_id = 'd-9-0'")
+
+    def counts() -> dict[str, Any]:
+        out = {
+            t: owner.execute(f"SELECT count(*) FROM {t}").fetchone()  # noqa: S608 - fixed table names
+            for t in ("publication", "webhook_delivery", "audit_event", "usage_event")
+        }
+        out["analysis"] = owner.execute("SELECT count(*), count(diagnosis) FROM analysis").fetchone()
+        return out
+
+    snapshot = counts()
+    dry = run(pool, dry_run=True)
+    assert dry.dry_run and dry.completed
+    after = counts()
+    assert after == snapshot  # nothing changed, and no audit row claims a run
+    real = run(pool)
+    assert dict(real.deleted) == dict(dry.deleted)  # the prediction was exact
+
+
+def test_every_real_run_is_audited_without_content(pool, owner) -> None:  # type: ignore[no-untyped-def]
+    (a,) = seed(pool, 9, 1)
+    age(owner, "analysis", "updated_at", 91, f"id = {a}")
+    run(pool)
+    actor, action, inst, detail = owner.execute(
+        "SELECT actor, action, installation_id, detail FROM audit_event WHERE action = 'retention.run'"
+    ).fetchone()
+    assert (actor, action, inst) == ("system:retention", "retention.run", None)
+    assert detail["deleted_analysis_content"] == 1 and detail["completed"] is True and detail["error"] is None
+    assert all(isinstance(v, int | bool) or v is None for v in detail.values())  # counts and flags only
+    assert "assert 1 == 2" not in json.dumps(detail)  # the purged excerpt never moves into the audit trail
+
+
+def test_the_data_of_a_run_with_a_live_job_is_never_purged(pool, owner) -> None:  # type: ignore[no-untyped-def]
+    """0017: e.g. an operator requeue of an old run. Its analysis, publications and run stay until the job ends."""
+    a_live, a_idle = seed(pool, 9, 1, n=2)
+    age(owner, "analysis", "updated_at", 181)
+    age(owner, "workflow_run", "created_at", 400)
+    owner.execute("UPDATE job SET run_key = '1:9000', status = 'queued', finished_at = NULL WHERE dedupe_key = 'j-9-0'")
+    run(pool)
+    assert {r[0] for r in owner.execute("SELECT id FROM analysis")} == {a_live}
+    assert owner.execute("SELECT count(*), count(diagnosis) FROM analysis").fetchone() == (1, 1)
+    assert owner.execute("SELECT count(*) FROM publication WHERE analysis_id = %s", (a_live,)).fetchone() == (2,)
+    owner.execute("UPDATE job SET status = 'succeeded', finished_at = now() WHERE dedupe_key = 'j-9-0'")
+    run(pool)  # the job ended: the next run purges it (idempotent, resumable)
+    assert owner.execute("SELECT count(*) FROM analysis").fetchone() == (0,)
+    assert a_idle not in {r[0] for r in owner.execute("SELECT id FROM analysis")}
+
+
+def test_the_dry_run_cli_flag(pool, owner, capsys) -> None:  # type: ignore[no-untyped-def]
+    seed(pool, 9, 1)
+    assert retention.main(["--dry-run"], build=lambda: pool) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["dry_run"] is True and out["completed"] is True
+    assert owner.execute("SELECT count(*) FROM audit_event WHERE action = 'retention.run'").fetchone() == (0,)
+
+
+def test_migration_0017_roundtrip_restores_the_previous_purge(pg, owner) -> None:  # type: ignore[no-untyped-def]
+    downgrade(pg.url(OWNER), "0016")
+    body = owner.execute("SELECT prosrc FROM pg_proc WHERE proname = 'tracewise_purge'").fetchone()[0]
+    assert "github_run_id" not in body and owner.execute("SELECT to_regclass('job_live_run')").fetchone() == (None,)
+    upgrade(pg.url(OWNER))
+    body = owner.execute("SELECT prosrc FROM pg_proc WHERE proname = 'tracewise_purge'").fetchone()[0]
+    assert body.count("github_run_id") == 3
+    owner_name, cfg, definer = owner.execute(
+        "SELECT pg_get_userbyid(proowner), proconfig, prosecdef FROM pg_proc WHERE proname = 'tracewise_purge'"
+    ).fetchone()
+    assert (owner_name, cfg, definer) == ("tracewise_owner", ["search_path=pg_catalog, public, pg_temp"], True)

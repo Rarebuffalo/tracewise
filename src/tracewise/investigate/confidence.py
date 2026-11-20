@@ -14,6 +14,9 @@ Rule (D-5, the stricter reading of FS-DX-7 "the error references the location, o
            (error_references_location  OR  (changed_line_at_location AND error_references_file))
   medium = diagnosed, location validated (or a non-code category resting on a real error line), no conflict
   low    = everything else, including every non-diagnosed status
+Cap (2026-11-03; AT-DX-11, benchmark B-04): `flaky_suspect` is never `high`. Flakiness is non-determinism across
+attempts; one failed attempt cannot show it, however well its error line corroborates the location. Without attempt
+metadata (FS-ATR-3, P2) such a diagnosis is at most `medium`, with the basis entry `flakiness_unobservable`.
 """
 
 from __future__ import annotations
@@ -142,6 +145,9 @@ def assess(
         basis.append("log_truncated")
     corroborated = near or (on_changed and file_ref)
     if corroborated and not flags and not log_truncated:
+        if category is Category.flaky_suspect:
+            basis.append("flakiness_unobservable")  # the cap above: corroborated, still one attempt
+            return Confidence(band=Band.medium, basis=basis)
         return Confidence(band=Band.high, basis=basis)
     basis.append("not_corroborated" if not corroborated else "corroborated_but_degraded")
     return Confidence(band=Band.medium, basis=basis)

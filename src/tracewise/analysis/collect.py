@@ -14,13 +14,16 @@ Status rules (FS-LOG-1, FS-LOG-3):
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import logging
-from collections.abc import Iterator
+import time
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from typing import Literal
 
 from pydantic import ValidationError
 
+from tracewise.analysis.attempt import AttemptDeadline
 from tracewise.context.gitfetch import GitFetcher
 from tracewise.context.paths import UnsafePath, validate_repo_path
 from tracewise.context.provider import open_code_context
@@ -51,6 +54,7 @@ class Evidence:
     logs_missing: list[int] = field(default_factory=list)
     jobs_not_downloaded: list[int] = field(default_factory=list)
     missing_permission: str | None = None
+    deadline_exhausted: bool = False  # C-4: the attempt deadline cut collection short (logs or jobs incomplete)
 
     @property
     def implicated_paths(self) -> set[str]:
@@ -65,28 +69,48 @@ class Evidence:
 
     @property
     def log_truncated(self) -> bool:
-        return bool(self.prepass and self.prepass.log_truncated) or bool(self.logs_missing)
+        return bool(self.prepass and self.prepass.log_truncated) or bool(self.logs_missing) or self.deadline_exhausted
+
+
+# A signed log URL is valid for about a minute (FS-LOG-1). Streams are opened together but read one after another, so a
+# slow first log could let the later URLs expire (C-7): a URL older than this is re-requested just before reading.
+_URL_FRESH_S = 30.0
 
 
 class _LogStream:
     """Iterates one job's log lines; records (instead of raising) a log that vanished mid-way."""
 
-    def __init__(self, rc: RepoClient, job_id: int) -> None:
-        self.rc, self.job_id = rc, job_id
+    def __init__(
+        self, rc: RepoClient, job_id: int, clock: Callable[[], float] = time.monotonic, deadline: AttemptDeadline | None = None
+    ) -> None:
+        self.rc, self.job_id, self._clock, self._deadline = rc, job_id, clock, deadline
         self.truncated = False
+        self.deadline_cut = False
         self.error: Exception | None = None
         self.lines: Iterator[str] | None = None
+        self._opened_at = 0.0
 
     def open(self) -> None:
         self.lines = self.rc.job_log_lines(self.job_id)  # API call + redirect check happen here
+        self._opened_at = self._clock()
 
     def __iter__(self) -> Iterator[str]:
         assert self.lines is not None
         try:
-            yield from self.lines
+            if self._clock() - self._opened_at > _URL_FRESH_S:
+                self.lines = self.rc.job_log_lines(self.job_id)  # nothing was read from the old URL
+            for line in self.lines:
+                if self._deadline is not None and self._deadline.expired:
+                    # C-4: the attempt's time is up. Keep what was read, mark the log incomplete, release the stream.
+                    self.truncated = self.deadline_cut = True
+                    close = getattr(self.lines, "close", None)
+                    if close is not None:
+                        close()
+                    return
+                yield line
             self.truncated = bool(getattr(self.lines, "truncated", False))
-        except (gh_err.NotFound, gh_err.Gone, gh_err.GitHubRetryable, gh_err.UnsafeRedirect) as e:
-            self.error = e
+        except (gh_err.NotFound, gh_err.Gone, gh_err.GitHubRetryable, gh_err.UnsafeRedirect, gh_err.PermissionDenied) as e:
+            self.error = e  # PermissionDenied only from a re-request: access was revoked while earlier logs were read
 
 
 @contextlib.contextmanager
@@ -100,6 +124,7 @@ def collect_evidence(
     code_limits: Limits | None = None,
     tool_limits: ToolLimits | None = None,
     log_max_bytes: int = DEFAULT_MAX_BYTES,
+    deadline: AttemptDeadline | None = None,
 ) -> Iterator[Evidence]:
     if rc.scope != "analysis" or rc.repo_id != job.repo_id:
         raise ValueError("evidence collection needs the analysis-scope client of the run's repository")
@@ -113,8 +138,13 @@ def collect_evidence(
     missing: list[int] = []
     permission: str | None = None
     streams: list[tuple[JobInfo, _LogStream]] = []
+    out_of_time = False
     for j in selected:
-        s = _LogStream(rc, j.id)
+        if deadline is not None and deadline.expired:
+            out_of_time = True  # C-4: jobs not reached in time are reported as not downloaded, never as clean
+            skipped.append(j.id)
+            continue
+        s = _LogStream(rc, j.id, deadline=deadline)
         try:
             s.open()
         except (gh_err.NotFound, gh_err.Gone, gh_err.UnsafeRedirect):
@@ -132,13 +162,24 @@ def collect_evidence(
             if s.truncated and s.job_id in prepass.logs:
                 prepass.logs[s.job_id].truncated = True
         missing += [s.job_id for _, s in streams if s.error is not None]
+        out_of_time = out_of_time or any(s.deadline_cut for _, s in streams)
     if status == "ok" and len(missing) == len(selected) and selected:
         status, prepass = "logs_unavailable", None  # metadata only; never a guessed cause (FS-LOG-3)
 
     trigger = compute_trigger_diff(rc, job.head_sha, base_sha=base_sha)
+    if fetcher is not None and deadline is not None:
+        # The git fetch's own timeout, never beyond what the attempt has left. With almost nothing left the fetch is
+        # skipped; the contents API source reads lazily, and each read is bounded by the client and the tool loop.
+        left = deadline.cap(fetcher.flimits.fetch_timeout_s)
+        if left < 1.0:
+            fetcher, out_of_time = None, True
+        else:
+            fetcher.flimits = dataclasses.replace(fetcher.flimits, fetch_timeout_s=left)
     with open_code_context(rc, job.head_sha, fetcher=fetcher, limits=code_limits) as source:
+        if deadline is not None:
+            source.time_left = deadline.remaining  # transient-read retries stop at the attempt deadline (C-4, I-3)
         tools = ToolBox(source, diff_text=trigger.render(), limits=tool_limits or ToolLimits())
-        ev = Evidence(job, status, failed, prepass, trigger, source, tools, missing, skipped, permission)
+        ev = Evidence(job, status, failed, prepass, trigger, source, tools, missing, skipped, permission, out_of_time)
         log.info(
             "evidence collected",
             extra={

@@ -26,7 +26,14 @@ APP_PERMISSIONS: dict[str, Access] = {
 # Per-purpose token scopes: each token gets only what its phase needs.
 ANALYSIS_SCOPE: dict[str, Access] = {"actions": "read", "contents": "read", "metadata": "read"}
 PUBLISH_SCOPE: dict[str, Access] = {"contents": "read", "metadata": "read", "pull_requests": "write", "checks": "write"}
-SCOPES: dict[str, dict[str, Access]] = {"analysis": ANALYSIS_SCOPE, "publish": PUBLISH_SCOPE}
+# G-PLAT-11: one token per publication surface, so a permission the installation declined blocks only the surface that
+# needs it (AT-REL-05). `publish` remains the publisher's binding; it never mints itself (see `Publisher`).
+PUBLISH_SURFACE_SCOPES: dict[str, dict[str, Access]] = {
+    "publish_checks": {"metadata": "read", "checks": "write"},  # Check Runs: create, update, list by ref
+    "publish_pr": {"metadata": "read", "pull_requests": "write"},  # PR association, PR comments
+    "publish_commit": {"metadata": "read", "contents": "read"},  # commit comments (Contents read, EV-P09)
+}
+SCOPES: dict[str, dict[str, Access]] = {"analysis": ANALYSIS_SCOPE, "publish": PUBLISH_SCOPE, **PUBLISH_SURFACE_SCOPES}
 
 
 @dataclass(frozen=True)

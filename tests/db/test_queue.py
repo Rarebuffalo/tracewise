@@ -62,9 +62,10 @@ def test_happy_path_and_owner_guard(pool) -> None:  # type: ignore[no-untyped-de
     assert j.deadline_at is not None
     assert claim(pool, "w2") is None  # nothing else ready
     with transaction(pool) as c:
-        assert not queue.complete(c, jid, "w2")  # not the owner
-        assert queue.complete(c, jid, "w1", {"analysis_id": 1})
-        assert not queue.complete(c, jid, "w1")  # already terminal
+        assert not queue.complete(c, jid, "w2", attempt=1)  # not the owner
+        assert not queue.complete(c, jid, "w1", {"analysis_id": 1}, attempt=2)  # not this attempt
+        assert queue.complete(c, jid, "w1", {"analysis_id": 1}, attempt=1)
+        assert not queue.complete(c, jid, "w1", attempt=1)  # already terminal
     assert status(pool, jid).status == "succeeded"
 
 
@@ -72,7 +73,7 @@ def test_retryable_failure_backoff_then_retry(pool, owner) -> None:  # type: ign
     (jid,) = enq(pool)
     claim(pool)
     with transaction(pool) as c:
-        assert queue.fail(c, jid, "w1", RetryableError("502 bad gateway"), rnd=random.Random(1)) == "retry_wait"
+        assert queue.fail(c, jid, "w1", RetryableError("502 bad gateway"), attempt=1, rnd=random.Random(1)) == "retry_wait"
         delay = c.execute("SELECT extract(epoch FROM run_after - now()) AS s FROM job WHERE id = %s", (jid,)).fetchone()
     assert delay is not None and 23 <= float(delay["s"]) <= 37  # 30 s ±20%
     assert claim(pool) is None  # not before run_after
@@ -85,7 +86,7 @@ def test_retry_after_is_honoured(pool) -> None:  # type: ignore[no-untyped-def]
     (jid,) = enq(pool)
     claim(pool)
     with transaction(pool) as c:
-        queue.fail(c, jid, "w1", RetryableError("rate limited", retry_after_s=75))
+        queue.fail(c, jid, "w1", RetryableError("rate limited", retry_after_s=75), attempt=1)
         s = c.execute("SELECT extract(epoch FROM run_after - now()) AS s FROM job WHERE id = %s", (jid,)).fetchone()
     assert s is not None and float(s["s"]) >= 74
 
@@ -94,9 +95,10 @@ def test_attempts_exhausted_goes_dead(pool, owner) -> None:  # type: ignore[no-u
     (jid,) = enq(pool, max_attempts=2)
     for expected in ("retry_wait", "dead"):
         make_ready(owner, jid)
-        assert claim(pool) is not None
+        j = claim(pool)
+        assert j is not None
         with transaction(pool) as c:
-            assert queue.fail(c, jid, "w1", RuntimeError("boom")) == expected
+            assert queue.fail(c, jid, "w1", RuntimeError("boom"), attempt=j.attempts) == expected
     j = status(pool, jid)
     assert j.status == "dead" and j.last_error is not None and j.last_error.startswith("attempts exhausted")
 
@@ -105,7 +107,7 @@ def test_permanent_error_dead_immediately(pool) -> None:  # type: ignore[no-unty
     (jid,) = enq(pool)
     claim(pool)
     with transaction(pool) as c:
-        assert queue.fail(c, jid, "w1", PermanentError("403 missing permission")) == "dead"
+        assert queue.fail(c, jid, "w1", PermanentError("403 missing permission"), attempt=1) == "dead"
     assert status(pool, jid).last_error.startswith("permanent")  # type: ignore[union-attr]
 
 
@@ -114,7 +116,7 @@ def test_deadline_exceeded(pool, owner) -> None:  # type: ignore[no-untyped-def]
     claim(pool)
     owner.execute("UPDATE job SET deadline_at = now() + interval '5 seconds' WHERE id = %s", (jid,))
     with transaction(pool) as c:  # 30 s backoff would pass the deadline
-        assert queue.fail(c, jid, "w1", RetryableError("timeout")) == "dead"
+        assert queue.fail(c, jid, "w1", RetryableError("timeout"), attempt=1) == "dead"
     assert "deadline exceeded" in (status(pool, jid).last_error or "")
     (j2,) = enq(pool, prefix="q")
     owner.execute("UPDATE job SET deadline_at = now() - interval '1 second' WHERE id = %s", (j2,))
@@ -126,14 +128,14 @@ def test_lease_expiry_reclaims_and_fences_old_worker(pool, owner) -> None:  # ty
     claim(pool, "w1", lease_s=60)
     owner.execute("UPDATE job SET locked_until = now() - interval '1 second' WHERE id = %s", (jid,))
     with transaction(pool) as c:
-        assert not queue.heartbeat(c, jid, "w1")  # expired lease cannot be extended
+        assert not queue.heartbeat(c, jid, "w1", attempt=1)  # expired lease cannot be extended
     j = claim(pool, "w2")
     assert j is not None and j.locked_by == "w2" and j.attempts == 2
     with transaction(pool) as c:
-        assert not queue.complete(c, jid, "w1")
-        assert queue.fail(c, jid, "w1", RuntimeError("late")) is None
-        assert queue.heartbeat(c, jid, "w2")
-        assert queue.complete(c, jid, "w2")
+        assert not queue.complete(c, jid, "w1", attempt=1)
+        assert queue.fail(c, jid, "w1", RuntimeError("late"), attempt=1) is None
+        assert queue.heartbeat(c, jid, "w2", attempt=2)
+        assert queue.complete(c, jid, "w2", attempt=2)
 
 
 def test_lease_expiry_on_last_attempt_goes_dead(pool, owner) -> None:  # type: ignore[no-untyped-def]
@@ -191,7 +193,7 @@ def test_concurrent_claims_never_double_claim_or_exceed_cap(pool, owner) -> None
                 violations.append(f"cap exceeded: {peak[0]}")
             time.sleep(0.005)
             with transaction(pool) as c:
-                assert queue.complete(c, j.id, name)
+                assert queue.complete(c, j.id, name, attempt=j.attempts)
 
     threads = [threading.Thread(target=worker, args=(f"t{i}",)) for i in range(8)]
     for t in threads:
@@ -214,7 +216,7 @@ def test_last_error_is_redacted(pool) -> None:  # type: ignore[no-untyped-def]
     (jid,) = enq(pool)
     claim(pool)
     with transaction(pool) as c:
-        queue.fail(c, jid, "w1", RetryableError("bad creds ghs_" + "B" * 36))
+        queue.fail(c, jid, "w1", RetryableError("bad creds ghs_" + "B" * 36), attempt=1)
     assert "ghs_" not in (status(pool, jid).last_error or "")
 
 

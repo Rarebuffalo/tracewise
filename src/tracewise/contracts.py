@@ -41,15 +41,26 @@ class _Lenient(BaseModel):
     model_config = ConfigDict(extra="ignore", frozen=True)
 
 
+# `owner/repo` as GitHub allows it; shared with the lifecycle models (web/lifecycle.py) and the git/contents path
+# checks (context/paths.py). The payload is HMAC-authenticated, but the name later reaches URLs, git and logs, so its
+# shape is checked at the boundary too. Owner: alphanumerics and dashes (legacy accounts may have dashes anywhere),
+# or an Enterprise Managed User name `<name>_<shortcode>` (shortcode 3-8 alphanumerics); 39 characters at most in
+# both cases (GitHub docs, "Username considerations for external authentication", retrieved 2026-11-01).
+# No lookaround (pydantic's pattern engine has none): the 39-character bound is spelled out per shortcode length.
+_EMU = "|".join(rf"[A-Za-z0-9][A-Za-z0-9-]{{0,{37 - k}}}_[A-Za-z0-9]{{{k}}}" for k in range(3, 9))
+OWNER = rf"(?:[A-Za-z0-9][A-Za-z0-9-]{{0,38}}|{_EMU})"
+FULL_NAME = rf"^{OWNER}/[A-Za-z0-9._-]{{1,100}}$"
+
+
 class RepoRef(_Lenient):
     id: GitHubId
-    full_name: str
+    full_name: str = Field(pattern=FULL_NAME)
     private: bool = False
 
 
 class HeadRepoRef(_Lenient):
     id: GitHubId
-    full_name: str
+    full_name: str = Field(pattern=FULL_NAME)
 
 
 class WorkflowRun(_Lenient):

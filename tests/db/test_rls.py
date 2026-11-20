@@ -31,6 +31,26 @@ TENANT_TABLES = (
     "audit_event",
     "webhook_delivery",
 )
+# D-11 option C (0015): the tables the tenant role still reads. RLS still guards every table above (defence in depth),
+# but the tenant role holds no privilege at all on the others.
+TENANT_READABLE = ("installation", "repository", "workflow_run", "analysis", "publication")
+SYSTEM_ONLY = tuple(t for t in TENANT_TABLES if t not in TENANT_READABLE)
+
+
+def _run(conn: Any, inst: int, repo_id: int, run_id: int) -> int:
+    return repo.insert_workflow_run(
+        conn,
+        installation_id=inst,
+        repo_id=repo_id,
+        run_id=run_id,
+        attempt=1,
+        workflow_id=3,
+        head_sha="c" * 40,
+        head_branch="main",
+        head_repo_id=repo_id,
+        event="push",
+        conclusion="failure",
+    )
 
 
 def _seed_tenant(conn: Any, inst: int, repo_id: int) -> dict[str, int]:
@@ -88,26 +108,32 @@ def test_runtime_roles_are_what_the_policies_assume(owner) -> None:  # type: ign
 def test_tenant_sees_and_changes_only_its_own_rows(tenant_pool, two) -> None:  # type: ignore[no-untyped-def]
     with transaction(tenant_pool, tenant=9) as c:
         assert c.execute("SELECT current_user AS u").fetchone() == {"u": APP}
-        for t in TENANT_TABLES:
+        for t in TENANT_READABLE:
             assert _visible(c, t) == {9}, t
         assert repo.repository_scope(c, 2) is None  # repo 2 belongs to installation 10
         assert repo.repository_scope(c, 1)["installation_id"] == 9
         # Writes to another tenant's rows match nothing; they are not errors, and nothing changes.
         assert c.execute("UPDATE analysis SET status = 'inconclusive' WHERE id = %s", (two[10]["analysis"],)).rowcount == 0
         assert c.execute("UPDATE publication SET state = 'failed' WHERE installation_id = 10").rowcount == 0
-        assert c.execute("DELETE FROM job WHERE installation_id = 10").rowcount == 0
-        assert c.execute("UPDATE repository SET enabled = false WHERE id = 2").rowcount == 0
         # Its own rows are writable.
         assert c.execute("UPDATE analysis SET status = 'inconclusive' WHERE id = %s", (two[9]["analysis"],)).rowcount == 1
-        repo.add_usage(c, 9, "analysis", 2)
+        _run(c, 9, 1, 7001)
     with transaction(tenant_pool, tenant=10) as c:
         assert {r["status"] for r in c.execute("SELECT status FROM analysis").fetchall()} == {"diagnosed"}
-        assert c.execute("SELECT count(*) AS n FROM usage_event").fetchone() == {"n": 1}
+        assert c.execute("SELECT count(*) AS n FROM workflow_run").fetchone() == {"n": 1}
+    for t, sql in [(t, f"SELECT 1 FROM {t}") for t in SYSTEM_ONLY] + [  # noqa: S608
+        ("job", "DELETE FROM job WHERE installation_id = 10"),
+        ("repository", "UPDATE repository SET enabled = false WHERE id = 1"),
+        ("installation", "UPDATE installation SET status = 'active' WHERE id = 9"),
+    ]:
+        with pytest.raises(psycopg.errors.InsufficientPrivilege), transaction(tenant_pool, tenant=9) as c:
+            c.execute(sql)
+        assert t
 
 
 def test_tenant_cannot_insert_or_move_rows_into_another_tenant(tenant_pool, two) -> None:  # type: ignore[no-untyped-def]
     with pytest.raises(psycopg.errors.InsufficientPrivilege), transaction(tenant_pool, tenant=9) as c:
-        repo.add_usage(c, 10, "analysis", 1)  # WITH CHECK rejects a row for installation 10
+        _run(c, 10, 2, 7002)  # WITH CHECK rejects a row for installation 10
     with pytest.raises(psycopg.errors.InsufficientPrivilege), transaction(tenant_pool, tenant=9) as c:
         repo.audit(c, "x", "y", 10)
     with pytest.raises(psycopg.errors.InsufficientPrivilege), transaction(tenant_pool, tenant=9) as c:
@@ -118,14 +144,14 @@ def test_tenant_cannot_insert_or_move_rows_into_another_tenant(tenant_pool, two)
 
 def test_missing_context_sees_nothing_and_writes_nothing(tenant_pool, two) -> None:  # type: ignore[no-untyped-def]
     with transaction(tenant_pool) as c:
-        for t in TENANT_TABLES:
+        for t in TENANT_READABLE:
             assert _visible(c, t) == set(), t
-        assert c.execute("UPDATE job SET status = 'cancelled'").rowcount == 0
+        assert c.execute("UPDATE analysis SET status = 'inconclusive'").rowcount == 0
     with pytest.raises(psycopg.errors.InsufficientPrivilege), transaction(tenant_pool) as c:
-        repo.add_usage(c, 9, "analysis", 1)
+        _run(c, 9, 1, 7003)
     with pytest.raises(psycopg.errors.InsufficientPrivilege), transaction(tenant_pool) as c:
         c.execute("SELECT set_config('tracewise.installation_id', '', true)")  # an empty value is "no tenant"
-        repo.add_usage(c, 9, "analysis", 1)
+        _run(c, 9, 1, 7004)
 
 
 def test_invalid_context_is_an_error_not_a_wildcard(tenant_pool, two) -> None:  # type: ignore[no-untyped-def]
@@ -134,7 +160,7 @@ def test_invalid_context_is_an_error_not_a_wildcard(tenant_pool, two) -> None:  
             c.execute("SELECT set_config('tracewise.installation_id', %s, true)", (bad,))
             c.execute("SELECT id FROM installation").fetchall()
     with transaction(tenant_pool, tenant=999) as c:  # a well-formed but unknown tenant sees nothing
-        assert all(_visible(c, t) == set() for t in TENANT_TABLES)
+        assert all(_visible(c, t) == set() for t in TENANT_READABLE)
     for bad_arg in (0, -1, True, "9"):
         with pytest.raises(ValueError):
             with transaction(tenant_pool, tenant=bad_arg):  # type: ignore[arg-type]
@@ -148,17 +174,17 @@ def test_context_is_transaction_local_on_reused_pooled_connections(pg, two) -> N
     try:
         with transaction(p, tenant=9) as c:
             pid = c.execute("SELECT pg_backend_pid() AS p").fetchone()["p"]
-            assert _visible(c, "job") == {9}
+            assert _visible(c, "analysis") == {9}
         with transaction(p) as c:  # after COMMIT
             assert c.execute("SELECT pg_backend_pid() AS p").fetchone()["p"] == pid
             assert c.execute("SELECT current_setting('tracewise.installation_id', true) AS s").fetchone()["s"] in ("", None)
-            assert _visible(c, "job") == set()
+            assert _visible(c, "analysis") == set()
         with pytest.raises(RuntimeError), transaction(p, tenant=9) as c:
-            assert _visible(c, "job") == {9}
+            assert _visible(c, "analysis") == {9}
             raise RuntimeError("abort")
         with transaction(p) as c:  # after ROLLBACK
             assert c.execute("SELECT pg_backend_pid() AS p").fetchone()["p"] == pid
-            assert _visible(c, "job") == set()
+            assert _visible(c, "analysis") == set()
     finally:
         p.close()
 
@@ -170,11 +196,11 @@ def test_concurrent_transactions_with_different_tenants_stay_separate(tenant_poo
 
     def work(inst: int) -> None:
         try:
-            for _ in range(20):
+            for i in range(20):
                 with transaction(tenant_pool, tenant=inst) as c:
                     barrier.wait(timeout=10)  # both transactions are open at the same time
-                    seen[inst].append(_visible(c, "analysis") | _visible(c, "publication") | _visible(c, "job"))
-                    repo.add_usage(c, inst, "analysis", 1)
+                    seen[inst].append(_visible(c, "analysis") | _visible(c, "publication") | _visible(c, "workflow_run"))
+                    _run(c, inst, 1 if inst == 9 else 2, 8000 + inst * 100 + i)
         except BaseException as e:  # surfaced below
             errors.append(e)
 
@@ -187,7 +213,7 @@ def test_concurrent_transactions_with_different_tenants_stay_separate(tenant_poo
     assert seen[9] == [{9}] * 20 and seen[10] == [{10}] * 20
     for inst in (9, 10):
         with transaction(tenant_pool, tenant=inst) as c:
-            assert c.execute("SELECT count(*) AS n FROM usage_event").fetchone() == {"n": 21}
+            assert c.execute("SELECT count(*) AS n FROM workflow_run").fetchone() == {"n": 21}
 
 
 def test_tenant_role_cannot_use_system_plane_tables_or_bypass(tenant_pool, two) -> None:  # type: ignore[no-untyped-def]
@@ -227,4 +253,4 @@ def test_migration_0005_roundtrip(pg, owner, two) -> None:  # type: ignore[no-un
     upgrade(pg.url(OWNER))
     assert owner.execute("SELECT count(*) FROM pg_policies WHERE policyname = 'tenant_isolation'").fetchone() == (10,)
     with psycopg.connect(pg.url(APP)) as c:
-        assert c.execute("SELECT count(*) FROM job").fetchone() == (0,)
+        assert c.execute("SELECT count(*) FROM analysis").fetchone() == (0,)

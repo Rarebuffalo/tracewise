@@ -8,8 +8,10 @@ import re
 import httpx
 import pytest
 
-from tests.db.test_recovery import NOW, Hub, delivery, redeliver, run_obj, setup_tenants, sweep
-from tests.github_fake import jresp
+from tests.db.test_recovery import NOW, Hub, clock, delivery, redeliver, run_obj, setup_tenants, sweep
+from tests.github_fake import jresp, test_key
+from tracewise import recovery as rec
+from tracewise.github.auth import AppCredentials
 
 RUNS = re.compile(r"^/repos/[^/]+/[^/]+/actions/runs$")
 
@@ -102,3 +104,31 @@ def test_interrupted_redelivery_request_counts_towards_the_attempt_cap(pool, own
     assert redeliver(pool, hub).skipped["cooldown"] == 1  # the cooldown applies to the uncertain attempt
     later = redeliver(pool, hub, now=lambda: NOW + timedelta(hours=1))
     assert later.redelivered == 1 and hub.redelivered == [41]
+
+
+def test_a_refused_app_jwt_stops_the_redelivery_pass_without_recording_an_attempt(pool, owner) -> None:  # type: ignore[no-untyped-def]
+    """C-9: a 401 on the redelivery POST (the pass outlived its 9-minute JWT, or a key fault) was recorded as
+    `refused:401` against the delivery's attempt cap although nothing reached GitHub."""
+    setup_tenants(pool)
+    hub = Hub()
+    hub.deliveries = [delivery(41, "g-auth")]
+    hub.faults["redeliver"] = ["401"]
+    s = redeliver(pool, hub)
+    assert s.stopped == "app_auth_failed" and s.redelivered == 0 and s.errors["redeliver"] == 1
+    assert owner.execute("SELECT count(*) FROM redelivery_request WHERE guid = 'g-auth'").fetchone() == (0,)
+
+
+def test_each_redelivery_post_carries_a_freshly_minted_app_jwt(pool, owner) -> None:  # type: ignore[no-untyped-def]
+    """C-9 cause: one JWT was minted per pass and reused for every POST, so a pass longer than 9 minutes failed."""
+    setup_tenants(pool)
+    hub = Hub()
+    hub.deliveries = [delivery(41, "g-a"), delivery(42, "g-b")]
+    minted: list[float | None] = []
+
+    class Counting(AppCredentials):
+        def app_jwt(self, now: float | None = None) -> str:
+            minted.append(now)
+            return super().app_jwt(now)
+
+    s = rec.redeliver_failed_deliveries(pool, hub.http(), Counting(123, test_key()), now=clock)
+    assert s.redelivered == 2 and len(minted) == 3  # the listing, then one per POST

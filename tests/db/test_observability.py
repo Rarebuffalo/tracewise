@@ -130,6 +130,8 @@ def test_cost_is_computed_only_from_configured_prices(world: World) -> None:
         price_output_per_mtok=Decimal("15"),
     )
     assert a.cost_usd(deps, 1000, 200) == Decimal("0.006")  # 1000*3/1e6 + 200*15/1e6
+    assert a.cost_usd(deps, 1000, 200, 0) == Decimal("0.006")  # cached input reported as zero: still calculable
+    assert a.cost_usd(deps, 1000, 200, 400) is None  # cached input has no configured price: unavailable, never guessed
     assert (
         a.cost_usd(
             a.AnalyzeDeps(
@@ -318,7 +320,13 @@ def test_report_with_no_data_makes_no_latency_claim(pool, owner) -> None:  # typ
     r = ops.report(pool, now=NOW)
     assert r["latency"]["end_to_end_s"] == {"n": 0, "p50": None, "p95": None, "within_deadline": 0, "deadline_s": 600}
     assert r["latency"]["processing_ms"] == {"n": 0, "p50": None, "p95": None}
-    assert r["cost_usd"] == {"total": None, "priced": 0, "unpriced": 0}
+    assert r["cost_usd"] == {
+        "basis": "calculated_from_configured_prices",
+        "total": None,
+        "priced": 0,
+        "unpriced": 0,
+        "unpriced_with_cached_input": 0,
+    }
     assert ops.failure_rate(pool, now=NOW)["state"] == "insufficient_data"
 
 
@@ -404,7 +412,13 @@ def test_report_tolerates_malformed_and_incomplete_ops_records(pool, owner) -> N
     r = ops.report(pool)
     assert r["analyses"]["total"] == 5 and r["analyses"]["without_ops_record"] == 5  # publish_result never written
     assert r["latency"]["processing_ms"] == {"n": 1, "p50": 120.0, "p95": 120.0}  # only the valid, non-negative total
-    assert r["latency"]["end_to_end_s"]["n"] == 0 and r["tokens"] == {"in": 0, "out": 0}
+    assert r["latency"]["end_to_end_s"]["n"] == 0 and r["tokens"] == {
+        "in": 0,
+        "out": 0,
+        "cached_in": {"total": None, "reported": 0, "not_reported": 5},  # unknown, never shown as 0
+        "reasoning_out": {"total": None, "reported": 0, "not_reported": 5},
+        "usage": {"provider": 0, "partial": 0, "no_call": 0, "unknown": 5},
+    }
 
 
 @pytest.mark.parametrize("stage", ["collect_evidence", "diagnose", "_persist", "check_run"])

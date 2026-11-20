@@ -18,7 +18,7 @@ from psycopg_pool import ConnectionPool
 
 from tracewise.db.session import Conn, DatabaseUnavailable, transaction
 from tracewise.jobs import queue
-from tracewise.jobs.queue import Job, JobCancelled, PermanentError
+from tracewise.jobs.queue import Fence, Job, JobCancelled, PermanentError, StaleAttempt
 from tracewise.logging import correlation_id
 from tracewise.observe import bind, event
 
@@ -30,9 +30,12 @@ class JobContext:
     job: Job
     lease_lost: threading.Event = field(default_factory=threading.Event)
     finished: threading.Event = field(default_factory=threading.Event)
+    # D-1/D-2: the database-decided owner of this attempt. Ownership-dependent writes verify it in their own
+    # transaction; the local `lease_lost` flag is only an early exit, never the guarantee.
+    fence: Fence | None = None
 
     def check(self) -> None:
-        """Handlers call this before side effects (e.g. publishing); raises if the lease was lost."""
+        """Handlers call this before side effects (e.g. publishing); raises if the lease was lost (local signal)."""
         if self.lease_lost.is_set():
             raise LeaseLost(f"job {self.job.id}: lease lost")
 
@@ -70,10 +73,12 @@ class Worker:
         if job is None:
             return False
         token = correlation_id.set(f"job-{job.id}-a{job.attempts}")
-        ctx = JobContext(job)
+        ctx = JobContext(job, fence=Fence(job.id, job.installation_id, self.worker_id, job.attempts))
         beat = threading.Thread(target=self._heartbeat, args=(ctx,), daemon=True, name=f"hb-{job.id}")
         with bind(job_id=job.id, installation_id=job.installation_id, attempt=job.attempts):
-            event(log, "job.claimed", kind=job.kind, max_attempts=job.max_attempts, worker=self.worker_id)
+            # A claim after the reaper took an expired lease back is a takeover: this attempt is the new owner.
+            takeover = job.attempts > 1 and job.last_error == "lease expired"
+            event(log, "job.claimed", kind=job.kind, max_attempts=job.max_attempts, worker=self.worker_id, takeover=takeover)
             beat.start()
             t0 = time.monotonic()
             try:
@@ -95,10 +100,14 @@ class Worker:
         except LeaseLost:
             event(log, "job.lease_lost", logging.WARNING)
             return
+        except StaleAttempt:
+            # The database refused a write: a newer attempt owns the job. Write nothing more, not even a failure.
+            event(log, "job.stale_attempt_stopped", logging.WARNING)
+            return
         except JobCancelled as e:
             try:
                 with transaction(self.pool) as conn:
-                    queue.cancel_running(conn, job.id, self.worker_id, str(e))
+                    queue.cancel_running(conn, job.id, self.worker_id, str(e), attempt=job.attempts)
                 event(log, "job.cancelled", reason=str(e)[:64])
             except DatabaseUnavailable:
                 event(log, "job.record_failed", logging.ERROR, transition="cancelled")
@@ -108,7 +117,7 @@ class Worker:
             return
         try:
             with transaction(self.pool) as conn:
-                ok = queue.complete(conn, job.id, self.worker_id, result)
+                ok = queue.complete(conn, job.id, self.worker_id, result, attempt=job.attempts)
             if ok:
                 event(log, "job.succeeded", outcome=(result or {}).get("outcome"))
             else:
@@ -120,7 +129,7 @@ class Worker:
     def _record_failure(self, job: Job, err: Exception) -> None:
         try:
             with transaction(self.pool) as conn:
-                status = queue.fail(conn, job.id, self.worker_id, err)
+                status = queue.fail(conn, job.id, self.worker_id, err, attempt=job.attempts)
             event(
                 log,
                 "job.retry_scheduled" if status == "retry_wait" else "job.failed",
@@ -136,7 +145,7 @@ class Worker:
         while not ctx.finished.wait(self.heartbeat_s):
             try:
                 with transaction(self.pool) as conn:
-                    if not queue.heartbeat(conn, ctx.job.id, self.worker_id, self.lease_s):
+                    if not queue.heartbeat(conn, ctx.job.id, self.worker_id, self.lease_s, attempt=ctx.job.attempts):
                         ctx.lease_lost.set()
                         return
             except DatabaseUnavailable:

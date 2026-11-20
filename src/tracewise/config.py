@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     database_url: SecretStr | None = None  # tenant plane (tracewise_app; RLS-restricted)
     database_url_system: SecretStr | None = None  # system plane (tracewise_system; BYPASSRLS): ingress, queue, recovery
     database_url_migrations: SecretStr | None = None
+    database_url_operator: SecretStr | None = None  # ops requeue only: the operator's personal login (tracewise_operator)
 
     # LIVE only: the project-scoped dev App in the approved test org.
     github_app_id: int | None = None
@@ -38,7 +39,8 @@ class Settings(BaseSettings):
     investigation_max_tool_calls: int = Field(12, ge=1, le=12)
     investigation_timeout_s: int = Field(120, ge=1, le=120)
     log_max_bytes_per_job: int = Field(2 * 1024 * 1024, ge=1024)
-    report_max_chars: int = Field(60_000, ge=1000)
+    # Upper bound: GitHub comment bodies are limited to about 65,536 characters; the Check Run text has its own cap.
+    report_max_chars: int = Field(60_000, ge=1000, le=60_000)
     # T-703 / FS-QTA-1: analyses per installation per UTC calendar month. Unset: no quota (the value is an owner decision).
     analysis_quota_monthly: int | None = Field(None, ge=1)
 
@@ -55,6 +57,7 @@ class Settings(BaseSettings):
             self.database_url,
             self.database_url_system,
             self.database_url_migrations,
+            self.database_url_operator,
             self.github_webhook_secret,
             self.openai_api_key,
         ):

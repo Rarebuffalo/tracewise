@@ -90,7 +90,9 @@ class FakeRC:
 
 def publisher(comments: list[dict[str, Any]]) -> Publisher:
     p = Publisher.__new__(Publisher)
-    p.rc, p.app_id, p.bot_login = FakeRC(comments), 42, None  # type: ignore[assignment]
+    rc = FakeRC(comments)
+    p.rc, p.app_id, p.bot_login = rc, 42, None  # type: ignore[assignment]
+    p._clients = {"pr_comment": rc, "commit_comment": rc, "check_run": rc}  # type: ignore[dict-item]
     return p
 
 
@@ -109,8 +111,8 @@ def test_a4_a_marker_printed_in_a_log_cannot_select_another_workflows_report() -
     wf3_body = report_with_log_line(f"E   assert 0.21 == 1.21 {wf4}", 3)
     assert wf4 in wf3_body  # the forged marker really is in workflow 3's comment
     p = publisher([ours(301, wf3_body)])
-    assert p._find_comment("list_pr_comments", marker("pr_comment", 4), number=12) is None
-    assert p._find_comment("list_pr_comments", marker("pr_comment", 3), number=12) == 301  # legitimate lookup
+    assert p._find_comment("pr_comment", "list_pr_comments", marker("pr_comment", 4), number=12) is None
+    assert p._find_comment("pr_comment", "list_pr_comments", marker("pr_comment", 3), number=12)[0] == 301  # type: ignore[index]  # legitimate lookup
 
 
 @pytest.mark.parametrize(
@@ -125,11 +127,11 @@ def test_a4_a_marker_printed_in_a_log_cannot_select_another_workflows_report() -
     ids=["not-first-line", "leading-space", "no-newline", "prefix-of-other-id", "malformed"],
 )
 def test_a4_only_the_exact_first_line_marker_identifies_a_report(body: str) -> None:
-    assert publisher([ours(9, body)])._find_comment("list_pr_comments", "pr:wf4", number=1) is None
+    assert publisher([ours(9, body)])._find_comment("pr_comment", "list_pr_comments", "pr:wf4", number=1) is None
 
 
 def test_a4_duplicate_markers_pick_the_first_genuine_report_and_ignore_foreign_authors() -> None:
     real = "<!-- tracewise:pr:wf4 -->\n### report"
     forged = {"id": 1, "body": real, "user": {"login": "attacker"}}  # same text, not authored by the app
     p = publisher([forged, ours(2, "noise <!-- tracewise:pr:wf4 -->"), ours(3, real), ours(4, real)])
-    assert p._find_comment("list_pr_comments", "pr:wf4", number=1) == 3
+    assert p._find_comment("pr_comment", "list_pr_comments", "pr:wf4", number=1)[0] == 3  # type: ignore[index]

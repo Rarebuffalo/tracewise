@@ -101,7 +101,11 @@ class GitHubState:
             return jresp(
                 403,
                 {"message": "Resource not accessible by integration"},
-                {"x-accepted-github-permissions": "pull_requests=write" if "pr" in kind else "checks=write"},
+                {
+                    "x-accepted-github-permissions": {"cc": "contents=read"}.get(
+                        kind, "pull_requests=write" if "pr" in kind else "checks=write"
+                    )
+                },
             ), False
         return jresp(int(action), {"message": "fault"}), False
 

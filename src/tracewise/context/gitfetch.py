@@ -32,6 +32,7 @@ import os
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import tempfile
 import time
@@ -53,6 +54,16 @@ _WS_NAME = re.compile(r"^tw-ws-(\d+)-[A-Za-z0-9_]+$")
 
 class GitFetchError(Exception):
     """Fetch failed; callers fall back to the Contents API. Messages are scrubbed."""
+
+
+def _require_private_dir(root: Path) -> None:
+    """The workspace root must be a real directory (not a symlink) owned by this process's user and closed to group
+    and others. Otherwise a local user who created it first could swap a live workspace (multi-user hosts)."""
+    st = os.lstat(root)
+    if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
+        raise GitFetchError("workspace root is not a directory")
+    if st.st_uid != os.getuid() or st.st_mode & 0o077:
+        raise GitFetchError("workspace root is not private to this user (owner and mode 0700 required)")
 
 
 class GitAuthError(GitFetchError):
@@ -138,6 +149,7 @@ class GitFetcher:
         owner, repo = validate_owner_repo(full_name)
         validate_sha(head_sha)
         self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        _require_private_dir(self.root)  # a pre-existing root could be another local user's, or a symlink
         ws = Path(tempfile.mkdtemp(prefix=f"{WS_PREFIX}{os.getpid()}-", dir=self.root))
         try:
             ws.chmod(0o700)

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import re
 from typing import Any
 
+import httpx
 import pytest
 
 from tests.context.conftest import make_fetcher
@@ -203,5 +205,80 @@ def test_publish_scope_cannot_fetch_code() -> None:
 
 def test_aggregate_budget_applies_to_api_source() -> None:
     _, rc = setup()
-    src = ContentsApiSource(rc, SHA, Limits(max_total_read_bytes=3))
+    src = ContentsApiSource(rc, SHA, Limits(max_total_read_bytes=3, validation_read_bytes=1))
     assert src.read("src/app.py").status is ReadStatus.budget_exhausted
+
+
+# ------------------------------------------------------------------ I-3 / D-A / D-B: read errors by class
+
+
+def _contents_route(gh: FakeGitHub, handler) -> None:  # type: ignore[no-untyped-def]
+    gh.routes.insert(0, ("GET", re.compile(r"^/repos/acme/app/contents/src/app.py$"), handler))
+
+
+@pytest.mark.parametrize(
+    "resp",
+    [lambda r: jresp(422, {"message": "Unprocessable"}), lambda r: httpx.Response(200, content=b"{not json")],
+    ids=["422", "invalid-json"],
+)
+def test_a_permanent_error_on_one_file_is_that_file_unreadable_not_a_dead_job(resp) -> None:  # type: ignore[no-untyped-def]
+    """D-A: it used to raise out of the tool call and end the whole job `dead` with no notice. D-C: its own status,
+    `read_failed`, distinct from absence (`not_found`) and from a transient failure; one request, no retry."""
+    gh, rc = setup()
+    _contents_route(gh, resp)
+    src = ContentsApiSource(rc, SHA)
+    r = src.read("src/app.py")
+    assert r.status is ReadStatus.read_failed and src.skipped["src/app.py"] is ReadStatus.read_failed
+    assert len(gh.calls("GET", r"/contents/src/app.py$")) == 1 and not src.transient_failure
+
+
+def test_a_transient_failure_is_retried_in_place_then_reported_as_temporary() -> None:
+    gh, rc = setup()
+    _contents_route(gh, lambda r: jresp(502, {"message": "Bad gateway"}))
+    src = ContentsApiSource(rc, SHA)
+    sleeps: list[float] = []
+    src._sleep = sleeps.append
+    r = src.read("src/app.py", purpose="validation")
+    assert r.status is ReadStatus.temporarily_unavailable and sleeps == [1.0]  # TRANSIENT_READ_TRIES = 2
+    assert len(gh.calls("GET", r"/contents/src/app.py$")) == 2 * 4  # each try: one request + 3 client retries
+    assert src.skipped["src/app.py"] is ReadStatus.temporarily_unavailable
+
+
+def test_a_transient_failure_that_clears_reads_normally() -> None:
+    gh, rc = setup()
+    n = {"calls": 0}
+
+    def flaky(r):  # type: ignore[no-untyped-def]
+        n["calls"] += 1
+        if n["calls"] <= 4:  # the client's inline retries are used up once: one source-level retry follows
+            return jresp(503, {"message": "unavailable"})
+        return jresp(200, contents("src/app.py", FILES["src/app.py"]))
+
+    _contents_route(gh, flaky)
+    src = ContentsApiSource(rc, SHA)
+    src._sleep = lambda s: None
+    assert src.read("src/app.py").status is ReadStatus.ok and "src/app.py" not in src.skipped
+
+
+def test_transient_retries_stop_at_the_attempt_deadline() -> None:
+    gh, rc = setup()
+    _contents_route(gh, lambda r: jresp(502, {"message": "Bad gateway"}))
+    src = ContentsApiSource(rc, SHA)
+    src.time_left = lambda: 0.5  # less than the 1 s pause: no second try
+    src._sleep = lambda s: (_ for _ in ()).throw(AssertionError("slept past the deadline"))
+    assert src.read("src/app.py").status is ReadStatus.temporarily_unavailable
+    assert len(gh.calls("GET", r"/contents/src/app.py$")) == 4
+
+
+def test_a_token_scope_failure_is_not_mistaken_for_a_missing_file(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Credential-level faults concern the whole source, not one file: they still propagate."""
+    _, rc = setup()
+    src = ContentsApiSource(rc, SHA)
+    src.entries()
+
+    def refuse(*a, **kw):  # type: ignore[no-untyped-def]
+        raise gh_err.TokenScopeError("token repositories differ")
+
+    monkeypatch.setattr(rc, "request", refuse)
+    with pytest.raises(gh_err.TokenScopeError):
+        src.read("src/app.py")

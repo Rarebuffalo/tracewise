@@ -54,11 +54,11 @@ class AppCredentials:
 
     def app_jwt(self, now: float | None = None) -> str:
         t = int(now if now is not None else time.time())
-        token = jwt.encode(
+        # Not registered with the log scrubber: a JWT is never logged, and every JWT shape is already redacted by the
+        # scrubber's token pattern. Registering each one (a new JWT per mint) grew the scrubber's set without bound.
+        return jwt.encode(
             {"iat": t - JWT_BACKDATE_S, "exp": t + JWT_LIFETIME_S, "iss": str(self.app_id)}, self._key, algorithm="RS256"
         )
-        secret_filter.register(token)
-        return token
 
 
 @dataclass(frozen=True)
@@ -84,6 +84,11 @@ class TokenProvider:
             raise ValueError(f"unknown token scope {scope!r}")
         key = (installation_id, repo_id, scope)
         with self._lock:
+            # Expired tokens of other keys are dropped too, so a long-running worker serving many repositories keeps
+            # neither dead tokens nor their scrubber entries indefinitely.
+            now = self._clock()
+            for k in [k for k, t in self._cache.items() if t.expires_at <= now and k != key]:
+                self._evict(k)
             cached = self._cache.get(key)
             if cached and cached.expires_at - self._clock() > REFRESH_MARGIN_S:
                 return cached
@@ -138,7 +143,14 @@ def _verify_scope(requested: dict[str, Access], granted: Any, doc: dict[str, Any
     if doc.get("repository_selection") != "selected":
         raise TokenScopeError("token is not limited to selected repositories")
     repos = doc.get("repositories")
-    if repos is not None and [r.get("id") for r in repos] != [repo_id]:
+    # 4C: the REST reference marks `repositories` optional and does not say when it is present; no live response has
+    # been recorded. Absent, the grant cannot be checked, so it is refused (fail closed) until an observed response
+    # (LIVE-VALIDATION-PLAN, G-PLAT-13) shows otherwise.
+    if repos is None:
+        raise TokenScopeError("token response does not list its repositories")
+    if not isinstance(repos, list) or not all(isinstance(r, dict) for r in repos):
+        raise TokenScopeError("token repositories are malformed")
+    if [r.get("id") for r in repos] != [repo_id]:
         raise TokenScopeError("token repositories differ from the requested repository")
 
 

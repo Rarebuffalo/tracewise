@@ -61,16 +61,25 @@ def test_no_column_level_grants_hide_beside_the_table_grants(owner: Any) -> None
     )
 
 
-def test_only_the_purge_is_security_definer_and_only_the_system_role_runs_it(owner: Any) -> None:
-    definers = rows(owner, "SELECT proname FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND prosecdef")
-    assert definers == [("tracewise_purge",)]
+def test_only_the_purge_the_job_fence_and_the_requeue_are_security_definers_with_their_runners(owner: Any) -> None:
+    """The requeue (0013) runs for no runtime role: only the `tracewise_operator` group (test below). The purge runs
+    only for the system role. The job fence (migration 0012, D-1/D-2) is runnable by both runtime
+    roles: the tenant plane must check ownership in its own write transactions, without job-table rights."""
+    definers = rows(
+        owner, "SELECT proname FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND prosecdef ORDER BY proname"
+    )
+    assert definers == [("tracewise_job_owned",), ("tracewise_purge",), ("tracewise_requeue",)]
     executable = rows(
         owner,
         """SELECT p.proname, r.rolname FROM pg_proc p CROSS JOIN pg_roles r
             WHERE p.pronamespace = 'public'::regnamespace AND r.rolname IN ('tracewise_app', 'tracewise_system') AND p.prosecdef
               AND has_function_privilege(r.oid, p.oid, 'EXECUTE')""",
     )
-    assert executable == [("tracewise_purge", "tracewise_system")]
+    assert sorted(executable) == [
+        ("tracewise_job_owned", "tracewise_app"),
+        ("tracewise_job_owned", "tracewise_system"),
+        ("tracewise_purge", "tracewise_system"),
+    ]
 
 
 def test_runtime_roles_cannot_create_or_inherit_anything(owner: Any) -> None:
@@ -109,3 +118,34 @@ def test_no_default_privileges_grant_future_objects_to_runtime_roles_or_public(o
 def test_only_the_system_role_bypasses_rls(owner: Any) -> None:
     got = dict(rows(owner, "SELECT rolname, rolbypassrls FROM pg_roles WHERE rolname IN ('tracewise_app', 'tracewise_system')"))
     assert got == {"tracewise_app": False, "tracewise_system": True}
+
+
+def test_only_the_operator_group_may_execute_the_requeue(owner: Any) -> None:
+    got = dict(
+        owner.execute(
+            "SELECT rolname, has_function_privilege(oid, 'tracewise_requeue(bigint, text, boolean)', 'EXECUTE')"
+            " FROM pg_roles WHERE rolname IN ('tracewise_app', 'tracewise_system', 'tracewise_operator', 'ops_mallory')"
+        ).fetchall()
+    )
+    assert got == {"tracewise_app": False, "tracewise_system": False, "tracewise_operator": True, "ops_mallory": False}
+    acl = owner.execute("SELECT proacl::text FROM pg_proc WHERE proname = 'tracewise_requeue_max_reruns'").fetchone()
+    assert acl is not None and not (acl[0] or "").startswith("{=") and ",=" not in (acl[0] or "")  # PUBLIC revoked
+
+
+def test_runtime_roles_hold_only_what_their_code_uses(owner: Any) -> None:
+    """D-11 option C (0015): no runtime role may DELETE from any Tracewise table, and the tenant role uses only the
+    sequences of the three tables it inserts into."""
+    deleters = rows(
+        owner,
+        """SELECT c.relname, r.rolname FROM pg_class c CROSS JOIN pg_roles r
+           WHERE c.relnamespace = 'public'::regnamespace AND c.relkind = 'r'
+             AND r.rolname IN ('tracewise_app', 'tracewise_system') AND has_table_privilege(r.oid, c.oid, 'DELETE')""",
+    )
+    assert deleters == []
+    seqs = rows(
+        owner,
+        """SELECT relname FROM (SELECT c.relname, c.oid FROM pg_class c
+                                 WHERE c.relnamespace = 'public'::regnamespace AND c.relkind = 'S' OFFSET 0) s
+            WHERE has_sequence_privilege('tracewise_app', s.oid, 'USAGE') ORDER BY 1""",
+    )
+    assert seqs == [("analysis_id_seq",), ("publication_id_seq",), ("workflow_run_id_seq",)]

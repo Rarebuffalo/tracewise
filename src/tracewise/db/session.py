@@ -18,7 +18,31 @@ class DatabaseUnavailable(Exception):
     """The database could not be reached or failed mid-operation; the caller should retry later."""
 
 
-def make_pool(url: str, *, min_size: int = 1, max_size: int = 10, timeout_s: float = 3.0) -> ConnectionPool[Conn]:
+# I-7: session bounds for every runtime connection. A stuck statement or a wait on another session's row lock (the
+# publisher holds one across its GitHub calls) ends in `DatabaseUnavailable`, which callers treat as retryable, instead
+# of holding a worker and a pooled connection indefinitely. Set per session, not via libpq `options`, so `options` in
+# an operator's URL are left alone.
+STATEMENT_TIMEOUT_MS = 30_000
+LOCK_TIMEOUT_MS = 10_000
+
+
+def make_pool(
+    url: str,
+    *,
+    min_size: int = 1,
+    max_size: int = 10,
+    timeout_s: float = 3.0,
+    statement_timeout_ms: int = STATEMENT_TIMEOUT_MS,
+    lock_timeout_ms: int = LOCK_TIMEOUT_MS,
+) -> ConnectionPool[Conn]:
+    if not (0 < statement_timeout_ms <= 600_000 and 0 < lock_timeout_ms <= statement_timeout_ms):
+        raise ValueError("database timeouts must be positive, at most 10 minutes, and lock <= statement")
+
+    def configure(conn: Conn) -> None:
+        conn.execute("SELECT set_config('statement_timeout', %s, false)", (str(statement_timeout_ms),))
+        conn.execute("SELECT set_config('lock_timeout', %s, false)", (str(lock_timeout_ms),))
+        conn.commit()  # session-level settings; the pool requires an idle connection back
+
     return ConnectionPool(
         libpq_url(url),
         min_size=min_size,
@@ -26,6 +50,7 @@ def make_pool(url: str, *, min_size: int = 1, max_size: int = 10, timeout_s: flo
         timeout=timeout_s,
         kwargs={"row_factory": dict_row, "autocommit": False, "connect_timeout": 3},
         connection_class=psycopg.Connection[DictRow],
+        configure=configure,
         open=True,
         name="tracewise",
     )

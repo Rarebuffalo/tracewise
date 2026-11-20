@@ -19,6 +19,9 @@ OWNER = "tracewise_owner"
 APP = "tracewise_app"
 SYSTEM = "tracewise_system"
 DB = "tracewise"
+OPERATORS = "tracewise_operator"
+OPERATOR = "ops_alice"
+OUTSIDER = "ops_mallory"
 
 
 def _bin(name: str) -> str:
@@ -67,6 +70,9 @@ class EphemeralPostgres:
         with psycopg.connect(self.url(OWNER, "postgres"), autocommit=True) as c:
             c.execute(f"CREATE ROLE {APP} LOGIN")  # tenant plane: RLS-restricted
             c.execute(f"CREATE ROLE {SYSTEM} LOGIN BYPASSRLS")  # system plane (T-705)
+            c.execute(f"CREATE ROLE {OPERATORS} NOLOGIN")  # requeue group (migration 0013)
+            c.execute(f"CREATE ROLE {OPERATOR} LOGIN IN ROLE {OPERATORS}")  # one person's own login
+            c.execute(f"CREATE ROLE {OUTSIDER} LOGIN")  # a login that is not an operator
             c.execute(f"CREATE DATABASE {DB} OWNER {OWNER}")
         return self
 

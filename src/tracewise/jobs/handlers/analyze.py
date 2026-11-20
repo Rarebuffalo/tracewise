@@ -37,21 +37,23 @@ from typing import Any
 from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
 
+from tracewise.analysis.attempt import AttemptDeadline
 from tracewise.analysis.collect import collect_evidence
 from tracewise.analysis.diagnose import diagnose
 from tracewise.context.gitfetch import GitFetcher
-from tracewise.contracts import AnalysisJob, Status
+from tracewise.contracts import AnalysisJob, Diagnosis, Status
 from tracewise.db import repositories as repo
 from tracewise.db.session import Conn, DatabaseUnavailable, require_tenant_plane, transaction
 from tracewise.github import errors as gh_err
 from tracewise.github.auth import TokenProvider
-from tracewise.github.client import GitHubHTTP, RepoClient
+from tracewise.github.client import MIN_REQUEST_S, GitHubHTTP, RepoClient
 from tracewise.github.publish import Publisher, PublishResult, PublishTarget, marker
 from tracewise.github.pulls import PRAssociation, associate_pr
 from tracewise.investigate.loop import InvestigationLimits
 from tracewise.investigate.provider import Provider
-from tracewise.investigate.validate import ValidatedDiagnosis
-from tracewise.jobs.queue import JobCancelled, PermanentError, RetryableError, retry_fits
+from tracewise.investigate.replay import ReplayContext
+from tracewise.investigate.validate import SOURCE_UNAVAILABLE, ValidatedDiagnosis, ValidationUnavailable
+from tracewise.jobs.queue import Fence, JobCancelled, PermanentError, RetryableError, StaleAttempt, retry_fits
 from tracewise.jobs.worker import Handler, JobContext, LeaseLost
 from tracewise.observe import Stages, bind, event
 from tracewise.prepass.envelope import DEFAULT_MAX_BYTES as DEFAULT_LOG_RETAIN_BYTES
@@ -66,6 +68,8 @@ from tracewise.report.render import (
 
 log = logging.getLogger(__name__)
 PROVIDER_FAILURES = frozenset({"provider_timeout", "provider_failed"})
+# Infrastructure, not evidence: retried, then "could not complete" (never a completed inconclusive analysis).
+RETRIED_REASONS = PROVIDER_FAILURES | {SOURCE_UNAVAILABLE}
 
 
 @dataclass
@@ -85,9 +89,13 @@ class AnalyzeDeps:
     analysis_quota: int | None = None  # T-703 (ANALYSIS_QUOTA_MONTHLY); None: no quota
 
 
-def cost_usd(deps: AnalyzeDeps, tokens_in: int, tokens_out: int) -> Decimal | None:
-    """Cost from configured prices only; None when either price is unknown (never estimated)."""
+def cost_usd(deps: AnalyzeDeps, tokens_in: int, tokens_out: int, cached_input_tokens: int | None = None) -> Decimal | None:
+    """Cost calculated from configured prices only; None when it cannot be calculated (never estimated):
+    either price is unknown, or part of the input was cached. Providers price cached input differently, and no
+    cached-input price is configured, so pricing it at the full input rate would overstate the cost."""
     if deps.price_input_per_mtok is None or deps.price_output_per_mtok is None:
+        return None
+    if cached_input_tokens:
         return None
     m = Decimal(1_000_000)
     return (Decimal(tokens_in) * deps.price_input_per_mtok + Decimal(tokens_out) * deps.price_output_per_mtok) / m
@@ -133,8 +141,13 @@ def _associate(rc_p: RepoClient, job: AnalysisJob) -> tuple[PRAssociation, str |
     """PR association by API only (FS-PUB-7). A 403 here means no Pull requests access (AT-REL-05)."""
     is_fork = job.head_repo_id is not None and job.head_repo_id != job.repo_id
     try:
+        # G-PLAT-11: association reads pull requests, so it uses the PR surface's token, never a bundled one.
         return associate_pr(
-            rc_p, head_sha=job.head_sha, head_branch=job.head_branch, head_repo_full_name=job.head_repo, is_fork=is_fork
+            rc_p.for_scope("publish_pr"),
+            head_sha=job.head_sha,
+            head_branch=job.head_branch,
+            head_repo_full_name=job.head_repo,
+            is_fork=is_fork,
         ), None
     except gh_err.PermissionDenied as e:
         return PRAssociation("error", detail="permission"), e.permission or "pull_requests"
@@ -153,37 +166,72 @@ def make_analyze_handler(deps: AnalyzeDeps) -> Handler:
 
 
 def _handle(ctx: JobContext, deps: AnalyzeDeps, job: AnalysisJob) -> dict[str, Any]:
+    # C-4 / O-2: the attempt's two deadlines, derived once from the job's durable deadline. Work (collection, tools,
+    # validation; the analysis client) stops PUBLISH_RESERVE_S early; publication (the publish client) may use it.
+    now = datetime.now(UTC)
+    work = AttemptDeadline.for_job(ctx.job.deadline_at, now)
+    publish = AttemptDeadline.for_publication(ctx.job.deadline_at, now)
     rc_a = RepoClient(
-        deps.http, deps.tokens, installation_id=job.installation_id, repo_id=job.repo_id, full_name=job.repo, scope="analysis"
+        deps.http,
+        deps.tokens,
+        installation_id=job.installation_id,
+        repo_id=job.repo_id,
+        full_name=job.repo,
+        scope="analysis",
+        deadline=work,
     )
     rc_p = RepoClient(
-        deps.http, deps.tokens, installation_id=job.installation_id, repo_id=job.repo_id, full_name=job.repo, scope="publish"
+        deps.http,
+        deps.tokens,
+        installation_id=job.installation_id,
+        repo_id=job.repo_id,
+        full_name=job.repo,
+        scope="publish",
+        deadline=publish,
     )
     target = PublishTarget(job.installation_id, job.repo_id, job.repo, job.head_sha, job.run_id, job.attempt, job.workflow_id)
-    publisher = Publisher(deps.pool, rc_p, app_id=deps.app_id, check_lease=ctx.check, bot_login=deps.bot_login)
+    publisher = Publisher(deps.pool, rc_p, app_id=deps.app_id, check_lease=ctx.check, bot_login=deps.bot_login, fence=ctx.fence)
 
     def is_final() -> bool:
-        """Decided when a failure happens: no attempts left, or no retry can finish before the deadline (FS-ERR-2)."""
-        return not retry_fits(ctx.job, datetime.now(UTC))
+        """Decided when a failure happens: no attempts left, or no retry can finish before the deadline (FS-ERR-2).
+        O-2: also once the work deadline has passed: a retry has the same absolute deadline, so it could do no work."""
+        return not retry_fits(ctx.job, datetime.now(UTC)) or work.remaining() < MIN_REQUEST_S
 
     if ctx.job.deadline_at is not None and datetime.now(UTC) >= ctx.job.deadline_at:
-        # Claimed after its deadline (it already ran and failed once): no new investigation. Tell the user, then end
-        # the job as failed (FS-ERR-1). A failing notice ends it the same way; there is no further attempt.
+        # Claimed after its deadline (it already ran and failed once): no new investigation. If an earlier attempt
+        # left a validated analysis unpublished, publish it within the reserve; otherwise tell the user (FS-ERR-1),
+        # but never overwrite a recorded analysis with a notice (F1: that used to erase a valid diagnosis). Then end.
         try:
-            _publish_notice(deps, job, target, publisher, rc_p, "could_not_complete", None)
-        except (LeaseLost, JobCancelled):
+            resumed = _resume_publication(deps, job, target, publisher, rc_p, ctx.job.attempts)
+            if resumed is not None:
+                return resumed
+            if not _analysis_recorded(deps, job):
+                _publish_notice(deps, job, target, publisher, rc_p, "could_not_complete", None)
+        except (LeaseLost, StaleAttempt, JobCancelled):
             raise
-        except Exception:
-            event(log, "analysis.notice_failed", logging.WARNING)
+        except Exception as e:
+            event(log, "analysis.notice_failed", logging.WARNING, error_type=type(e).__name__)
         raise PermanentError("job deadline passed before a final attempt")
     try:
+        resumed = _resume_publication(deps, job, target, publisher, rc_p, ctx.job.attempts)
+        if resumed is not None:
+            return resumed
         if deps.analysis_quota is not None:
             over = _quota_gate(deps, job, target, publisher, deps.analysis_quota)
             if over is not None:
                 return over
-        return _run(ctx, deps, job, rc_a, rc_p, target, publisher, is_final)
+        return _run(ctx, deps, job, rc_a, rc_p, target, publisher, is_final, work)
     except gh_err.InstallationUnavailable:
         raise JobCancelled("cancelled_uninstalled") from None  # FS-INS-3: token mint refused
+    except gh_err.DeadlineExhausted:
+        # O-2: a work-stage request could not start before the work deadline (job deadline less the publication
+        # reserve). Nothing more can be read in this job, and a retry would face the same deadline: tell the user
+        # within the reserve and end. Once an analysis is recorded, publication itself ran out of time: retryable.
+        if _analysis_recorded(deps, job):
+            raise
+        event(log, "analysis.deadline_exhausted", logging.WARNING, stage="work")
+        res = _publish_notice(deps, job, target, publisher, rc_p, "could_not_complete", None)
+        return {"outcome": "could_not_complete", "publications": res}
     except gh_err.PermissionDenied as e:
         # Must precede PermanentError (its base class). Reading the run itself is forbidden
         # (e.g. Actions: read missing): say so on the remaining surfaces, do not retry (FS-ERR-3).
@@ -196,17 +244,25 @@ def _handle(ctx: JobContext, deps: AnalyzeDeps, job: AnalysisJob) -> dict[str, A
         if is_final() and not _analysis_recorded(deps, job):
             try:
                 _publish_notice(deps, job, target, publisher, rc_p, "could_not_complete", None)
-            except (LeaseLost, JobCancelled):
+            except (LeaseLost, StaleAttempt, JobCancelled):
                 raise
             except Exception:
                 event(log, "analysis.notice_failed", logging.WARNING)
         raise
-    except (LeaseLost, JobCancelled, PermanentError):
+    except (LeaseLost, StaleAttempt, JobCancelled):
         raise
-    except Exception:
+    except Exception as e:
         # FS-ERR-1: tell the user, then still fail the job (never reported as success). Same guard as the
         # RetryableError branch: once an analysis was recorded a surface may be visible, so no notice (D-14).
-        if is_final() and not _analysis_recorded(deps, job):
+        # D-A: a PermanentError is always final (the queue ends the job `dead` without a retry), so it gets the
+        # notice on any attempt; before, it was re-raised first and the job died with nothing shown to the user.
+        # A credential fault (App key refused, token scope wrong) cannot publish anything either: no notice attempt,
+        # which would only repeat the refused token mint.
+        credential = isinstance(e, gh_err.AppAuthenticationFailed | gh_err.TokenScopeError)
+        final = (isinstance(e, PermanentError) and not credential) or is_final()
+        if isinstance(e, PermanentError):
+            event(log, "analysis.permanent_failure", logging.WARNING, error_type=type(e).__name__)
+        if final and not _analysis_recorded(deps, job):
             try:
                 _publish_notice(deps, job, target, publisher, rc_p, "could_not_complete", None)
             except Exception:
@@ -255,6 +311,8 @@ def _quota_gate(
             conclusion=job.conclusion,
         )
         noticed = repo.quota_notice_today(conn, job.installation_id, job.repo_id, excluding_run_pk=run_pk)
+        if publisher.fence is not None:
+            publisher.fence.verify(conn, "persist_quota_notice")  # D-1
         analysis_id = repo.upsert_analysis(
             conn,
             installation_id=job.installation_id,
@@ -274,7 +332,7 @@ def _quota_gate(
             "repository per day; later runs today are not analysed and get no notice."
         )
         _note(results, {}, publisher.check_run(target, analysis_id, CheckOutput(QUOTA_TITLE, summary, text)))
-    _record_ops(deps, job, analysis_id, {}, results)
+    _record_ops(deps, job, analysis_id, {}, results, publisher.fence)
     return {
         "outcome": "quota_exceeded",
         "quota": quota,
@@ -297,17 +355,40 @@ def _run(
     target: PublishTarget,
     publisher: Publisher,
     is_final: Callable[[], bool],
+    deadline: AttemptDeadline,
 ) -> dict[str, Any]:
     stages = Stages()
     t0 = time.monotonic()
-    with collect_evidence(job, rc_a, fetcher=deps.fetcher_factory(), log_max_bytes=deps.log_max_bytes) as ev:
+    with collect_evidence(job, rc_a, fetcher=deps.fetcher_factory(), log_max_bytes=deps.log_max_bytes, deadline=deadline) as ev:
         stages.ms["collect"] = int((time.monotonic() - t0) * 1000)
         ctx.check()
         with stages.time("associate"):
-            assoc, assoc_permission = _associate(rc_p, job)
+            # A work-stage read through the publish client: it runs under the work deadline, so it can never take
+            # time from the publication reserve (O-2). Publication afterwards uses the client's own job deadline.
+            publish_deadline, rc_p.deadline = rc_p.deadline, deadline
+            try:
+                assoc, assoc_permission = _associate(rc_p, job)
+            finally:
+                rc_p.deadline = publish_deadline
         pr_number = assoc.number if assoc.outcome == "matched" else None
         with stages.time("diagnose"):
-            vd = diagnose(ev, deps.provider_factory(), limits=deps.limits, pr_number=pr_number)
+            try:
+                provider = deps.provider_factory()
+                # O-5: provider continuation state is bound to this tenant, job and job attempt (and, inside the loop,
+                # to this one investigation); it can never be replayed into another.
+                rctx = ReplayContext(
+                    provider.name,
+                    provider.model,
+                    installation_id=job.installation_id,
+                    job_id=ctx.job.id,
+                    attempt=ctx.job.attempts,
+                )
+                vd = diagnose(ev, provider, limits=deps.limits, pr_number=pr_number, deadline=deadline, replay_context=rctx)
+            except ValidationUnavailable:
+                # D-B: validation infrastructure, not the answer, failed (after in-place read retries). Retry the
+                # attempt (or, on the last one, publish "could not complete"); never judge the answer on it.
+                event(log, "analysis.validation_unavailable", logging.WARNING)
+                raise RetryableError("validation could not read the code (temporary GitHub failure)") from None
     ctx.check()
     _recheck(deps, job)  # before persisting or publishing anything
     d = vd.diagnosis
@@ -327,9 +408,12 @@ def _run(
         tokens_out=d.usage.output_tokens,
         model_ms=d.usage.latency_ms,
     )
-    if d.inconclusive_reason in PROVIDER_FAILURES and not is_final():
-        raise RetryableError(f"provider failure ({d.inconclusive_reason})")  # FS-ERR-1: retry ≤2
-    if d.inconclusive_reason in PROVIDER_FAILURES:
+    if d.inconclusive_reason == SOURCE_UNAVAILABLE:
+        event(log, "analysis.source_unavailable", logging.WARNING, final=is_final())
+    if d.inconclusive_reason in RETRIED_REASONS and not is_final():
+        kind = "provider failure" if d.inconclusive_reason in PROVIDER_FAILURES else "infrastructure failure"
+        raise RetryableError(f"{kind} ({d.inconclusive_reason})")  # FS-ERR-1: retry ≤2
+    if d.inconclusive_reason in RETRIED_REASONS:
         outcome = "could_not_complete"
     elif d.status is Status.logs_unavailable:
         outcome = "logs_unavailable"
@@ -339,7 +423,39 @@ def _run(
         outcome = d.status.value  # diagnosed | inconclusive
 
     with stages.time("persist"):
-        analysis_id = _persist(deps, job, vd, outcome)
+        analysis_id = _persist(deps, job, vd, outcome, publisher.fence)
+    return _publish_report(
+        deps,
+        job,
+        target,
+        publisher,
+        vd,
+        outcome,
+        analysis_id,
+        pr_number,
+        assoc_permission,
+        stages,
+        t0,
+        {"association": assoc.outcome, "candidates": list(assoc.candidates)},
+    )
+
+
+def _publish_report(
+    deps: AnalyzeDeps,
+    job: AnalysisJob,
+    target: PublishTarget,
+    publisher: Publisher,
+    vd: ValidatedDiagnosis,
+    outcome: str,
+    analysis_id: int,
+    pr_number: int | None,
+    assoc_permission: str | None,
+    stages: Stages,
+    t0: float,
+    extra: dict[str, Any],
+) -> dict[str, Any]:
+    """Publish a persisted, validated analysis on its surfaces, then write the ops record that marks the publication
+    complete. Shared by a fresh analysis and a resumed publication (`_resume_publication`)."""
     t = dataclasses.replace(target, pr_number=pr_number)
     t_pub = time.monotonic()
     missing: dict[str, str | None] = {}
@@ -362,21 +478,62 @@ def _run(
     if assoc_permission:
         missing["pr_comment"] = assoc_permission
         results["pr_comment"] = "unpublished_permission"
-    text = publication_notes(render(vd, max_chars=deps.report_max_chars), missing)
+    # Rule 8 (publish.py): a write-once commit comment holding an earlier attempt's report is named on the Check Run.
+    superseded = results.get("commit_comment") == "superseded"
+    text = publication_notes(render(vd, max_chars=deps.report_max_chars), missing, superseded=superseded)
     _recheck(deps, job)  # D-10(a)
-    r = publisher.check_run(t, analysis_id, check_output(vd, text))
+    r = publisher.check_run(t, analysis_id, check_output(vd, text, superseded=superseded))
     _note(results, missing, r)
     stages.ms["publish"] = int((time.monotonic() - t_pub) * 1000)
     stages.ms["total"] = int((time.monotonic() - t0) * 1000)
-    _record_ops(deps, job, analysis_id, stages.ms, results)
-    event(log, "analysis.finished", outcome=outcome, association=assoc.outcome, stage_ms=stages.ms, publications=results)
-    return {
-        "outcome": outcome,
-        "analysis_id": analysis_id,
-        "association": assoc.outcome,
-        "candidates": list(assoc.candidates),
-        "publications": results,
-    }
+    _record_ops(deps, job, analysis_id, stages.ms, results, publisher.fence)
+    event(log, "analysis.finished", outcome=outcome, stage_ms=stages.ms, publications=results, **extra)
+    return {"outcome": outcome, "analysis_id": analysis_id, **extra, "publications": results}
+
+
+def _resume_publication(
+    deps: AnalyzeDeps, job: AnalysisJob, target: PublishTarget, publisher: Publisher, rc_p: RepoClient, job_attempt: int
+) -> dict[str, Any] | None:
+    """F1/D-14: an earlier attempt of this run attempt (this job, a job it took over, or a dead job an operator
+    requeued) persisted a validated analysis whose publication did not complete (no ops record). Publish THAT analysis
+    instead of investigating again: no repeated model spend, no divergent second report, and no dependence on the
+    work deadline, which a retry after a publication failure has usually passed. None: nothing to resume."""
+    with transaction(deps.pool, tenant=job.installation_id) as conn:  # T-705: tenant plane
+        row = repo.pending_publication(conn, job.installation_id, job.repo_id, job.run_id, job.attempt)
+    if row is None:
+        return None
+    try:
+        vd = ValidatedDiagnosis.from_record(Diagnosis.model_validate(row["diagnosis"]))
+    except (ValidationError, ValueError):
+        event(log, "analysis.resume_refused", logging.WARNING, reason="unreadable_record")
+        return None  # never published from a record that no longer validates: investigate afresh
+    run = vd.diagnosis.run
+    if (run.repo_id, run.run_id, run.attempt, run.head_sha) != (job.repo_id, job.run_id, job.attempt, job.head_sha):
+        event(log, "analysis.resume_refused", logging.WARNING, reason="record_mismatch")
+        return None
+    # The report names its PR; publish it only where it still belongs. Association is re-read (publish client, which
+    # is this path's only work); a different target than at diagnosis means the stored report is not reused.
+    assoc, assoc_permission = _associate(rc_p, job)
+    now_pr = assoc.number if assoc.outcome == "matched" else None
+    if now_pr != run.pr_number:
+        event(log, "analysis.resume_refused", logging.WARNING, reason="association_changed")
+        return None
+    event(log, "analysis.publication_resumed", logging.WARNING, status=row["status"], job_attempt=job_attempt)
+    _recheck(deps, job)
+    return _publish_report(
+        deps,
+        job,
+        target,
+        publisher,
+        vd,
+        str(row["status"]),
+        int(row["id"]),
+        run.pr_number,
+        assoc_permission,
+        Stages(),
+        time.monotonic(),
+        {"resumed": True},
+    )
 
 
 def _note(results: dict[str, str], missing: dict[str, str | None], r: PublishResult) -> None:
@@ -386,8 +543,10 @@ def _note(results: dict[str, str], missing: dict[str, str | None], r: PublishRes
         missing[r.surface] = r.missing_permission
 
 
-def _persist(deps: AnalyzeDeps, job: AnalysisJob, vd: ValidatedDiagnosis | None, status: str) -> int:
+def _persist(deps: AnalyzeDeps, job: AnalysisJob, vd: ValidatedDiagnosis | None, status: str, fence: Fence | None) -> int:
     with transaction(deps.pool, tenant=job.installation_id) as conn:  # T-705: tenant plane
+        if fence is not None:  # D-1: a stale attempt never overwrites the current attempt's analysis (lock to commit)
+            fence.verify(conn, "persist_analysis")
         run_pk = repo.find_workflow_run(
             conn, job.installation_id, job.repo_id, job.run_id, job.attempt
         ) or repo.insert_workflow_run(
@@ -417,14 +576,29 @@ def _persist(deps: AnalyzeDeps, job: AnalysisJob, vd: ValidatedDiagnosis | None,
             tokens_in=d.usage.input_tokens if d else None,
             tokens_out=d.usage.output_tokens if d else None,
             latency_ms=d.usage.latency_ms if d else None,
-            cost_usd=cost_usd(deps, d.usage.input_tokens, d.usage.output_tokens) if d else None,
+            cost_usd=cost_usd(deps, d.usage.input_tokens, d.usage.output_tokens, vd.usage.cached_input_tokens)
+            if vd and d
+            else None,
+            cached_input_tokens=vd.usage.cached_input_tokens if vd else None,
+            reasoning_output_tokens=vd.usage.reasoning_output_tokens if vd else None,
+            usage_source=vd.usage.source if vd else None,
         )
 
 
-def _record_ops(deps: AnalyzeDeps, job: AnalysisJob, analysis_id: int, stage_ms: dict[str, int], results: dict[str, str]) -> None:
-    """AT-OPS-01 record. Publication already happened; a DB fault here must not re-run it, so it is reported, not raised."""
+def _record_ops(
+    deps: AnalyzeDeps,
+    job: AnalysisJob,
+    analysis_id: int,
+    stage_ms: dict[str, int],
+    results: dict[str, str],
+    fence: Fence | None,
+) -> None:
+    """AT-OPS-01 record. Publication already happened; a DB fault here must not re-run it, so it is reported, not raised.
+    A stale attempt (StaleAttempt) is raised: it must stop, and its numbers must not replace the owner's."""
     try:
         with transaction(deps.pool, tenant=job.installation_id) as conn:  # T-705: tenant plane
+            if fence is not None:
+                fence.verify(conn, "record_ops")
             repo.record_analysis_ops(conn, analysis_id, stage_ms, results)
     except DatabaseUnavailable:
         event(log, "analysis.ops_record_failed", logging.ERROR, analysis_id=analysis_id)
@@ -441,7 +615,7 @@ def _publish_notice(
 ) -> dict[str, str]:
     """could-not-complete / missing-permission notice: Check Run + PR comment on PRs; never a commit comment."""
     _recheck(deps, job)
-    analysis_id = _persist(deps, job, None, status)
+    analysis_id = _persist(deps, job, None, status, publisher.fence)
     reason = "permission_denied" if status == "permission_denied" else "internal"
 
     def body(mark: str | None) -> str:
@@ -464,6 +638,6 @@ def _publish_notice(
         missing,
         publisher.check_run(t, analysis_id, CheckOutput(title, title + ".", publication_notes(body(None), missing))),
     )
-    _record_ops(deps, job, analysis_id, {}, results)
+    _record_ops(deps, job, analysis_id, {}, results, publisher.fence)
     event(log, "analysis.finished", outcome=status, stage_ms={}, publications=results)
     return results

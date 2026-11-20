@@ -292,6 +292,18 @@ def quota_notice_today(conn: Conn, installation_id: int, repo_id: int, *, exclud
     return row is not None
 
 
+def pending_publication(conn: Conn, installation_id: int, repo_id: int, run_id: int, attempt: int) -> dict[str, Any] | None:
+    """F1: the analysis of this run attempt whose publication did not complete. The ops record (`publish_result`) is
+    written only after every surface has a final state (published, unchanged, adopted, refused for a permission...);
+    a transient failure or a lost attempt leaves it NULL. Only rows that still hold their validated document count."""
+    return conn.execute(
+        """SELECT a.id, a.status, a.diagnosis FROM analysis a JOIN workflow_run w ON w.id = a.run_pk
+           WHERE w.installation_id = %s AND w.repo_id = %s AND w.github_run_id = %s AND w.run_attempt = %s
+             AND a.publish_result IS NULL AND a.diagnosis IS NOT NULL""",
+        (installation_id, repo_id, run_id, attempt),
+    ).fetchone()
+
+
 def analysis_recorded(conn: Conn, installation_id: int, repo_id: int, run_id: int, attempt: int) -> bool:
     """Whether any job attempt persisted an analysis for this run attempt. `_persist` runs before ANY publication
     surface is reserved, so False proves that nothing was (or may have been) written to GitHub for it."""
@@ -360,15 +372,25 @@ def upsert_analysis(
     tokens_out: int | None = None,
     latency_ms: int | None = None,
     cost_usd: Decimal | None = None,
+    cached_input_tokens: int | None = None,
+    reasoning_output_tokens: int | None = None,
+    usage_source: str | None = None,
 ) -> int:
+    """Usage breakdown (migration 0014): NULL subsets are "not reported", never 0; `usage_source` NULL is a row
+    written without a measurement record (legacy, or a notice without any investigation)."""
     row = conn.execute(
         """INSERT INTO analysis (installation_id, run_pk, status, category, confidence_band, diagnosis, provider, model,
-                                 tokens_in, tokens_out, latency_ms, cost_usd)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                 tokens_in, tokens_out, latency_ms, cost_usd, cached_input_tokens,
+                                 reasoning_output_tokens, usage_source)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
            ON CONFLICT (run_pk) DO UPDATE SET status = EXCLUDED.status, category = EXCLUDED.category,
                confidence_band = EXCLUDED.confidence_band, diagnosis = EXCLUDED.diagnosis, provider = EXCLUDED.provider,
                model = EXCLUDED.model, tokens_in = EXCLUDED.tokens_in, tokens_out = EXCLUDED.tokens_out,
-               latency_ms = EXCLUDED.latency_ms, cost_usd = EXCLUDED.cost_usd, updated_at = now()
+               latency_ms = EXCLUDED.latency_ms, cost_usd = EXCLUDED.cost_usd,
+               cached_input_tokens = EXCLUDED.cached_input_tokens,
+               reasoning_output_tokens = EXCLUDED.reasoning_output_tokens, usage_source = EXCLUDED.usage_source,
+               publish_result = NULL, stage_ms = NULL, finished_at = NULL,  -- F1: a new version is not yet published
+               updated_at = now()
            RETURNING id""",
         (
             installation_id,
@@ -383,6 +405,9 @@ def upsert_analysis(
             tokens_out,
             latency_ms,
             cost_usd,
+            cached_input_tokens,
+            reasoning_output_tokens,
+            usage_source,
         ),
     ).fetchone()
     assert row is not None

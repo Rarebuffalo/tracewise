@@ -224,7 +224,8 @@ def _redeliver_failed_deliveries(
                 break
             interrupted = False
             try:
-                http.app_post("redeliver_app_hook_delivery", jwt_, {"delivery_id": latest["id"]})
+                # A fresh JWT per POST (signed locally): a long pass never outlives the listing's 9-minute JWT.
+                http.app_post("redeliver_app_hook_delivery", creds.app_jwt(), {"delivery_id": latest["id"]})
                 status = "requested"
             except gh_err.GitHubRetryable as e:
                 s.stopped = s.stopped or _stop_reason(e)
@@ -234,6 +235,12 @@ def _redeliver_failed_deliveries(
                 # 5xx or transport failure: the POST may have reached GitHub. Record an uncertain attempt
                 # (the cooldown and the attempt cap apply to it), then stop.
                 status, interrupted = "uncertain", True
+            except gh_err.AppAuthenticationFailed:
+                # The App JWT was refused (it outlived its 9 minutes, or a key fault): the POST was not applied, so no
+                # attempt is recorded against the delivery's cap. Every further POST in this pass would fail the same way.
+                s.stopped = s.stopped or "app_auth_failed"
+                s.errors["redeliver"] += 1
+                break
             except gh_err.GitHubPermanent as e:
                 status = f"refused:{e.status}"
                 s.errors["redeliver"] += 1

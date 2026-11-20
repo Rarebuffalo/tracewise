@@ -327,7 +327,9 @@ class Run:
 
     def step(self, name: str, messages: tuple[Message, ...], tools: bool) -> StepResponse:
         self.deadline.start_step(self.overall_at)  # raises DeadlineExceeded once the overall deadline has passed
-        req = StepRequest(messages, TOOL_SPECS if tools else (), tools, MAX_OUTPUT_CHARS, self.deadline.remaining())
+        # As the investigator sends it: the same tools on every step; `tools=False` only clears `allow_tools`, which the
+        # codec sends as `tool_choice: "none"` (multi-provider design step 2).
+        req = StepRequest(messages, TOOL_SPECS, tools, MAX_OUTPUT_CHARS, self.deadline.remaining())
         rec: dict[str, Any] = {"step": name, "tools_offered": tools}
         self.steps.append(rec)
         resp = self.provider.step(req)
@@ -352,7 +354,8 @@ def run_steps(run: Run) -> str:
         return "observation_missing"  # the contract held, but G-5/G-7/G-8 were not exercised
     assistant = Message("assistant", r2.text or "", tool_calls=r2.tool_calls, replay=r2.replay)
     results = tuple(Message("tool", TOOL_RESULT, tool_call_id=tc.id) for tc in r2.tool_calls)
-    # G-7: the final step omits `tools` while earlier calls stay in the input, exactly as the investigator does.
+    # G-7: the final step keeps the same `tools` with `tool_choice: "none"` while earlier calls stay in the input,
+    # exactly as the investigator does.
     # The exact ids (G-5) and the reasoning items (R-10, G-8) are sent back unchanged.
     r3 = run.step("tool_result_without_tools", (system, first, assistant, *results, Message("user", FINAL_PROMPT)), tools=False)
     return "pass" if r3.text is not None else "observation_missing"

@@ -10,6 +10,16 @@ class GitHubRetryable(RetryableError):
     no earlier than `retry_after_s`."""
 
 
+class DeadlineExhausted(GitHubRetryable):
+    """O-2: the attempt's remaining time is too short to start (or repeat) a request. `sent` is False when no request
+    of this call reached GitHub, so nothing can have been applied; True when an earlier try of the same call was sent
+    (its outcome is unknown, exactly as for a timeout)."""
+
+    def __init__(self, message: str, *, sent: bool = False) -> None:
+        super().__init__(message)
+        self.sent = sent
+
+
 class GitHubPermanent(PermanentError):
     def __init__(self, message: str, status: int | None = None) -> None:
         super().__init__(message)

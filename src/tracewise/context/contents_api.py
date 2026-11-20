@@ -11,12 +11,16 @@ from __future__ import annotations
 
 import base64
 import binascii
+import logging
 from typing import Any
 
 from tracewise.context.paths import UnsafePath, validate_repo_path
-from tracewise.context.source import CodeSource, EntryKind, Limits, TreeEntry
+from tracewise.context.source import CodeSource, EntryKind, Limits, PermanentReadError, TransientReadError, TreeEntry
 from tracewise.github import errors as gh_err
 from tracewise.github.client import RepoClient
+from tracewise.observe import event
+
+log = logging.getLogger(__name__)
 
 
 class ContentsApiSource(CodeSource):
@@ -52,6 +56,15 @@ class ContentsApiSource(CodeSource):
                 doc = self._rc.request("get_contents", path=entry.path, query={"ref": self.head_sha})
         except (gh_err.NotFound, gh_err.Gone, gh_err.PermissionDenied):
             return None
+        except gh_err.GitHubRetryable:
+            raise TransientReadError("contents read failed transiently") from None  # retried in place (I-3)
+        except (gh_err.InstallationUnavailable, gh_err.AppAuthenticationFailed, gh_err.TokenScopeError):
+            raise  # not about this file: the whole source (installation, App key, token) is unusable
+        except gh_err.GitHubPermanent as e:
+            # D-A: any other permanent error (422, an oversized or malformed response, ...) concerns this file only.
+            # It is reported to the model as unavailable and listed in `files_skipped`, instead of ending the job.
+            event(log, "context.read_permanent_error", logging.WARNING, error_type=type(e).__name__, status=e.status)
+            raise PermanentReadError("contents read refused") from None
         return _decode(doc, entry)
 
 

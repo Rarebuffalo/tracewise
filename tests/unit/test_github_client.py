@@ -184,6 +184,8 @@ def test_log_redirect_followed_without_token() -> None:
         "https://user:pw@pipelines.actions.githubusercontent.com/x",  # credentials
         "https://evil.example/logs",  # host not allowed
         "https://blob.core.windows.net.evil.example/x",  # suffix trick
+        "https://productionresultssa1.blob.core.windows.net:8443/x",  # allowed host, other port
+        "https://productionresultssa1.blob.core.windows.net:99999/x",  # invalid port
         "",
     ],
 )
@@ -463,3 +465,10 @@ def test_waitlist_outbound_reaches_only_its_two_fixed_endpoints() -> None:
     assert urls == {"https://api.resend.com/emails", "https://challenges.cloudflare.com/turnstile/v0/siteverify"}
     assert "api.github.com" not in text and "openai.com" not in text
     assert text.count("follow_redirects=False") == 2 and "follow_redirects=True" not in text
+
+
+def test_app_post_maps_a_refused_jwt_to_app_authentication_failed() -> None:
+    gh = FakeGitHub()
+    gh.route("POST", r"^/app/hook/deliveries/\d+/attempts$", jresp(401, {"message": "Bad credentials"}))
+    with pytest.raises(err.AppAuthenticationFailed):
+        gh.http().app_post("redeliver_app_hook_delivery", "jwt", {"delivery_id": 5})

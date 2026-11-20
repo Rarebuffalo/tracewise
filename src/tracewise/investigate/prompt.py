@@ -95,7 +95,8 @@ class Delimiter:
         return cls(secrets.token_hex(6))
 
     def wrap(self, label: str, text: str) -> str:
-        safe = _DELIM_LIKE.sub(lambda m: m.group(0)[0] + " " + m.group(0)[1:], text)
+        # Every character of a run is separated, so no `<<` or `>>` survives (a single split left `<<` in longer runs).
+        safe = _DELIM_LIKE.sub(lambda m: " ".join(m.group(0)), text)
         return f"<<UNTRUSTED {self.nonce} {label}>>\n{safe}\n<<END UNTRUSTED {self.nonce}>>"
 
 

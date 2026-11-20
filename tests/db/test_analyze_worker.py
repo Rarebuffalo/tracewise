@@ -330,11 +330,12 @@ def test_04_duplicate_delivery_and_reexecution_publish_once(world: World) -> Non
     assert outs == ["enqueued", "duplicate_delivery", "duplicate_run"]
     (jid,) = [r[0] for r in world.owner.execute("SELECT id FROM job").fetchall()]
     world.run()
-    # Lost completion → the job runs again: nothing new is written.
+    # Lost completion → the job runs again: no new object. A later generation does not trust the stored digest (an
+    # unrecorded request of the earlier one may have reached GitHub), so the Check Run is re-asserted once in place.
     world.owner.execute("UPDATE job SET status='retry_wait', finished_at=NULL, run_after=now() WHERE id=%s", (jid,))
     world.run()
-    assert (world.state.count("POST", "cc"), world.state.count("POST", "cr"), world.state.count("PATCH", "cr")) == (1, 1, 0)
-    assert world.jobrow(jid)["result"]["publications"] == {"commit_comment": "already_published", "check_run": "unchanged"}
+    assert (world.state.count("POST", "cc"), world.state.count("POST", "cr"), world.state.count("PATCH", "cr")) == (1, 1, 1)
+    assert world.jobrow(jid)["result"]["publications"] == {"commit_comment": "already_published", "check_run": "reconciled"}
 
 
 # ---------------------------------------------------------------- 5, 6, 7: retries and reconciliation
@@ -767,3 +768,59 @@ def test_evt03_timed_out_job_end_to_end_the_published_report_mentions_the_timeou
     for text in (cc["body"], cr["output"]["text"]):
         assert "with a timeout (`timed_out`)" in text
     assert cr["conclusion"] == "neutral"
+
+
+def test_c4_an_attempt_out_of_time_is_published_once_as_inconclusive_not_retried(world: World) -> None:
+    """The work stages stop at the attempt deadline (job deadline less the publication reserve). Logs were read in
+    time, the investigation could not start: the result says so, is published once, and the job is not retried."""
+    jid = world.enqueue()
+    world.owner.execute("UPDATE job SET deadline_at = now() + interval '75 seconds' WHERE id = %s", (jid,))
+    world.run()  # 15 s of work time: collection fits, the 20 s investigation minimum does not
+    j = world.jobrow(jid)
+    assert j["status"] == "succeeded" and j["result"]["outcome"] == "inconclusive" and j["attempts"] == 1
+    (diag,) = world.owner.execute("SELECT diagnosis FROM analysis").fetchone()
+    assert diag["inconclusive_reason"] == "attempt_deadline_exhausted" and diag["limits"]["budget_exhausted"]
+    assert (world.state.count("POST", "cc"), world.state.count("POST", "cr")) == (1, 1)
+    (cr,) = world.state.check_runs
+    assert "ran out of time" in cr["output"]["summary"] + cr["output"].get("text", "")
+
+
+def test_o2_no_work_request_starts_inside_the_publication_reserve(world: World) -> None:
+    """O-2: with 40 s left, the work deadline (less the 60 s reserve) has passed. No log or job request starts
+    (before O-2 they ran on client timeouts alone); the reserve is used only to tell the user, once, and no retry
+    is scheduled, because a retry would have the same deadline."""
+    jid = world.enqueue()
+    world.owner.execute("UPDATE job SET deadline_at = now() + interval '40 seconds' WHERE id = %s", (jid,))
+    world.run()
+    j = world.jobrow(jid)
+    assert (j["status"], j["result"]["outcome"], j["attempts"]) == ("succeeded", "could_not_complete", 1)
+    assert world.gh.calls("GET", r"/actions/runs/55/attempts/") == []  # the job list was never requested
+    assert world.provider_calls == 0 and world.all_ccs() == []  # FS-ERR-1 / D-8: Check Run only
+    (cr,) = world.state.check_runs
+    assert cr["conclusion"] == "neutral"
+
+
+def test_o2_pr_association_uses_the_work_deadline_and_publication_the_job_deadline(world: World, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Association is a read made through the publish client before the investigation: it must not be able to use
+    the publication reserve. Publication itself then gets the full job deadline back."""
+    from tracewise.github.publish import Publisher
+    from tracewise.jobs.handlers import analyze as a
+
+    seen: dict[str, float] = {}
+    real_assoc, real_cr = a._associate, Publisher.check_run
+
+    def assoc(rc: Any, job: Any) -> Any:
+        seen["associate"] = rc.deadline.remaining()
+        return real_assoc(rc, job)
+
+    def check_run(self: Any, *args: Any) -> Any:
+        seen["publish"] = self.rc.deadline.remaining()
+        return real_cr(self, *args)
+
+    monkeypatch.setattr(a, "_associate", assoc)
+    monkeypatch.setattr(Publisher, "check_run", check_run)
+    jid = world.enqueue()
+    world.owner.execute("UPDATE job SET deadline_at = now() + interval '300 seconds' WHERE id = %s", (jid,))
+    world.run()
+    assert seen["associate"] <= 300 - 60 + 1  # the work deadline: job deadline less the 60 s reserve
+    assert seen["publish"] > 300 - 60 + 1  # the job deadline: the reserve is available to publication

@@ -34,6 +34,11 @@ def test_key_pem() -> bytes:
     return _KEY.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
 
 
+# Helpers, not tests: modules that import them would otherwise have pytest collect them (PytestReturnNotNoneWarning).
+test_key.__test__ = False  # type: ignore[attr-defined]
+test_key_pem.__test__ = False  # type: ignore[attr-defined]
+
+
 def recorded(name: str) -> Any:
     return json.loads((RECORDED / name).read_text())
 

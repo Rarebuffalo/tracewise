@@ -10,6 +10,12 @@ CREATE ROLE tracewise_owner LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICAT
 CREATE ROLE tracewise_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
 -- System plane (DATABASE_URL_SYSTEM): ingress, lifecycle, queue, recovery, retention. Bypasses RLS by design.
 CREATE ROLE tracewise_system LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS;
+-- Operators (I-6 requeue, migration 0013): a group without login. Each person gets their OWN login role in it, e.g.
+--   CREATE ROLE ops_alice LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS IN ROLE tracewise_operator;
+-- The requeue audit records that login (session_user). Never put a shared service role in this group.
+-- Create it before migration 0013; created later, also run: GRANT EXECUTE ON FUNCTION
+--   tracewise_requeue(bigint, text, boolean) TO tracewise_operator;  (as tracewise_owner)
+CREATE ROLE tracewise_operator NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
 
 CREATE DATABASE tracewise OWNER tracewise_owner;
 -- Hardening (SA-5 defence in depth): runtime roles need no temporary tables and may not create objects.

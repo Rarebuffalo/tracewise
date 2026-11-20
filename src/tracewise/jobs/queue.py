@@ -181,32 +181,70 @@ def claim(
     return Job.from_row(claimed)
 
 
-def heartbeat(conn: Conn, job_id: int, worker_id: str, lease_s: int = DEFAULT_LEASE_S) -> bool:
-    """Extend the lease. False means the lease was lost: the worker must stop and not publish."""
+class StaleAttempt(Exception):
+    """This attempt no longer owns the job (its lease was reaped, or a newer attempt claimed it). Nothing more may
+    be written or published for it; the current owner's work stands (D-1, D-2)."""
+
+
+@dataclass(frozen=True)
+class Fence:
+    """One claimed execution: the database decides whether it still owns the job (migration 0012).
+
+    The generation is `attempts`, incremented by every claim and reclaim. Each ownership-dependent write calls
+    `verify` in its own transaction: `lock=True` holds the job row (FOR SHARE) until that transaction ends, so the
+    reaper and a reclaim wait and the check cannot go stale before the commit; `lock=False` is a plain check for use
+    just before an external request (no row lock across a network call)."""
+
+    job_id: int
+    installation_id: int
+    worker_id: str
+    attempt: int
+
+    def owned(self, conn: Conn, *, lock: bool = True) -> bool:
+        row = conn.execute(
+            "SELECT tracewise_job_owned(%s, %s, %s, %s, %s) AS owned",
+            (self.job_id, self.installation_id, self.worker_id, self.attempt, lock),
+        ).fetchone()
+        return bool(row and row["owned"])
+
+    def verify(self, conn: Conn, stage: str, *, lock: bool = True) -> None:
+        if not self.owned(conn, lock=lock):
+            event(log, "job.stale_attempt_rejected", logging.WARNING, stage=stage, attempt=self.attempt)
+            raise StaleAttempt(f"job {self.job_id} attempt {self.attempt}: no longer the owner ({stage})")
+
+
+def heartbeat(conn: Conn, job_id: int, worker_id: str, lease_s: int = DEFAULT_LEASE_S, *, attempt: int) -> bool:
+    """Extend the lease. False means the lease was lost: the worker must stop and not publish. An expired lease is
+    never extended (the reaper may already be reclaiming it), and an older attempt never extends a newer one's."""
     cur = conn.execute(
         """UPDATE job SET locked_until = now() + make_interval(secs => %s), updated_at = now()
-           WHERE id = %s AND status = 'running' AND locked_by = %s AND locked_until >= now()""",
-        (lease_s, job_id, worker_id),
+           WHERE id = %s AND status = 'running' AND locked_by = %s AND attempts = %s AND locked_until >= now()""",
+        (lease_s, job_id, worker_id, attempt),
     )
     return cur.rowcount == 1
 
 
-def complete(conn: Conn, job_id: int, worker_id: str, result: dict[str, Any] | None = None) -> bool:
+def complete(conn: Conn, job_id: int, worker_id: str, result: dict[str, Any] | None = None, *, attempt: int) -> bool:
+    """Only the owning attempt can complete the job (conditional UPDATE: the check and the write are one statement).
+    A reclaim always passes through the reaper and increments `attempts`, so a stale attempt never matches."""
     cur = conn.execute(
         """UPDATE job SET status = 'succeeded', result = %s, finished_at = now(), locked_by = NULL, locked_until = NULL,
                last_error = NULL, updated_at = now()
-           WHERE id = %s AND status = 'running' AND locked_by = %s""",
-        (Jsonb(result or {}), job_id, worker_id),
+           WHERE id = %s AND status = 'running' AND locked_by = %s AND attempts = %s""",
+        (Jsonb(result or {}), job_id, worker_id, attempt),
     )
     return cur.rowcount == 1
 
 
-def fail(conn: Conn, job_id: int, worker_id: str, error: BaseException, *, rnd: random.Random | None = None) -> JobStatus | None:
-    """Record a failure. Returns the new status, or None if this worker no longer owns the job."""
+def fail(
+    conn: Conn, job_id: int, worker_id: str, error: BaseException, *, attempt: int, rnd: random.Random | None = None
+) -> JobStatus | None:
+    """Record a failure. Returns the new status, or None if this attempt no longer owns the job (then nothing
+    changes: a stale attempt can neither schedule a retry nor end a newer attempt's job)."""
     row = conn.execute(
         "SELECT attempts, max_attempts, deadline_at, now() AS now FROM job"
-        " WHERE id = %s AND status = 'running' AND locked_by = %s FOR UPDATE",
-        (job_id, worker_id),
+        " WHERE id = %s AND status = 'running' AND locked_by = %s AND attempts = %s FOR UPDATE",
+        (job_id, worker_id, attempt),
     ).fetchone()
     if row is None:
         return None
@@ -257,13 +295,13 @@ def cancel_pending(conn: Conn, *, installation_id: int, reason: str, repo_id: in
     return cur.rowcount
 
 
-def cancel_running(conn: Conn, job_id: int, worker_id: str, reason: str) -> bool:
-    """running → cancelled, only by the lease owner (FS-INS-3 `cancelled_uninstalled`, disabled repositories)."""
+def cancel_running(conn: Conn, job_id: int, worker_id: str, reason: str, *, attempt: int) -> bool:
+    """running → cancelled, only by the owning attempt (FS-INS-3 `cancelled_uninstalled`, disabled repositories)."""
     cur = conn.execute(
         """UPDATE job SET status = 'cancelled', finished_at = now(), locked_by = NULL, locked_until = NULL,
                last_error = %s, updated_at = now()
-           WHERE id = %s AND status = 'running' AND locked_by = %s""",
-        (short_error(reason, 200), job_id, worker_id),
+           WHERE id = %s AND status = 'running' AND locked_by = %s AND attempts = %s""",
+        (short_error(reason, 200), job_id, worker_id, attempt),
     )
     return cur.rowcount == 1
 

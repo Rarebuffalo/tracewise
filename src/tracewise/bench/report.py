@@ -21,6 +21,23 @@ def _p(m: dict[str, Any]) -> str:
     return "n/a (0 runs)" if not m["of"] else f"{m['n']}/{m['of']} ({m['rate']:.0%})"
 
 
+def _accounting(scores: dict[str, Any], c: dict[str, Any], outcome_keys: tuple[str, ...]) -> str:
+    """How the executed runs split across tracks, so the outcome table (Track B only) never reads as all of them."""
+    runs = scores.get("runs") or []
+    track_b = sum(int(c.get(k, 0)) for k in outcome_keys)
+    track_a = sum(1 for r in runs if r.get("outcome") == "track_a")
+    track_e = sum(1 for r in runs if r.get("outcome") == "track_e")
+    executed = int(c.get("executed", 0))
+    line = (
+        f"The outcome table counts Track B diagnosis runs only: {track_b} of {executed} executed. Also executed: "
+        f'{track_a} Track A run(s) (extraction only; see "Track A extraction") and {track_e} Track E run(s) '
+        f'(security properties; see "Track E"). Not executed: {c.get("not_applicable", 0)} not applicable (P2).'
+    )
+    if track_b + track_a + track_e != executed:
+        line += f" **Accounting mismatch:** {track_b} + {track_a} + {track_e} ≠ {executed}."
+    return line
+
+
 def render_report(scores: dict[str, Any]) -> str:
     s = scores["summary"]
     prov = scores["provider"]
@@ -75,6 +92,8 @@ def render_report(scores: dict[str, Any]) -> str:
         "| " + " | ".join(k.replace("_", " ") for k in outcome_keys) + " |",
         "|---|---|---|---|---|---|",
         "| " + " | ".join(str(c[k]) for k in outcome_keys) + " |",
+        "",
+        _accounting(scores, c, outcome_keys),
         "",
         f"Abstentions that were provider or execution failures, not the model choosing to abstain: "
         f"{s.get('abstentions_from_execution_failures', 0)} (scored as abstentions under BENCHMARK §4; by reason under "

@@ -116,7 +116,11 @@ def test_grep_features_and_limits() -> None:
     assert box().call("grep", {"pattern": "(unclosed"}).status == "invalid_pattern"
     assert box().call("grep", {"pattern": ""}).status == "invalid_args"
     assert box().call("grep", {"pattern": "x" * 201}).status == "invalid_args"
-    assert box().call("grep", {"pattern": "nothing-matches-this"}).content == "no matches"
+    # C-3: big.txt (over the file size cap) was not searched, so "no matches" says so; the binary logo is not counted.
+    assert box().call("grep", {"pattern": "nothing-matches-this"}).content == (
+        "no matches\n(1 file(s) not searched: too large, over the search or read budget, or unreadable)"
+    )
+    assert box().call("grep", {"pattern": "nothing-matches-this", "glob": "*.py"}).content == "no matches"
 
 
 def test_grep_redos_is_contained() -> None:

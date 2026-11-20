@@ -75,7 +75,7 @@ def test_offline_scenarios_classify_and_record_no_content(scenario: str) -> None
         assert ev["failure"]["class"] == want and (ev["failure"]["detail"] is None)  # no provider message
 
 
-def test_pass_sends_exact_ids_and_reasoning_once_without_tools_on_the_final_step() -> None:
+def test_pass_sends_exact_ids_and_reasoning_once_and_forbids_tools_on_the_final_step() -> None:
     args = S.parse(["--offline", "pass", "--model", "offline-model"])
     deadline = S.Deadline(lambda: 0.0)
     provider, guarded, _ = S.build(args, {}, deadline)
@@ -83,7 +83,9 @@ def test_pass_sends_exact_ids_and_reasoning_once_without_tools_on_the_final_step
     assert S.run_steps(run_) == "pass"
     bodies = [json.loads(b) for b in guarded.inner.bodies]
     assert [b["store"] for b in bodies] == [False, False, False]
-    assert ["tools" in b for b in bodies] == [False, True, False]  # G-7 is exercised exactly as the product does
+    # G-7 is exercised exactly as the product does: the same tools on every step, calls forbidden with "none".
+    assert [len(b["tools"]) for b in bodies] == [4, 4, 4]
+    assert [b["tool_choice"] for b in bodies] == ["none", "auto", "none"]
     final = bodies[2]["input"]
     assert [i for i in final if i.get("type") == "reasoning"] == [S.REASONING]  # replayed once, verbatim
     assert [i["call_id"] for i in final if i.get("type") in ("function_call", "function_call_output")] == [

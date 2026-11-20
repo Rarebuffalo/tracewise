@@ -35,7 +35,14 @@ from typing import Any, Literal, Protocol
 import httpx
 from pydantic import SecretStr
 
-from tracewise.investigate.provider import ProviderError, ProviderTimeout, StepRequest, StepResponse
+from tracewise.investigate.provider import (
+    ProviderError,
+    ProviderRefusal,
+    ProviderTimeout,
+    ProviderTruncated,
+    StepRequest,
+    StepResponse,
+)
 from tracewise.logging import secret_filter
 
 _MODEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$")
@@ -43,6 +50,14 @@ _MODEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$")
 
 class WireError(ValueError):
     """The provider's document does not match the codec's contract. Message must not quote the document."""
+
+
+class WireRefusal(WireError):
+    """A well-formed document in which the provider documents a refusal or a block (→ `ProviderRefusal`)."""
+
+
+class WireTruncated(WireError):
+    """A well-formed document that the provider documents as cut at the output limit (→ `ProviderTruncated`)."""
 
 
 class ProviderAuthError(ProviderError):
@@ -61,9 +76,38 @@ class ProviderUnavailable(ProviderError):
     """429/5xx/transport failure after the bounded retries."""
 
 
+ReplayScope = Literal["none", "tool_turns", "all_turns"]
+
+
+@dataclass(frozen=True)
+class CodecCapabilities:
+    """What the investigator must know about a codec to run it correctly (multi-provider design step 4). Each value
+    comes from the provider's research record; `None` where the provider does not document it."""
+
+    tool_choice_none: bool  # can forbid calls while keeping the same declarations (design step 2)
+    replay_scope: ReplayScope  # the assistant turns whose provider state must be sent back verbatim
+    usage_breakdown: bool  # cached-input and reasoning-output subsets are mapped from documented fields
+    output_cap_includes_reasoning: bool | None = None  # descriptive only; not enforced
+
+
+# What the shared investigation loop provides (O-5): state sealed per step and sent back on tool-call turns, or on
+# every assistant turn (including the repair turn, unaltered) for providers that require it.
+ENGINE_REPLAY_SCOPES: frozenset[str] = frozenset({"none", "tool_turns", "all_turns"})
+
+
+def require_engine_support(caps: CodecCapabilities) -> None:
+    """Refuse, when the provider is built, a codec the investigator cannot run correctly, instead of failing mid-way
+    (a provider 400) or degrading silently. The loop itself never branches on the provider."""
+    if not caps.tool_choice_none:
+        raise ValueError("codec cannot forbid tool calls while keeping its declarations (design step 2)")
+    if caps.replay_scope not in ENGINE_REPLAY_SCOPES:
+        raise ValueError("codec declares an unknown replay scope")
+
+
 class WireCodec(Protocol):
     name: Literal["openai", "gemini", "fake"]
     endpoint: str
+    capabilities: CodecCapabilities
 
     def auth_headers(self, key: str) -> dict[str, str]: ...
 
@@ -105,6 +149,7 @@ class HTTPProvider:
         clock: Callable[[], float] = time.monotonic,
         rnd: random.Random | None = None,
     ) -> None:
+        require_engine_support(codec.capabilities)
         key = api_key.get_secret_value() if api_key is not None else ""
         if len(key) < 8 or any(c.isspace() for c in key):
             raise ValueError("API key is missing or malformed")
@@ -126,6 +171,10 @@ class HTTPProvider:
     @property
     def model(self) -> str:
         return self.config.model
+
+    @property
+    def replay_scope(self) -> ReplayScope:
+        return self.codec.capabilities.replay_scope  # O-5: the loop's replay rule comes from the codec's record
 
     def close(self) -> None:
         self._client.close()
@@ -212,6 +261,10 @@ class HTTPProvider:
             raise ProviderError(f"{self.name}: response is not valid JSON") from None
         try:
             out = self.codec.decode(doc)
+        except WireRefusal as e:
+            raise ProviderRefusal(f"{self.name}: {e}") from None
+        except WireTruncated as e:
+            raise ProviderTruncated(f"{self.name}: {e}") from None
         except WireError as e:
             raise ProviderError(f"{self.name}: response does not match the contract ({e})") from None
         if out.text is None and not out.tool_calls:

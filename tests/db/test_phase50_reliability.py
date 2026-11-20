@@ -37,7 +37,9 @@ def test_a1_provider_failure_without_time_to_retry_publishes_the_notice(pool, ow
     jid = w.enqueue()
     w.run()
     assert w.jobrow(jid)["status"] == "retry_wait"
-    owner.execute("UPDATE job SET deadline_at = now() + interval '60 seconds' WHERE id = %s", (jid,))  # 120 s backoff cannot fit
+    # 120 s backoff cannot fit; 90 s still leaves the final attempt 30 s for the model after the 60 s publication
+    # reserve (C-4). With 60 s, the attempt would rightly skip the model ("ran out of time"; see test_c4_* there).
+    owner.execute("UPDATE job SET deadline_at = now() + interval '90 seconds' WHERE id = %s", (jid,))
     w.ready(jid)
     w.run()
     j = w.jobrow(jid)

@@ -237,3 +237,36 @@ def test_l2_partly_unavailable_log_without_error_line_is_reported_as_incomplete(
     assert d.inconclusive_reason == "no_error_line" and d.limits.log_truncated and d.confidence.band.value == "low"
     for text in (render(vd), check_output(vd, render(vd)).summary):
         assert "the log has no error line" not in text and "incomplete" in text
+
+
+def test_a_signed_log_url_older_than_its_freshness_window_is_requested_again(server, ws_root, head, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """C-7: URLs are obtained for every job first and read one after another; a stale one is re-requested before the
+    read, so a slow first log no longer makes the later ones expire. Nothing is downloaded twice."""
+    import tracewise.analysis.collect as collect
+
+    monkeypatch.setattr(collect, "_URL_FRESH_S", -1.0)  # every URL counts as stale by the time it is read
+    jobs = [api_job(300 + i, f"t{i}", "failure", fixture("pytest_b02.out")) for i in range(2)]
+    gh, rc, job = setup(server, head, jobs=jobs)
+    with collect_evidence(job, rc, fetcher=make_fetcher(server, ws_root)) as ev:
+        assert ev.status == "ok" and ev.logs_missing == []
+    for jid in (300, 301):
+        assert len(gh.calls("GET", rf"/actions/jobs/{jid}/logs$")) == 2
+        assert len(gh.calls("GET", rf"/logs/{jid}\.txt$")) == 1
+
+
+def test_fresh_signed_log_urls_are_not_requested_again(server, ws_root, head) -> None:  # type: ignore[no-untyped-def]
+    gh, rc, job = setup(server, head)
+    with collect_evidence(job, rc, fetcher=make_fetcher(server, ws_root)) as ev:
+        assert ev.status == "ok"
+    assert len(gh.calls("GET", r"/actions/jobs/101/logs$")) == 1
+
+
+def test_c4_jobs_not_reached_before_the_attempt_deadline_are_reported_not_downloaded(server, ws_root, head) -> None:  # type: ignore[no-untyped-def]
+    from tracewise.analysis.attempt import AttemptDeadline
+
+    _, rc, job = setup(server, head)
+    expired = AttemptDeadline(0.0, clock=lambda: 1.0)
+    with collect_evidence(job, rc, fetcher=make_fetcher(server, ws_root), deadline=expired) as ev:
+        assert ev.deadline_exhausted and ev.log_truncated  # visible as incomplete, never as a clean result
+        assert ev.jobs_not_downloaded == [101] and ev.prepass is None
+        assert ev.source.kind != "git"  # no time left for a git fetch: the lazily read contents API source is used

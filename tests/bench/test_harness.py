@@ -138,3 +138,21 @@ def test_cli_verify_and_incomplete_runs_exit_nonzero(tmp_path, monkeypatch) -> N
     assert main(["run", "--provider", "oracle", "--case", "B-02", "--reps", "1", "--out", str(tmp_path)]) == 1
     scores = json.loads((tmp_path / "scores.json").read_text())
     assert scores["summary"]["complete"] is False and scores["summary"]["counts"]["errored"] == 2
+
+
+def test_the_report_accounts_for_every_executed_run_by_track(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """The outcome table counts Track B only; Track A (extraction) and Track E (security) runs are scored elsewhere.
+    The report says so with the numbers, so its outcome counts never read as covering all executed runs."""
+    argv = ["run", "--provider", "oracle", "--reps", "1", "--out", str(tmp_path)]
+    for case in ("B-02", "A-04", "E-01", "B-15"):
+        argv += ["--case", case]
+    assert main(argv) == 0
+    scores = json.loads((tmp_path / "scores.json").read_text())
+    c = scores["summary"]["counts"]
+    report = (tmp_path / "report.md").read_text()
+    b = sum(c[k] for k in ("correct", "partial", "justified_abstention", "unjustified_abstention", "wrong", "overconfident"))
+    assert f"counts Track B diagnosis runs only: {b} of {c['executed']} executed" in report
+    assert "1 Track A run(s)" in report and "1 Track E run(s)" in report and f"{c['not_applicable']} not applicable" in report
+    assert "Accounting mismatch" not in report
+    broken = {**scores, "runs": [r for r in scores["runs"] if r["outcome"] != "track_e"]}
+    assert "Accounting mismatch" in render_report(broken)

@@ -4,12 +4,29 @@
 write, execute or network tools. Every call is logged; `files_examined()` is derived **only** from
 successful `read_file` calls (repo-relative, true ranges, end ≤ EOF), never from model text.
 Tool output is untrusted repository data; the investigator must delimit it (FS-SEC-1).
+
+Errors (D-C). Argument binding is separate from execution, so only the model's arguments can produce
+`invalid_args`. Every non-ok status has one model-facing category (`CATEGORY`), logged as `tool.error`:
+  invalid_arguments  bad or missing arguments, invalid pattern, a range beyond EOF: the model can correct them
+  unsupported        an unknown tool
+  unavailable        the path or resource does not exist or cannot be shown (too large, binary, submodule, ...)
+  transient          a transient GitHub failure that outlasted the source's bounded in-place retries
+  external_error     GitHub refused this one read for good (not retried)
+  security_policy    an unsafe path or a link leaving the repository: refused, nothing read
+  budget             the tool-call, read or time budget is spent
+  tool_failed        the grep worker process failed (reported; the model can continue without it)
+An exception raised inside a tool that none of these explains is a defect: it is logged as `tool.internal_error`
+(tool, exception type, code location; never arguments or content) and raised as `ToolInternalError`, which ends
+the investigation. It is never shown to the model as a correctable argument error, and never yields a diagnosis.
+Credential faults (installation gone, App key refused, token scope) propagate unchanged.
 """
 
 from __future__ import annotations
 
 import fnmatch
+import inspect
 import json
+import logging
 import subprocess
 import sys
 from collections.abc import Callable
@@ -18,9 +35,40 @@ from pathlib import PurePosixPath
 from typing import Any
 
 from tracewise.context.paths import UnsafePath, validate_repo_path
-from tracewise.context.source import CodeSource, ReadStatus
+from tracewise.context.source import CodeSource, PermanentReadError, ReadStatus, TransientReadError
+from tracewise.github import errors as gh_err
+from tracewise.observe import event
+
+log = logging.getLogger(__name__)
 
 TOOL_NAMES = ("read_file", "grep", "list_dir", "get_diff")
+
+CATEGORY: dict[str, str] = {
+    "invalid_args": "invalid_arguments",
+    "invalid_pattern": "invalid_arguments",
+    "beyond_eof": "invalid_arguments",
+    "unknown_tool": "unsupported",
+    "not_found": "unavailable",
+    "is_directory": "unavailable",
+    "too_large": "unavailable",
+    "binary": "unavailable",
+    "submodule": "unavailable",
+    "unavailable": "unavailable",
+    "temporarily_unavailable": "transient",
+    "read_failed": "external_error",
+    "invalid_path": "security_policy",
+    "symlink_escapes": "security_policy",
+    "symlink_loop": "security_policy",
+    "budget_exhausted": "budget",
+    "timeout": "budget",
+    "grep_failed": "tool_failed",
+}
+_CREDENTIAL_FAULTS = (gh_err.InstallationUnavailable, gh_err.AppAuthenticationFailed, gh_err.TokenScopeError)
+
+
+class ToolInternalError(Exception):
+    """A defect inside a tool: not the model's arguments, not the repository, not GitHub. The investigation cannot
+    be trusted and ends; the job's failure handling applies (retry, then "could not complete"). No content."""
 
 
 @dataclass(frozen=True)
@@ -42,6 +90,10 @@ class ToolResult:
     ok: bool
     content: str
     status: str = "ok"
+
+    @property
+    def category(self) -> str | None:
+        return None if self.ok else CATEGORY.get(self.status, "tool_failed")
 
 
 @dataclass(frozen=True)
@@ -70,7 +122,8 @@ class ToolBox:
     # ------------------------------------------------------------ dispatch
 
     def call(self, tool: str, args: dict[str, Any]) -> ToolResult:
-        """Single entry point for the investigator. Unknown tools and bad args are errors, not exceptions."""
+        """Single entry point for the investigator. Unknown tools, bad arguments and unreadable resources are
+        structured results; a defect inside a tool raises `ToolInternalError` (D-C, module docstring)."""
         if self.budget_exhausted:
             return ToolResult(False, "tool-call budget exhausted", "budget_exhausted")
         handlers: dict[str, Callable[..., tuple[ToolResult, tuple[str, int, int] | None]]] = {
@@ -80,16 +133,53 @@ class ToolBox:
             "get_diff": self._get_diff,
         }
         handler = handlers.get(tool)
+        examined: tuple[str, int, int] | None = None
         if handler is None:
-            res, examined = ToolResult(False, f"unknown tool {tool!r}", "unknown_tool"), None
+            res = ToolResult(False, f"unknown tool {tool[:40]!r}", "unknown_tool")
+        elif not isinstance(args, dict):
+            res = ToolResult(False, "invalid arguments: an object is required", "invalid_args")
         else:
             try:
-                res, examined = handler(**args)
-            except TypeError:
-                res, examined = ToolResult(False, "invalid arguments", "invalid_args"), None
+                bound = inspect.signature(handler).bind(**args)  # only the model's arguments can fail here
+            except TypeError as e:
+                res = ToolResult(False, f"invalid arguments: {str(e)[:120]}", "invalid_args")
+            else:
+                res, examined = self._execute(tool, handler, bound)
         res = self._cap(res)
-        self.log.append(ToolCall(tool, dict(args), res, examined))
+        if not res.ok:
+            event(log, "tool.error", tool=tool, status=res.status, category=res.category)
+        self.log.append(ToolCall(tool, dict(args) if isinstance(args, dict) else {}, res, examined))
         return res
+
+    def _execute(
+        self, tool: str, handler: Callable[..., Any], bound: inspect.BoundArguments
+    ) -> tuple[ToolResult, tuple[str, int, int] | None]:
+        try:
+            out = handler(*bound.args, **bound.kwargs)
+        except _CREDENTIAL_FAULTS:
+            raise  # the whole source is unusable: the job reports it, never the model
+        except (TransientReadError, gh_err.GitHubRetryable):
+            msg = "temporarily unavailable (a GitHub failure outlasted the retries); continue without it"
+            return ToolResult(False, msg, "temporarily_unavailable"), None
+        except (PermanentReadError, gh_err.GitHubPermanent):
+            return ToolResult(False, "unavailable: GitHub refused the request (not retried)", "read_failed"), None
+        except Exception as e:
+            self._internal(tool, type(e).__name__, e.__traceback__)
+            raise ToolInternalError(f"internal error in tool {tool} ({type(e).__name__})") from None
+        res, examined = out if isinstance(out, tuple) and len(out) == 2 else (out, None)
+        if not isinstance(res, ToolResult) or not isinstance(res.content, str):  # e.g. an unserialisable result
+            self._internal(tool, "InvalidToolResult", None)
+            raise ToolInternalError(f"internal error in tool {tool} (invalid result)")
+        return res, examined
+
+    @staticmethod
+    def _internal(tool: str, error_type: str, tb: Any) -> None:
+        """Operator record of a tool defect: where it happened, never what it was working on."""
+        where = None
+        while tb is not None:
+            where = f"{PurePosixPath(tb.tb_frame.f_code.co_filename).name}:{tb.tb_lineno}:{tb.tb_frame.f_code.co_name}"
+            tb = tb.tb_next
+        event(log, "tool.internal_error", logging.ERROR, tool=tool, error_type=error_type, where=where)
 
     def files_examined(self) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
@@ -167,6 +257,7 @@ class ToolBox:
             return ToolResult(False, "invalid glob", "invalid_args"), None
         files: list[list[str]] = []
         size = 0
+        unsearched = 0  # within the file cap but not searched: too large, over the byte budget, or unreadable (C-3)
         candidates = [
             e
             for p, e in sorted(self.source.entries().items())
@@ -174,11 +265,14 @@ class ToolBox:
         ]
         for e in candidates[: self.limits.grep_max_files]:
             if e.size is None or e.size > self.source.limits.max_file_bytes or size + e.size > self.limits.grep_max_bytes:
+                unsearched += 1
                 continue
             r = self.source.read(e.path)
             if r.status is ReadStatus.ok and r.text is not None:
                 files.append([e.path, r.text])
                 size += len(r.text)
+            elif r.status is not ReadStatus.binary:
+                unsearched += 1
         partial = len(candidates) > self.limits.grep_max_files
         req = json.dumps(
             {
@@ -214,6 +308,9 @@ class ToolBox:
             notes.append(f"(first {self.limits.grep_max_matches} matches)")
         if partial:
             notes.append(f"(searched the first {self.limits.grep_max_files} matching files)")
+        if unsearched:
+            # "no matches" must not read as "absent from the repository" when files were left out.
+            notes.append(f"({unsearched} file(s) not searched: too large, over the search or read budget, or unreadable)")
         body = "\n".join(lines) if lines else "no matches"
         return ToolResult(True, body + ("\n" + " ".join(notes) if notes else "")), None
 

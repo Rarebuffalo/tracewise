@@ -22,12 +22,10 @@ from typing import Literal
 from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, ConfigDict, Field
 
-from tracewise.contracts import GitHubId
+from tracewise.contracts import FULL_NAME, GitHubId
 from tracewise.db import repositories as repo
 from tracewise.db.session import Conn, transaction
 from tracewise.jobs import queue
-
-FULL_NAME = r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/[A-Za-z0-9._-]{1,100}$"
 
 
 class _M(BaseModel):

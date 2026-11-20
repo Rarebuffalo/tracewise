@@ -155,6 +155,7 @@ def test_template_creates_the_documented_role_attributes(fresh) -> None:  # type
                             FROM pg_authid WHERE rolname LIKE 'tracewise_%' ORDER BY 1""").fetchall()
         assert rows == [
             ("tracewise_app", False, False, False, False, False),
+            ("tracewise_operator", False, False, False, False, False),  # NOLOGIN group for personal operator logins
             ("tracewise_owner", False, False, False, False, False),
             ("tracewise_system", False, True, False, False, False),
         ]  # no passwords in the template
@@ -182,7 +183,11 @@ def test_schema_grants_rls_and_definer_owner_after_a_clean_install(fresh) -> Non
             got = k.execute("SELECT has_function_privilege(%s, 'tracewise_purge(integer)', 'EXECUTE')", (role,)).fetchone()
             assert got == (allowed,), role
     with psycopg.connect(fresh.url("tracewise_owner")) as k:
-        assert k.execute("SELECT version_num FROM alembic_version").fetchone() == ("0011",)
+        assert k.execute("SELECT version_num FROM alembic_version").fetchone() == ("0017",)
+        got = k.execute(
+            "SELECT has_function_privilege('tracewise_operator', 'tracewise_requeue(bigint, text, boolean)', 'EXECUTE')"
+        )
+        assert got.fetchone() == (True,)  # granted at migration time because the template created the group first
         assert k.execute(
             "SELECT count(*) FROM pg_indexes WHERE indexname IN ('job_ready', 'analysis_updated', 'installation_purge_due')"
         ).fetchone() == (3,)

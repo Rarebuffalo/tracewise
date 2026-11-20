@@ -128,7 +128,7 @@ def test_signature_upsert_is_per_installation(pool, tenant_pool, owner, two_tena
     transfer(pool)
     pk2, _ = persist(tenant_pool, 2, 200, 1)
     for inst, pk in ((1, pk1), (2, pk2)):
-        with transaction(tenant_pool, tenant=inst) as k:
+        with transaction(pool) as k:  # no runtime writer yet; D-11 (0015) gives the tenant role no access to it
             n = repo.record_signature(
                 k, repo_id=11, installation_id=inst, fingerprint="0123456789abcdef", normalized_message="m", run_pk=pk
             )

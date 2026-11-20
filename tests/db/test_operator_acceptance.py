@@ -173,7 +173,8 @@ def test_local_operator_acceptance(pg, pool, tenant_pool, owner, server, tmp_pat
         assert w.jobrow(jid)["status"] == "succeeded" and closed == ["op-1", "op-2", "op-2b"]
         assert (w.state.count("POST", "cc"), w.state.count("POST", "cr")) == (1, 1)
         assert any(r.url.path.endswith("/actions/jobs/101/logs") for r in w.gh.requests)  # evidence stage ran
-        assert len(model.requests) == 5 and {str(r.url) for r in model.requests} == {TestWire.endpoint}
+        # F1: attempt 3 publishes attempt 2's validated analysis (its Check Run failed): no third investigation.
+        assert len(model.requests) == 3 and {str(r.url) for r in model.requests} == {TestWire.endpoint}
         sent = "\n".join(r.content.decode() for r in model.requests)
         assert [k for k, n in NEEDLES.items() if n in sent] == []  # AT-SEC-04 at the real adapter boundary
         prov, diag = owner.execute("SELECT provider, diagnosis FROM analysis").fetchone()

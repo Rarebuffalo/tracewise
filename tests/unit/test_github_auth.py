@@ -153,3 +153,79 @@ def test_tokens_and_jwts_never_logged(caplog) -> None:  # type: ignore[no-untype
     secret_filter.filter(rec)  # and the scrubber would catch an accidental emission
     assert tok not in JsonFormatter().format(rec) and jwt_sent not in JsonFormatter().format(rec)
     assert tok not in repr(tp.token(1, 10, "analysis"))
+
+
+def test_expired_tokens_of_other_repositories_leave_the_cache_and_the_scrubber() -> None:
+    gh = FakeGitHub()
+    gh.add_token_route()
+    tp = gh.provider(gh.http())
+    old = tp.token(1, 10, "analysis").value
+    assert old in secret_filter._secrets
+    gh.now += 3601  # expired; repository 10 is never asked for again
+    tp.token(1, 11, "analysis")
+    assert old not in secret_filter._secrets and (1, 10, "analysis") not in tp._cache
+
+
+def test_app_jwts_are_scrubbed_by_pattern_and_never_accumulate_in_the_scrubber() -> None:
+    """A JWT per mint used to be registered and never removed (unbounded growth). The token pattern covers JWTs."""
+    creds = AppCredentials(123, test_key())
+    before = len(secret_filter._secrets)
+    tokens = [creds.app_jwt(now=1_800_000_000 + i) for i in range(50)]
+    assert len(secret_filter._secrets) == before
+    rec = logging.LogRecord("x", logging.INFO, __file__, 1, f"leak {tokens[-1]}", None, None)
+    secret_filter.filter(rec)
+    assert tokens[-1] not in JsonFormatter().format(rec)
+
+
+def test_report_cap_has_an_upper_bound() -> None:
+    from pydantic import ValidationError
+
+    from tracewise.config import Settings
+
+    assert Settings(report_max_chars=60_000).report_max_chars == 60_000
+    with pytest.raises(ValidationError):
+        Settings(report_max_chars=70_000)
+
+
+@pytest.mark.parametrize("repositories", ["7", [7], {"id": 10}, None, [], [{"id": 10}, {"id": 11}]])
+def test_malformed_repositories_in_a_grant_fail_closed(repositories) -> None:  # type: ignore[no-untyped-def]
+    gh = FakeGitHub()
+
+    def mint(req):  # type: ignore[no-untyped-def]
+        body = json.loads(req.content)
+        return jresp(
+            201,
+            {
+                "token": "ghs_" + "m" * 36,
+                "expires_at": "2099-01-01T00:00:00Z",
+                "permissions": body["permissions"],
+                "repository_selection": "selected",
+                "repositories": repositories,
+            },
+        )
+
+    gh.route("POST", r"^/app/installations/\d+/access_tokens$", mint)
+    with pytest.raises(TokenScopeError):
+        gh.provider(gh.http()).token(1, 10, "analysis")
+
+
+def test_a_grant_that_omits_its_repositories_is_refused() -> None:
+    """4C: the REST reference marks `repositories` optional without saying when it is present, and no live response
+    is recorded. A grant that cannot be checked is refused (fail closed) until G-PLAT-13 is observed."""
+    gh = FakeGitHub()
+
+    def mint(req):  # type: ignore[no-untyped-def]
+        body = json.loads(req.content)
+        return jresp(
+            201,
+            {
+                "token": "ghs_" + "n" * 36,
+                "expires_at": "2099-01-01T00:00:00Z",
+                "permissions": body["permissions"],
+                "repository_selection": "selected",
+            },
+        )
+
+    gh.route("POST", r"^/app/installations/\d+/access_tokens$", mint)
+    with pytest.raises(TokenScopeError, match="does not list its repositories"):
+        gh.provider(gh.http()).token(1, 10, "analysis")
