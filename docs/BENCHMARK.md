@@ -207,13 +207,24 @@ Minimal extensions to §5, needed to express the catalogue:
 | Not graded | The "why" text (blind human grading per §4) and fix application (AT-DX-06) are not implemented. |
 | Repetitions | 3 per Track B/E run (§4); 1 for Track A (deterministic, pre-pass only). |
 
+### Run accounting (how the report's numbers add up)
+
+`required` = `executed` + `not applicable (P2)` (+ errored, missing or not executed, all 0 in a complete run). The
+outcome table (correct … overconfident) counts **Track B diagnosis runs only**.
+- Track A runs (A-04 to A-06, extraction only, one repetition) are scored under "Track A extraction".
+- Track E runs (E-01 to E-06, security properties) are scored under "Track E".
+
+Example, full scripted oracle run at one repetition (2026-11-02): 43 required = 39 executed + 4 not applicable
+(B-15, B-16 × C1/C2). 39 = 30 Track B (21 + 3 + 5 + 0 + 0 + 1) + 3 Track A + 6 Track E. Each metric states its own
+denominator (for example "diagnosed runs" = Track B runs with a diagnosis). The report prints this split itself.
+
 ## 8. Protocol-validation findings (scripted providers; NOT model accuracy)
 
 The scripted `oracle` provider replays hand-written reference answers (`reference.yaml`, written before any run). The findings below concern **the product and the truth set**, and are recorded **without changing the product or the truth**, so the benchmark has not been tuned against itself:
 
 | Case | Finding | Owner |
 |---|---|---|
-| B-04 C1 | A correct `flaky_suspect` answer is rated **high** (the error cites the line, which the push changed), but §2 and AT-DX-11 require ≤ medium without attempt metadata. Reported as a high-confidence-wrong safety failure. | Product (confidence rule D-5 has no cap for `flaky_suspect`) |
+| B-04 C1 | A correct `flaky_suspect` answer is rated **high** (the error cites the line, which the push changed), but §2 and AT-DX-11 require ≤ medium without attempt metadata. Reported as a high-confidence-wrong safety failure. | Product (confidence rule D-5 has no cap for `flaky_suspect`). **Requires owner decision** (2026-11-02): cap `flaky_suspect` at medium, because flakiness cannot be observed in one attempt. Recommended before gate D; not made, to keep the benchmark untuned. **Resolved 2026-11-03:** the owner asked for the cap (D-5 amended). B-04 C1 is now medium and correct. This was the only per-case change in the scripted oracle run; the truth is unchanged. |
 | B-12 | A correct explanation must name the deleted `src/util.ts`; validator rule 4 strips paths absent at `head_sha`, so evidence is marked invalid (partial). Attribution says "not implicated" although the push deleted the imported module. | Product (rule 4; implicated paths do not include resolved module targets) |
 | A-04 | The two `ERROR:` lines of one pip failure form two primaries (truth: 1). | Product (fingerprint grouping) |
 | B-01 | The cross-file answer (`lib.ts`, where the export was renamed) is downgraded to **low** because tsc names `app.ts` (D-5 conflict rule). | Product (D-5 design choice, for review) |

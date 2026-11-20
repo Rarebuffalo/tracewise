@@ -10,6 +10,11 @@
 | `final-audit-public/` | S3 public-only competitor audit (2026-10-17) + public evidence + provenance | Dated record + evidence. Its spec and tests are superseded by `docs/`. |
 | `final-audit/` | `PROVENANCE-QUARANTINE.md` + S2 evidence. **Contains quarantined authenticated artifacts; never use them as evidence.** Excluded from git (D-3). | Kept untouched |
 | `REPOSITORY-AUDIT-2026-10-18.md` | Workspace audit that led to the 2026-10-18 cleanup | Dated record |
+| `openai-api-reference-2026-10-19/` | Recorded OpenAI Responses API contract (R-1…R-14, gaps G-1…G-8) | Dated record |
+| `gemini-api-reference-2026-10-26/` | Recorded Gemini API contract: compatibility layer, native `generateContent` (Addenda A–C) | Dated record |
+| `anthropic-api-reference-2026-11-01/` | Recorded Anthropic Messages API contract (A-1…A-54, gaps AG-1…AG-8); no codec exists | Dated record |
+| `deepseek-api-reference-2026-11-01/` | Recorded DeepSeek chat completions contract (D-1…D-43, gaps DG-1…DG-9); no codec exists | Dated record |
+| `product-strategy/` | Verified implementation-gap report and decision notes (2026-10-30 onward). The competitor landscape, product strategy and feature roadmap drafts are kept outside the V0 release (owner decision, 2026-11-04) | Proposals for the owner; not decisions |
 | `archive/2026-10-15-s1-research/` | Original market and competitor research, first MVP plan, executive summary, plan review, doc 04 (benchmark) and doc 07 (GTM) | Superseded; see its README |
 | `archive/2026-10-15-s1-plan/` | S1 engineering plan set (attribution-only design) | Superseded by `docs/` |
 | `archive/2026-10-17-s2-audit-quarantined/` | S2 audit, spec and tests built partly on quarantined evidence | Superseded; do not follow |

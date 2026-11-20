@@ -2,6 +2,15 @@
 
 This inventory was derived from the code and schema at the Phase 23 commit, **not** from the intended architecture. Every row names the implementation that supports it. Retention marked *(D-12)* is the current code's interpretation and is **pending your approval**.
 
+> **Correction (2026-11-01, pending owner decision O-5).** The model-provider rows below (the data-flow row and class 3, model
+> input) say every model input is redacted at the provider boundary. One field is not: `Message.replay` (OpenAI reasoning items; the Gemini codec's signed copy
+> of the model's own turn, including its text and tool-call arguments) is sent back to the same provider unredacted,
+> because the provider requires it verbatim (`investigate/loop.py`, `provider_view`). It is held in memory only and
+> never logged or persisted. Since 2026-11-02 it is sealed per step (`investigate/replay.py`): bound to provider, model,
+> installation, job, job attempt and one investigation; capped at 64 KiB per envelope and 192 KiB per conversation;
+> verified unchanged before it is sent back; masked in every `repr`. Whether this exception is accepted, and on what conditions, is O-5:
+> [decision note](../research/product-strategy/decision-notes/O-5-reasoning-state-replay.md).
+
 ## 1. What enters the system
 
 | Category | Source | Purpose | Where it lives | Retention | Evidence |
@@ -23,11 +32,11 @@ This inventory was derived from the code and schema at the Phase 23 commit, **no
 | ↳ `fix.replacement.new_text` | Model-proposed replacement code | ≤20 lines; dangerous commands removed; **redacted since P-1** | as above | `validate.py::_fix` |
 | ↳ `root_cause`, `why`, `fix.description`, `next_steps`, `files_examined[].verdict` | Model text | 300, 800, 600, 3×160 and 140 chars; URLs removed; unverified paths masked; redacted | as above | `validate.py::_Text.clean` |
 | ↳ `files_examined`, `problem_location`, `failed`, `run`, `attribution` | Paths, line ranges, step names, ids, SHAs | Repository-relative paths validated | as above | `contracts.py` |
-| `analysis` other columns | Status, category, confidence, provider, model, tokens, cost, latency, stage timings, publish result | Numbers and identifiers | 180 days | migrations 0001 and 0007 |
-| `publication` | Surface, target key, GitHub object id, state, content **digest** (not content), missing permission | No report text stored | Deleted with its analysis (180 days) | migrations 0001 and 0002 |
+| `analysis` other columns | Status, category, confidence, provider, model, tokens, cost, latency, stage timings, publish result; usage breakdown (cached input, reasoning output: provider-reported counts or NULL when not reported; `usage_source`) | Numbers and identifiers | 180 days | migrations 0001, 0007 and 0014 |
+| `publication` | Surface, target key, GitHub object id, state, content **digest** (not content; for a commit comment kept with an earlier attempt's report, the digest of what GitHub shows), missing permission | No report text stored | Deleted with its analysis (180 days) | migrations 0001 and 0002 |
 | `failure_signature` | Fingerprint, normalised message | ≤300 chars, redacted | 365 days after last seen | `db/repositories.py::record_signature` |
 | `job` | Payload (ids only), status, attempts, `last_error`, result (outcome, PR candidates) | `last_error` ≤500 chars, redacted. Stored text never depends on input: SQLSTATE plus schema identifiers for database errors; count, model name and fixed codes for validation errors; Tracewise's own messages; otherwise the class name only (P-5, completed in Phase 43). | Terminal jobs: 365 days; non-terminal: never by age *(D-12)* | `jobs/queue.py`; `test_observability.py::test_failure_in_each_stage_*` |
-| `usage_event`, `audit_event` | Kind and quantity; actor, action, content-free detail | Identifiers only | 365 days; audit rows kept through a tenant purge *(D-12)* | `db/repositories.py` |
+| `usage_event`, `audit_event` | Kind and quantity; actor, action, content-free detail (operator re-runs, I-6: `operator:<database login>` as authenticated by PostgreSQL, a reason code, job ids and the re-run limit in force; retention runs: `system:retention` with counts only) | Identifiers only | 365 days; audit rows kept through a tenant purge *(D-12)* | `db/repositories.py` |
 | `recovery_checkpoint`, `redelivery_request` | Cursors; delivery GUIDs, attempts | System data | Redelivery rows 365 days | migration 0004 |
 
 ## 3. What leaves the system

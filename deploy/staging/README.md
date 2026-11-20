@@ -87,12 +87,12 @@ command line, a ticket or chat.
 | 5 | Secret files, each `chmod 600` (names only; values from your password manager): `pg_superuser_password`; `system.env` (`DATABASE_URL_SYSTEM`); `web.env` (`TW_ENV=test`, `GITHUB_WEBHOOK_SECRET` = the App's secret); `worker.env` (`TW_ENV=test`, `LLM_PROVIDER=fake`, `DATABASE_URL`); `app.env` (`GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY_PATH=/run/secrets/app.pem`); `migrate.env` (`DATABASE_URL_MIGRATIONS`); `app.pem` (`sudo chown 10001 app.pem`). URLs: `postgresql://<role>:<password>@db:5432/tracewise` with roles `tracewise_owner` (migrate), `tracewise_app` (worker), `tracewise_system` (system); **percent-encode** any password character outside letters, digits and `-._~` (rehearsed with `@`, `/` and `:`). Each process receives only its files: web = system + web; worker = system + worker + app; recovery = system + app; retention and ops = system; migrate = migrate; preflight = all | `ls -l $TW_SECRETS_DIR` | seven files, `-rw-------`; `app.pem` owned by uid 10001 | A missing file stops Compose ("bind source path does not exist" or "env file … not found"); create it. Nothing creates a directory in its place |
 | 6 | Image (no registry until you authorise publishing) | from the repository root: `make image` | `Successfully tagged tracewise:local` | Re-run; needs outbound access to the base image registries |
 | 7 | Database and roles | `docker compose up -d db`; `docker compose exec -T db psql -v ON_ERROR_STOP=1 -U postgres -f /provision/provision_roles.sql`; then for each of `tracewise_owner`, `tracewise_app`, `tracewise_system`: `docker compose exec db psql -U postgres -d tracewise -c '\password <role>'` (prompts; use the values in the env files) | template exits 0; `docker compose exec db psql -U postgres -tAc "SELECT rolname, rolbypassrls FROM pg_roles WHERE rolname LIKE 'tracewise%'"` shows only `tracewise_system` with `t` | Template errors mean it ran twice or on the wrong database: `docker compose down -v` (deletes the empty database) and repeat |
-| 8 | Migration (owner URL only) | `docker compose --profile jobs run --rm migrate upgrade`; `docker compose --profile jobs run --rm migrate status` | `{"before": null, "after": "0011", ...}`; status exit 0 with `"at_head": true` | Exit 2: the named setting is wrong (never the URL). Exit 1: database unreachable or migration failed; fix and re-run (upgrade is idempotent) |
+| 8 | Migration (owner URL only) | `docker compose --profile jobs run --rm migrate upgrade`; `docker compose --profile jobs run --rm migrate status` | `{"before": null, "after": "0017", ...}`; status exit 0 with `"at_head": true` | Exit 2: the named setting is wrong (never the URL). Exit 1: database unreachable or migration failed; fix and re-run (upgrade is idempotent) |
 | 9 | Preflight | `docker compose --profile jobs run --rm preflight` | exit 0; warnings only `llm_provider` (fake) and `analysis_quota_monthly`; confirm the 4 `manual` lines against the App | Exit 2: fix each `fail` check by name; exit 3: an invalid setting (named) |
 | 10 | Start | `docker compose up -d web worker proxy`; `docker compose ps` | the proxy starts only after web is `healthy` (`/readyz` 200); worker and proxy `Up`; `docker compose logs worker` shows `worker.started` | `docker compose logs <service>`; the worker exits 2 on a configuration refusal (the message names the setting) |
 | 11 | **(live)** Health and ingress | `curl -s -o /dev/null -w '%{http_code}' https://<TW_DOMAIN>/healthz` and `/readyz`; any other path | 200, 200, 404. Then "Redeliver" the App's `ping` in GitHub: 200 `pong`, web log `webhook.ping` | No certificate: check DNS and inbound 80/443, `docker compose logs proxy`. `/readyz` 503: its body names `unavailable`, `wrong_database_role` or `schema_mismatch`. Ping 401: the webhook secret in `web.env` differs from the App's |
 | 12 | **(live)** Live validation | docs/LIVE-VALIDATION-PLAN.md "Stage gates": readiness, then S0, S1 … S5 in order | each gate's "Proceed when" | each stage's cleanup and the plan's rollback conditions |
-| 13 | Schedules, after S1 and your approval (cron on the VM) | see below | entries run; `recovery` JSON `"completed": true` | `recovery` exit 1 is "incomplete" (re-run later); `retention` exit 3 is "run again"; `ops alerts` exit 2 is "firing" |
+| 13 | Schedules, after S1 and your approval (cron on the VM) | see below. **Before enabling the `retention` line:** run it once with `--dry-run` and review the JSON (exact counts, nothing changed) | entries run; `recovery` JSON `"completed": true`; one `retention.run` audit row per real retention run | `recovery` exit 1 is "incomplete" (re-run later); `retention` exit 3 is "run again" (the next scheduled run continues); `ops alerts` exit 2 is "firing" |
 
 ```bash
 */15 * * * * cd <checkout>/deploy/staging && TW_SECRETS_DIR=/etc/tracewise TW_DOMAIN=<host> docker compose --profile jobs run --rm recovery deliveries
@@ -158,6 +158,27 @@ secret as the database: they hold the diagnosis excerpts. Never downgrade below 
 80 and 443, and the `caddy_data` volume kept (deleting it forces a new issuance; issuers rate-limit repeated ones).
 
 **Teardown:** `docker compose --profile jobs down` keeps the data; `docker compose --profile jobs down -v` deletes it.
+
+## Upgrading this staging database to 0017 (prepared; not run)
+
+The staging database was provisioned before migrations 0012–0017 and before the `tracewise_operator` group existed.
+In order:
+
+1. `docker compose stop web worker`. Old processes must not run against the new schema. 0016's UPDATE and 0017's
+   index build also lock `analysis` and `job` while they run.
+2. Back up: `pg_dump` as the owner (OPERATIONS §8).
+3. Create the operator group **before** migrating, so that 0013 grants it EXECUTE on `tracewise_requeue`:
+   `docker compose exec db psql -U postgres -d tracewise -c 'CREATE ROLE tracewise_operator NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS'`.
+   If it was forgotten, run the GRANT from `scripts/db/provision_roles.sql` as the owner afterwards.
+4. Run step 8 below (`migrate upgrade`, then `migrate status`): the result must be `"after": "0017"`.
+5. Run step 9 (preflight), then step 10 (start). The new build refuses any schema other than 0017.
+6. Operator logins: OPERATIONS §2a, one per person.
+
+**Running a requeue in staging:** the database is reachable only inside the compose network, so an operator runs the
+`ops` job with their own URL in the environment of that one command, never in a file under the secrets directory:
+`DATABASE_URL_OPERATOR=... docker compose --profile jobs run --rm -e DATABASE_URL_OPERATOR ops requeue --job-id N --reason <code> --dry-run`.
+Take the value from the password manager without echoing it. Anyone with Docker access on the VM can read a running
+container's environment: keep the VM's Docker access to the database administrator and the operators.
 
 ## Milestone B: real-model smoke test (T-605), separate
 

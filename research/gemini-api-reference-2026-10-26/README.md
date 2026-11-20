@@ -335,3 +335,19 @@ addendum adds facts and narrows NG-1; it does not change any entry above.
 **NG-1, narrowed:** per-model output limits are documented (N-28, N-29). Still **not documented** for
 `generateContent`: a definition of `maxOutputTokens`, its default when unset, and whether it includes thinking
 tokens on this API. Whether a signature on a final text part is required on replay is still **not documented** (NG-2).
+
+---
+
+# Addendum C: function declaration schema (owner-authorised retrieval, 2026-10-30)
+
+Same method and limits as above (official `ai.google.dev` only; no API call or key). Adds facts; changes no entry above.
+
+| ID | Fact | Source |
+|---|---|---|
+| N-31 | FunctionDeclaration `parameters`: "Optional. Describes the parameters to this function. Reflects the Open API 3.03 Parameter Object". `parametersJsonSchema`: "Optional. Describes the parameters to the function in JSON Schema format." and "This field is mutually exclusive with `parameters`." | S-10 |
+| N-32 | The Schema object (the type of `parameters`) lists: type, format, title, description, nullable, enum, maxItems, minItems, properties, required, minProperties, maxProperties, minLength, maxLength, pattern, example, anyOf, propertyOrdering, default, items, minimum, maximum. `additionalProperties` is not among them. Type values are upper case (`STRING`, `OBJECT`, …). | S-10 |
+
+**Consequence for Tracewise:** the investigator's tool specs are JSON Schema (`additionalProperties: false`,
+lower-case types), so they belong in `parametersJsonSchema`, not `parameters`. The codec was corrected on 2026-10-30.
+Whether every JSON Schema keyword the specs use (`maxLength`, `minimum`) is honoured by the server is not stated and
+needs live observation.

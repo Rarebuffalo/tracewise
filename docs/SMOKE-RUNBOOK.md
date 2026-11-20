@@ -73,9 +73,9 @@ The content is fixed in the script and synthetic: no repository source, logs, cr
 
 | Step | Sends | Checks |
 |---|---|---|
-| 1 `text` | Instructions plus "Reply with exactly the two letters OK…"; no tools | Authentication, request serialisation, a `completed` response, `usage` (G-4) |
+| 1 `text` | Instructions plus "Reply with exactly the two letters OK…"; the 4 tool declarations with `tool_choice: "none"` | Authentication, request serialisation, a `completed` response, `usage` (G-4) |
 | 2 `tool_call` | Instructions plus "Call the list_dir tool… path `docs`"; the product's 4 read-only tool declarations (`strict: false`) | A `function_call` with a string `call_id` and arguments; reasoning items with `encrypted_content` if the model emits them (G-5, G-8) |
-| 3 `tool_result_without_tools` | Step 2's conversation, the reasoning items and calls passed back **unchanged**, a synthetic `function_call_output` (`README.md`, `GUIDE.md`), "Now reply… OK"; **no `tools`** | The endpoint accepts earlier calls without `tools` (G-7), exact id pairing (G-5) and reasoning replay (R-10) |
+| 3 `tool_result_without_tools` | Step 2's conversation, the reasoning items and calls passed back **unchanged**, a synthetic `function_call_output` (`README.md`, `GUIDE.md`), "Now reply… OK"; the same 4 `tools` with `tool_choice: "none"` (as the investigator sends its final step since 2026-11-01; the step name is kept for comparability) | The endpoint accepts earlier calls with tools forbidden by `"none"` (G-7), exact id pairing (G-5) and reasoning replay (R-10) |
 
 Every request uses the product's codec and adapter unchanged, with `store: false`. Each response is validated by the codec: any non-`completed` status, refusal, unknown item, missing usage, malformed call or reasoning item without `encrypted_content` fails closed.
 

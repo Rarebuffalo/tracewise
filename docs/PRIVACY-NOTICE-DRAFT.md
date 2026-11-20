@@ -75,7 +75,7 @@ Operational logs contain event names, identifiers, outcomes, counts and timings.
 
 ### 7. Isolation and access
 
-Each installation's data is separated in the database by row-level security. Analysis runs under a database role that can see only the installation being analysed. [Operator access controls, hosting location and backup handling: to be supplied with the deployment (T-1002).]
+Each installation's data is separated in the database by row-level security. Analysis runs under a database role that can see only the installation being analysed. When an operator re-runs a failed analysis, the audit record names that operator's personal database login; it holds no repository content. [Operator access controls, hosting location and backup handling: to be supplied with the deployment (T-1002).]
 
 ### 8. Other services
 

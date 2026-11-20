@@ -95,10 +95,60 @@ An unexpected error in the loop exits 1 instead of spinning.
 | `DATABASE_URL_MIGRATIONS` | `tracewise_owner` | Migrations only | Used by any runtime process |
 | `DATABASE_URL` | `tracewise_app` (RLS) | Analyze handler, publisher | The system or owner role; the handler refuses these (`WrongDatabaseRole`) |
 | `DATABASE_URL_SYSTEM` | `tracewise_system` (BYPASSRLS) | Webhook intake, lifecycle, queue, recovery, retention, ops | Given to the analysis path |
+| `DATABASE_URL_OPERATOR` | one **personal** login per person, member of `tracewise_operator` | `ops requeue` only | Shared between people, a service role, or stored in the services' secrets directory |
 
 - Keep three separate secrets, with separate rotation.
 - RLS limits forgotten filters and wrong ids. It does **not** contain arbitrary SQL running as `tracewise_app` (SECURITY-AUDIT §2).
 - The system role bypasses RLS. Its code paths are guarded by application checks.
+
+### 2a. Operator logins (requeue identity, migration 0013)
+
+The requeue audit records the PostgreSQL login that ran it (`session_user`). That record is only as trustworthy as
+the logins, so:
+
+1. **One login per person; never shared, never a service role.** As the database administrator (the role that ran
+   `scripts/db/provision_roles.sql`), in `psql` connected to the `tracewise` database:
+
+   ```
+   CREATE ROLE ops_<name> LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS IN ROLE tracewise_operator;
+   ```
+
+   The login has no password yet. Group membership is its only privilege: EXECUTE on `tracewise_requeue`. It has no
+   table access.
+2. **Set the credential without it touching shell history, logs or chat.** In `psql`, run `\password ops_<name>`.
+   `psql` prompts for the password, hashes it client-side (SCRAM) and sends only the hash. Never use
+   `ALTER ROLE ... PASSWORD '...'` (statement logs and history keep it). Never put a password in a SQL file, a ticket
+   or a message. Generate it with the password manager or `openssl rand -base64 32`, and type or paste it only into
+   the `\password` prompt. If the deployment uses certificate or IAM authentication, use that instead and skip
+   passwords entirely.
+3. **Deliver it to that person only, through the team's password manager.** No secret manager is chosen for this
+   project yet (deployment decision T-1002). Whatever is chosen must: hold one entry per operator, restrict each
+   entry to its owner, keep an access log, and support rotation. Do **not** add operator credentials to
+   the services' secrets directory (`deploy/staging`): those files are read by service processes, not people.
+4. **Supply `DATABASE_URL_OPERATOR` for one command, not in a profile file.** For example, read from the password
+   manager into the environment of a single run. Better, use libpq's own files: `~/.pgpass` (mode 600) or a
+   `PGSERVICEFILE` entry, so the URL itself holds no password (`postgresql://ops_<name>@host/tracewise`). Never echo
+   the URL, never put it on the command line, never commit it.
+5. **Remove access** the same day someone leaves the rota:
+
+   ```
+   REVOKE tracewise_operator FROM ops_<name>;
+   ALTER ROLE ops_<name> NOLOGIN;
+   ```
+
+   Keep the role, so audit rows naming it stay attributable. Drop it only after its audit rows have expired (365 days).
+6. **Rotate** with `\password ops_<name>` (step 2), at least when a device is lost or a person changes teams.
+
+**Why `--operator` is only a cross-check:** anyone can type any name. The identity is what PostgreSQL authenticated.
+`--operator` only makes a human typo or a wrong `DATABASE_URL_OPERATOR` visible (`operator_mismatch`) before
+anything is read.
+
+**Limits of the attribution:**
+- A database superuser can run `SET SESSION AUTHORIZATION ops_<name>` and act as that person. Superusers are refused
+  by the function itself, but impersonation through `SET SESSION AUTHORIZATION` cannot be prevented inside the
+  database. Keep superuser access to the database administrator, separately audited (`log_connections`, and the host's
+  own access logs).
+- A shared or leaked password makes the record name the wrong person. Steps 1–6 exist to prevent that.
 
 ## 3. GitHub App
 
@@ -145,6 +195,75 @@ An unexpected error in the loop exits 1 instead of spinning.
 - 10-minute deadline;
 - 3 attempts with backoff (honouring `retry-after`).
 
+**Attempt deadline (C-4, 2026-11-01):** each attempt derives one deadline from the job's 10-minute deadline, less a
+60 s publication reserve. Log downloads stop at it (the report says the logs are incomplete), the git fetch timeout
+is capped by it, and the investigation gets only what is left (it is not started with under 10 s left: the report
+says "the analysis ran out of time", with no model call). Publication uses the reserve and is never cut mid-request.
+The two values are code defaults (`analysis/attempt.py`) pending owner decision O-2.
+
+**Attempt ownership and stale workers (D-1, D-2; migration 0012):** a job attempt owns the job only while the row
+says so (`locked_by` and `attempts`, status `running`). When a lease expires, the next claim reaps it
+(`queue.lease_expired`) and the new claim is a takeover (`job.claimed` with `takeover: true`, a higher `attempt`).
+From then on the old worker cannot renew its lease, persist an analysis, record a publication, write the ops record,
+complete, fail or cancel the job: each refusal is logged as `job.stale_attempt_rejected` (with the `stage`) and the
+old worker stops (`job.stale_attempt_stopped`). One limit remains: a GitHub request already in flight at the moment of
+takeover can still be applied; it is never recorded, and the new owner adopts it (see ARCHITECTURE §4.4).
+**Deploy order:** run the migration (0012) before starting workers at this version; workers refuse to start on an
+older schema. Rolling back the code needs no schema change; downgrading 0012 makes this code refuse to start.
+
+**Re-running a dead job (I-6):**
+
+```
+DATABASE_URL_OPERATOR=<your own login> python -m tracewise.ops requeue --job-id N --reason {transient_outage|fixed_configuration|fixed_permission|operator_request} [--dry-run] [--operator YOUR_LOGIN]
+```
+
+**Who may run it:** a person with their **own** database login that is a member of `tracewise_operator` (create one
+per person: `scripts/db/provision_roles.sql`). The decision and the writes happen in `tracewise_requeue` (migration
+0013). The audit actor is `operator:<session_user>`, the login PostgreSQL authenticated, not a typed name.
+`--operator` is only a cross-check: a mismatch is refused (`operator_mismatch`). Shared service roles (owner, tenant,
+system) and superusers are refused (`not_authorised`) before any job is looked at.
+
+**What it does:** it requeues only a `dead` analysis job of an active installation and an enabled repository, with no
+job for the same run queued, waiting or running.
+- **Concurrency:** requeues of one run are serialised by an advisory lock, so concurrent operators get one new job,
+  and the others get `live_job_exists`.
+- **Result:** it inserts a new linked job (fresh attempt and deadline) and keeps the dead row. The job and its
+  `audit_event` (`job.requeued`: actor, reason code, job ids, the limit in force) commit together or not at all.
+  `--dry-run` writes nothing.
+- **Unchanged for the re-run:** the quota gate and publication reconcile apply as usual.
+- **Exit status:** 0 when queued (or `would_requeue` with `--dry-run`); 1 when refused (the JSON `outcome` or
+  `error` says why).
+
+**Re-run limit:** `tracewise_requeue_max_reruns()` returns 2 per original job (**provisional**, pending the owner).
+Only the schema owner can change it, by replacing that one-line function (normally a reviewed migration). Sessions
+cannot override it. Values outside 0–10 are refused.
+
+**Read and validation failures:** `context.read_retry` / `context.read_retries_exhausted` (transient GitHub
+failures on code reads), `context.read_permanent_error` (one file unreadable; the analysis continues),
+`analysis.validation_unavailable` (validation could not read the code; the attempt is retried),
+`analysis.permanent_failure` (the analysis ended on a permanent error; a could-not-complete notice is published),
+`context.source_unavailable` / `analysis.source_unavailable` (the code could not be reached; retried, then "could not
+complete"), `tool.error` (a tool returned an error: `category` says which kind), `tool.internal_error` (a defect in a
+tool: investigate the `where` location; the job retries, then ends `dead` with a notice).
+
+**Publication recovery (F1):** an analysis whose publication did not complete is published by the next attempt, or
+by a requeue of the dead job, without a new investigation (`analysis.publication_resumed`). `ops report` shows it
+under `publication_incomplete` (`analyses`: pending for over 15 minutes; `surfaces_unconfirmed`: reserved but never
+confirmed). With either above zero, check `job` for that run; if the job is `dead`, requeue it (§5, requeue).
+`ops report` also shows the current `queue` (queued, retry_wait, running, running with an expired lease, oldest
+waiting age), `provider_failures` in the window, and the last `retention` run.
+
+**Publication:** `publication.attempted` precedes each GitHub write; `publication.result` reports the outcome per
+surface; `publication.outcome_uncertain` means a write failed transiently and may still have been applied (the next
+attempt reconciles); `publication.reconciled` means a retried or taken-over job rewrote a surface in place;
+`publication.superseded_retained` means the write-once commit comment shows an earlier attempt's report (the Check
+Run says so; the App cannot edit commit comments without Contents write).
+
+**Database session bounds (all runtime pools: web, worker, recovery, retention, ops):** `statement_timeout` 30 s and
+`lock_timeout` 10 s per session (`db/session.py`). Hitting either is reported as the database being unavailable, so
+the job or pass is retried later instead of holding a worker. They are set per session, so `options` in a database
+URL are left alone; they are code constants, not environment settings.
+
 Expired leases are reaped at the next claim (`queue.lease_expired`). Handlers are idempotent at GitHub: they reconcile before creating, and POSTs are never retried inline.
 
 **Recovery:** `python -m tracewise.recovery {deliveries|runs|both}` runs one bounded pass.
@@ -152,7 +271,7 @@ Expired leases are reaped at the next claim (`queue.lease_expired`). Handlers ar
 | Exit | Meaning |
 |---|---|
 | 0 | Complete |
-| 1 | Incomplete, or the database was unavailable. The JSON summary says why: `rate_limited`, `github_unavailable`, `list_failed`, `page_cap`, `request_cap` or `failed_repos`. |
+| 1 | Incomplete, or the database was unavailable. The JSON summary says why: `rate_limited`, `github_unavailable`, `list_failed`, `page_cap`, `request_cap`, `app_auth_failed` (a redelivery POST's App JWT was refused; no attempt is counted) or `failed_repos`. |
 
 - Checkpoints in `recovery_checkpoint` advance only after the step they cover, so a pass is safe to re-run.
 - One pass of each kind at a time: an overlapping `deliveries` (or `runs`) pass stops at once with `"stopped": "locked"` and exit 1, before any GitHub request (`recovery.locked`). Different kinds may overlap. Safe for cron.
@@ -161,7 +280,13 @@ Expired leases are reaped at the next claim (`queue.lease_expired`). Handlers ar
 
 ## 6. Retention and purge
 
-`python -m tracewise.retention [--batch-limit N] [--max-batches M]` runs bounded batches of `tracewise_purge()`.
+`python -m tracewise.retention [--batch-limit N] [--max-batches M] [--dry-run]` runs bounded batches of
+`tracewise_purge()`. Since migration 0017, data of a run with a live job (queued, waiting or running) is skipped
+until the job ends.
+- **Audit:** every real run writes one content-free `audit_event` (`system:retention`, `retention.run`: counts,
+  batches, completed, error type).
+- **Dry run:** `--dry-run` reports exactly what a run would delete now, by running the batches in one transaction
+  and rolling it back. It writes nothing, and it holds the same row locks while it runs.
 
 | Exit | Meaning | Action |
 |---|---|---|
@@ -171,7 +296,23 @@ Expired leases are reaped at the next claim (`queue.lease_expired`). Handlers ar
 
 - Re-running is always safe: batches are idempotent and committed one at a time. A concurrent run returns `locked`.
 - **Recovery after a failure:** fix the cause (database reachability, privileges), then re-run. A partial tenant purge resumes, and `purged_at` is set only when the tenant is fully purged.
-- Policy is in §9. **No schedule is installed.** Suggested cadence: daily.
+- Policy is in §9. **No schedule is installed.**
+
+**Scheduling (not enabled by this repository).** The deployment schedules its jobs with cron on the VM
+([deploy/staging/README.md](../deploy/staging/README.md), step 13: `retention` daily, next to `recovery` and
+`ops alerts`). Review a dry run first. Exit 3 means "more remains"; the next scheduled run continues. Check
+the `retention.finished` events and the `retention.run` audit rows. Alert on exit 1, or on no `retention.run` row for
+two days.
+
+**Operational logs (the 14-day period, D-12 recommendation):** the container logs are rotated by size only (json-file,
+10 MB × 3 per service), so their age is not bounded. For a 14-day maximum, use the host's journald:
+1. Set `logging: driver: journald` for the services. This is a host and compose change: make it in the deployment,
+   not here.
+2. Set `MaxRetentionSec=14day` in `/etc/systemd/journald.conf`.
+3. Restart journald. That is a host operation: schedule it.
+
+The logs contain no repository content by design (event deny-list), so this bounds metadata, not code or log
+excerpts.
 
 ## 7. Observability
 
@@ -195,6 +336,25 @@ Expired leases are reaped at the next claim (`queue.lease_expired`). Handlers ar
 | Suspected cross-tenant exposure | Stop workers and intake. Preserve the logs. Run the RLS and schema guards (`test_db_security.py` queries) against the database, read-only. Review `audit_event`. |
 | Uninstalled tenant asks for deletion before the grace period | A policy decision. The purge honours `purge_after` (+7 days, FS-INS-3). |
 
+### 8b. Migrations 0012–0017: order, rollback and forward recovery
+
+Order: **stop web and workers**, back up, run `migrate` (as the owner) to `0017`, run `preflight`, and only then
+start the new web and worker build. Stopping first matters: 0016 updates `analysis` and 0017 builds an index on
+`job`, both in one transaction that blocks writers, and old processes must not run on the new schema. An existing
+database provisioned before 0013 needs the `tracewise_operator` group created first (deploy/staging README). Both refuse a schema other than their head (`SchemaMismatch`), so an old worker cannot run unfenced on a new
+schema, nor a new worker on an old one. Rollback means downgrading the schema **and** redeploying the matching build
+together. Verified on a disposable cluster: `tests/db/test_migrations_0012_0017.py` (populated 0011 upgrade, every
+round trip), `test_fresh_install.py` (template plus all migrations), `test_privilege_matrix.py`.
+
+| Revision | What | Downgrade | Data lost on downgrade | Forward recovery after a failed upgrade |
+|---|---|---|---|---|
+| 0012 | `tracewise_job_owned` (attempt fence) | Drops the function. A build at 0012+ then refuses to start | none | Re-run `migrate`: each revision is one transaction |
+| 0013 | `tracewise_requeue`, `tracewise_requeue_max_reruns()` | Drops both. Requeue becomes unavailable; earlier audit rows stay | none (an owner-changed limit returns to 2 on re-upgrade) | Re-run. If `tracewise_operator` was created after 0013, also run the GRANT from `provision_roles.sql` |
+| 0014 | Usage breakdown columns | Drops the three columns | **yes**: cached input, reasoning output and `usage_source` values | Re-run |
+| 0015 | Least-privilege grants | Restores the 0001/0005 grants exactly | none | Re-run. Grants are idempotent |
+| 0016 | Backfill `usage_source = no_call` (proven rows only) | No-op (the values stay true) | none | Re-run |
+| 0017 | Purge skips runs with live jobs; `job_live_run` index | Restores the 0008/0009 purge body; drops the index | none | Re-run. `CREATE INDEX` on a very large `job` table takes a lock: run in a quiet window |
+
 ## 8a. Troubleshooting (prepared offline; not exercised against a live deployment)
 
 Run every SQL below **read-only, as the system role** (`DATABASE_URL_SYSTEM`); the tenant role sees no rows outside a
@@ -208,7 +368,7 @@ tenant transaction. Never paste a URL, token or log blob into a ticket. Start wi
 | **Jobs stuck** | `SELECT status, count(*), min(run_after), max(updated_at) FROM job WHERE finished_at IS NULL GROUP BY 1`. `running` with `locked_until < now()` = a dead worker; `retry_wait` with `last_error` = backing off. Events: `queue.lease_expired`, `job.lease_lost`, `worker.db_unavailable`. | No worker running: start one (it reaps expired leases at the next claim). ≤2 running jobs per installation is a limit, not a fault. Never edit `job` rows by hand; a job past `max_attempts` becomes `dead` with a bounded `last_error`. |
 | **Publication failed** | `SELECT surface, state, count(*) FROM publication GROUP BY 1, 2`. `unpublished_permission` with `missing_permission` = the installation declined a permission (`publication.permission_refused`); `failed` with `last_error`. | Permission: the installer must accept it in GitHub; Tracewise never escalates. `failed`: transient GitHub errors retry with the job (3 attempts). There is no automatic re-publication after that; a workflow re-run (a new attempt) is analysed and published afresh. Publication reconciles before creating, so retries never duplicate a commit comment (FS-PUB-1 trigger). `recovery runs` only finds failed runs whose webhook never arrived. |
 | **Database unavailable** | `worker.db_unavailable`, `webhook.db_unavailable`, `/readyz` → 503 `unavailable`; `ops` exits 1 with `database_unavailable`. | Restore the database. Workers back off on their own; web keeps answering 503 so GitHub records the deliveries. Afterwards: `recovery deliveries`, then `recovery runs`. `wrong_database_role` or `schema_mismatch` instead: a configuration or migration problem, not an outage (preflight names which). |
-| **Provider failures** | `SELECT status, count(*) FROM analysis WHERE created_at > now() - interval '1 hour' GROUP BY 1`: a rise in `could_not_complete`; `alert.failure_rate`. The job itself succeeds (it published the could-not-complete notice). | Timeouts, 429 and 5xx are retried inside the investigation's time budget; then the run is reported as could-not-complete, never as a diagnosis. Quota (`insufficient_quota`) and auth (401/403) errors are not retried: fix the account or key at its source, restart the workers. With the `fake` provider every analysis is could-not-complete by design. |
+| **Provider failures** | `SELECT status, count(*) FROM analysis WHERE created_at > now() - interval '1 hour' GROUP BY 1`: a rise in `could_not_complete`; `alert.failure_rate`. The job itself succeeds (it published the could-not-complete notice). | Timeouts, 429 and 5xx are retried inside the investigation's time budget; then the run is reported as could-not-complete, never as a diagnosis. Quota (`insufficient_quota`) and auth (401/403) errors are not retried: fix the account or key at its source, restart the workers. With the `fake` provider no analysis names a root cause: a log with no recognised error line ends `inconclusive` without a provider call, one with an error line ends could-not-complete. |
 | **Quota reached** | `analysis.quota_exceeded`; analyses with status `quota_exceeded`; at most one notice per repository per UTC day. | Expected when `ANALYSIS_QUOTA_MONTHLY` is set. Raising it is an owner decision. |
 
 ## 9. Data retention and privacy
@@ -223,10 +383,11 @@ tenant transaction. Never paste a URL, token or log blob into a ticket. Start wi
 
 | Data | Retention |
 |---|---|
-| Diagnosis document (holds the excerpts) | 90 days |
+| Diagnosis document (holds the log and code excerpts: the only log-derived content in the database) | 90 days (D-12a). Not 14: the 14-day recommendation concerns operational log files (§6) |
 | Analyses, with their publications | 180 days |
 | Deliveries | 14 days |
-| Fingerprints, runs, terminal jobs, usage, audit, redelivery bookkeeping | 365 days |
+| Fingerprints, runs, terminal jobs, usage, audit (including operator logins on requeue records, and `retention.run` records), redelivery bookkeeping | 365 days |
+| Data of a run with a live job | Kept until the job ends (0017) |
 | Non-terminal jobs | Never deleted |
 | Tenant purge | 7 days after uninstall, once no job is in flight; a tombstone and 365-day audit rows remain |
 

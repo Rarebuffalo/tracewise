@@ -1,8 +1,9 @@
-# Live GitHub validation plan (NOT executed; requires your approval)
+# Live GitHub validation plan (partly executed: S0 and S1 step 1 observed; the rest requires your approval)
 
-**Purpose:** confirm, in a dedicated test organisation, the platform behaviours that offline tests only simulate. These are G-PLAT-1 to G-PLAT-12, plus findings F-1 to F-3 in [GITHUB-CONTRACT-AUDIT.md](GITHUB-CONTRACT-AUDIT.md).
+**Purpose:** confirm, in a dedicated test organisation, the platform behaviours that offline tests only simulate. These are G-PLAT-1 to G-PLAT-13 (G-PLAT-13, added 2026-11-01: the first token mint's response lists `repositories` with exactly the requested repository; if it does not, every mint now fails closed, see ARCHITECTURE), plus findings F-1 to F-3 in [GITHUB-CONTRACT-AUDIT.md](GITHUB-CONTRACT-AUDIT.md).
 
-**Nothing here has been run.** Each step lists its expected observation and the evidence to capture. Where GitHub's behaviour is unknown, the plan says so instead of predicting.
+**Status:** S0 (fake provider) and S1 step 1 were observed on 2026-10-22/23 (notes under §S0 and §S1); every other
+stage has not been run. Each step lists its expected observation and the evidence to capture. Where GitHub's behaviour is unknown, the plan says so instead of predicting.
 
 ## Offline coverage per stage (Phase 51; mocks and local fixtures only, never live verification)
 
@@ -185,8 +186,8 @@ event. Offline tests (the first table) cover our side of each stage with fake Gi
 
 | GitHub behaviour | Expected Tracewise result today | Decision it informs |
 |---|---|---|
-| Mint refused (422 or similar) for the bundled request | `pr_comment`, `commit_comment` (D-4 fallback) and `check_run` all `unpublished_permission`. **No surface published.** That contradicts AT-REL-05. | Approve per-surface tokens (recommended) or a mint retry without `pull_requests` |
-| Mint succeeds with reduced permissions | Our `_verify_scope` accepts a subset; the PR comment POST gets 403 → `unpublished_permission`; the Check Run is published and names the missing permission (AT-REL-05 as intended) | Keep the bundled token |
+| Mint refused (422 or similar) for the Pull requests token | Per-surface tokens (2026-11-02): `pr_comment` `unpublished_permission`; commit comment (D-4 fallback) and Check Run published; the Check Run names the permission (AT-REL-05) | Record the observed status and message; no further change |
+| Mint succeeds with reduced permissions | Our `_verify_scope` accepts a subset; the PR comment POST gets 403 → `unpublished_permission`; the Check Run is published and names the missing permission (AT-REL-05 as intended) | Record it; per-surface tokens behave the same |
 | Mint succeeds, then the PR association call is refused | The association error leads to the D-4 commit-comment fallback; the Check Run is published | Confirms D-4 fallback behaviour |
 
 **Capture:**

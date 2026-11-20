@@ -69,7 +69,7 @@ here: the worker would call the GitHub API for an installation that does not exi
 Receiving real webhooks on a laptop needs a public relay; §3a describes the prepared tunnel procedure. A relay sends
 your webhook payloads through a third party.
 
-## 3a. Real GitHub deliveries to a laptop through a tunnel (prepared, not yet run)
+## 3a. Real GitHub deliveries to a laptop through a tunnel
 
 A temporary HTTPS tunnel lets GitHub reach the local trial without a server. **Executed once on 2026-10-22** for a
 GitHub App `ping` (Stage 1): GitHub's redelivered `ping` reached Tracewise through the tunnel and was answered 200

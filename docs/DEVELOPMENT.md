@@ -13,7 +13,8 @@ How to set up Tracewise locally, run it, and troubleshoot it. For contribution r
 | PostgreSQL server binaries | any supported release with `initdb`, `pg_ctl`, `psql`, `pg_dump`, `pg_restore` | The database tests start disposable clusters; local runs need a server |
 | git | any | The code-context tests run a local `git http-backend` |
 
-Node, npm and the JS test tools are **not** needed: their logs are fixtures.
+The JavaScript tool *logs* used by the benchmark are fixtures, so no JS toolchain is needed for the Python tests.
+`make check` and `make ci` also build and test the website (`web/`), which needs **Node 20 or later**.
 
 ```bash
 uv sync

@@ -99,6 +99,16 @@ simulated refusal of that token, nothing is published, which is contrary to AT-R
 **Recommendation in the audit:** (a), but only if live stage S2 shows GitHub really refuses. **Blocks:** nothing
 offline; decide after S2.
 
+**Update 2026-11-02: option (a) implemented**, as the production-readiness milestone asked for the smallest safe
+correction. Each surface mints its own token:
+- `publish_checks`: Checks write;
+- `publish_pr`: Pull requests write, also used for PR association;
+- `publish_commit`: Contents read.
+
+Each also carries Metadata read. No permission was added to the App. Up to three token mints per repository per hour
+replace one; tokens are cached. S2 still confirms GitHub's real refusal behaviour
+(`test_github_contracts.py::test_g_plat_11_*`).
+
 ## 7. OpenAI: three separate authorisations
 
 1. **Smoke call** (SMOKE-RUNBOOK §1):

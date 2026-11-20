@@ -113,7 +113,8 @@ responses), and the OpenAI Responses API adapter (implemented against the record
 | PyJWT | GitHub App authentication |
 | uv, ruff, mypy (strict), pytest | Dependency management and quality gates |
 
-There is no Redis, object store or frontend.
+There is no Redis or object store, and the product has no frontend; `web/` is the separate project website and
+waitlist.
 
 ## Quick start
 

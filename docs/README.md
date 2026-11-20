@@ -6,6 +6,7 @@
 |---|---|
 | [SPEC.md](SPEC.md) | MVP requirements (FS-…), data contracts, validator rules |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | System design and decisions (ADR-01…18), data model, security boundaries |
+| [architecture/multi-provider-design.md](architecture/multi-provider-design.md) | Proposed multi-provider model architecture: shared loop, native codecs, migration steps (design, not implemented) |
 | [IMPLEMENTATION-PLAN.md](IMPLEMENTATION-PLAN.md) | Gates A–E, package layout, analysis flow, configuration, controls |
 | [TASKS.md](TASKS.md) | Dependency-ordered backlog with traceability and a bottom-up estimate |
 | [ACCEPTANCE-TESTS.md](ACCEPTANCE-TESTS.md) | Acceptance tests (AT-…) and the MVP gate |
@@ -24,6 +25,8 @@
 | [DEPLOYMENT-BLUEPRINT.md](DEPLOYMENT-BLUEPRINT.md) | Vendor-neutral T-1002 design: processes, ingress, secrets, env inventory, DB budget, staging gate (not a deployment) |
 | [OPERATIONS.md](OPERATIONS.md) | Install, roles, App setup, worker/recovery/retention operation, incidents, release checklist (offline package) |
 | [LIVE-VALIDATION-PLAN.md](LIVE-VALIDATION-PLAN.md) | Staged test-org plan for the live gates (not executed; needs approval) |
+| [LIVE-VALIDATION-RUNBOOK.md](LIVE-VALIDATION-RUNBOOK.md) | Test cards for tokens, intake, logs, a real provider, publication races and recovery (not executed; needs approval) |
+| [RELEASE-CANDIDATE-V0.md](RELEASE-CANDIDATE-V0.md) | V0 release candidate: commit plan, staging gates A–E, scenario coverage, acceptance matrix (nothing executed) |
 | [SECURITY-AUDIT.md](SECURITY-AUDIT.md) | Security audit findings SA-1 to SA-8 and evidence |
 | [GITHUB-CONTRACT-AUDIT.md](GITHUB-CONTRACT-AUDIT.md) | G-PLAT gates versus recorded evidence and tests; findings F-1 to F-3 |
 | [BENCHMARK-REVIEW-QUEUE.md](BENCHMARK-REVIEW-QUEUE.md) | Benchmark review items (proposals only; truth unchanged) |

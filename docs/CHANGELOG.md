@@ -3,6 +3,190 @@
 > **Commit hashes in this file before 2026-10-20 (bb) are pre-rewrite hashes.** The history was rewritten once to
 > redact signed URLs before the first push; map them with [HISTORY-REWRITE.md](HISTORY-REWRITE.md).
 
+## Unreleased: B-04 confidence cap (2026-11-03, tenth batch; uncommitted)
+
+- **D-5 amended (owner-requested):** `flaky_suspect` is never `high` (basis `flakiness_unobservable`); every other
+  category is unchanged. Scripted oracle: B-04 C1 changed from high/overconfident to medium/correct (Track B points
+  50.5 → 55.5; confident-wrong 1/25 → 0/25; no safety failures). This was the only per-case change; the truth is
+  unchanged.
+- Changed test pin (deliberate): `tests/bench/test_review_items.py` B-04 item; new `test_validate.py` cap tests.
+
+## Unreleased: V0 execution package (2026-11-02, ninth batch; uncommitted)
+
+- **Benchmark accounting:** the report now states that its outcome table counts Track B runs only, with the Track A
+  and Track E counts, and flags any mismatch (`bench/report.py`; test in `tests/bench/test_harness.py`).
+  BENCHMARK.md explains the denominators. No truth or score changed.
+- **B-04 overconfidence:** traced to confidence rule D-5, which has no cap for `flaky_suspect`. Recorded as an owner
+  decision (not changed, to keep the benchmark untuned).
+- **Tests:** a removed PR association is never published to from a stored report; a refused Check Run write leaves
+  the comment published with an accurate per-surface result.
+- **Release candidate:** measured buildability of the commit groups (only groups 1–5 together build); two-commit
+  plan recommended. Gate A–C execution tables with every external write marked. 20-row acceptance matrix. Gate D
+  packet with OpenAI's public data-control facts and the staging-only enabling change (not made).
+
+## Unreleased: V0 release-candidate fixes (2026-11-02, eighth batch; uncommitted)
+
+- **Pre-pass:** a container registry's refusal in the Docker CLI format (`denied: …`, `unauthorized: …`, only at the
+  line start, only with words after it) is an error line (`generic`, observed text only). Before, the run ended
+  `no_error_line` without investigation. The benchmark is unchanged: the signal report over all cases is
+  byte-identical, and the scripted oracle run gives identical per-case results.
+- **Resumable publication bound tighter:** a stored report is resumed only for the same commit SHA and only when the
+  commit's PR association is unchanged; otherwise the run is investigated afresh.
+- **Permissions re-checked** against docs.github.com (commit comment create = Contents read; edit = Contents write,
+  not requested). The fake GitHub now names the right permission for a refused commit comment. New
+  partial-publication test.
+- **Release candidate:** `docs/RELEASE-CANDIDATE-V0.md` (commit plan, staging gates, acceptance matrix, approvals).
+
+## Unreleased: publication recovery, per-surface tokens, report acceptance (2026-11-02, seventh batch; uncommitted)
+
+- **F1 / D-14, publication recovery:** an analysis persisted but not fully published (no ops record) is published
+  by the next attempt, a takeover, or an operator requeue, without a new investigation or model call
+  (`_resume_publication`). A re-persisted analysis resets its ops record.
+- **Defect fixed:** an attempt claimed after its deadline used to write a "could not complete" notice **over a
+  recorded valid diagnosis**. It now publishes the pending analysis, or leaves a completed one untouched.
+- **G-PLAT-11:** per-surface publication tokens (`publish_checks`, `publish_pr`, `publish_commit`). A declined
+  permission blocks only its own surface. No App permission added.
+- **Defect fixed (review):** PR association ran under the publication deadline. It now runs under the work
+  deadline. Replay sizes are logged on "investigation finished" (bytes and counts only).
+- `ops report`: current `queue`, `publication_incomplete`, `provider_failures`, last `retention` run.
+- Tests: `test_publication_recovery.py`, `test_report_outcomes.py`, held-out pre-pass logs for container and
+  authentication failures (one strict xfail: a bare registry `denied:` line is not recognised).
+- Changed test pins (deliberate): reconcile tests now expect the persisted report to be resumed; the G-PLAT-11 test
+  expects per-surface behaviour; operator acceptance expects 3 model requests (no third investigation).
+- New decision note: provider data approval for OpenAI (the product still refuses `LLM_PROVIDER=openai`).
+
+## Unreleased: attempt deadline on GitHub requests, continuation-state security, retention (2026-11-02, sixth batch; uncommitted)
+
+- **O-2:** every GitHub request of an attempt (reads, validation, token mints, log streams, publication) runs within
+  the attempt's deadline. Analysis requests use the work deadline (job − 60 s reserve); publication uses the job
+  deadline. Nothing starts with < 2 s left. Work that cannot start ends "could not complete" without a futile retry;
+  publication that cannot start is `publication.not_started`, never uncertain or published. Investigation now needs
+  ≥ 20 s (was 10 s). The 600 s / 60 s / 3-attempt policy is unchanged.
+- **O-5:** `investigate/replay.py`: continuation state is sealed per step, bound to provider, model, tenant, job,
+  job attempt and investigation, capped (64 KiB per envelope, 192 KiB per conversation), verified before replay,
+  and masked in every `repr`. The engine supports `all_turns` replay through the provider's `replay_scope`
+  (repair turn unaltered). No Anthropic or DeepSeek codec was added.
+- **Usage:** migration 0016 marks legacy rows `no_call` only where the code proves no model call. Cost with cached
+  input is unavailable (no cached-input price is configured), never overstated. `ops report` shows usage
+  completeness and the cost basis.
+- **Retention:** migration 0017. The purge never touches the data of a run with a live job. `retention --dry-run`
+  (exact, rolled back). Every real run writes a content-free `retention.run` audit row. Scheduling (existing cron) and 14-day
+  operational-log instructions are in OPERATIONS §6.
+- **Operator provisioning** procedure (OPERATIONS §2a). Per-migration rollback table (§8b). Runbook cards gain
+  needs and live-effect columns, plus L-7, I-7, P-8 and R-7.
+- Changed test pins (deliberate): the C-4 test now leaves 15 s of work time (40 s left is now the new
+  `test_o2_no_work_request_starts_inside_the_publication_reserve`); the engine accepts `all_turns`; the schema head is
+  0017; the retention test counts the new `retention.run` audit row.
+
+## Unreleased: operator identity, least privilege, usage breakdown (2026-11-01, fifth batch; uncommitted)
+
+- **Requeue identity (0013):** `ops requeue` now runs as the operator's own database login (`DATABASE_URL_OPERATOR`,
+  a member of `tracewise_operator`). The audit actor is the authenticated `session_user`, not a typed handle;
+  `--operator` is only a cross-check. Shared service roles and superusers are refused. The decision, the job and its
+  audit row happen atomically in `tracewise_requeue`. The limit (2, provisional) is owner-replaceable via
+  `tracewise_requeue_max_reruns()` and is recorded in every audit row.
+- **Least privilege (0015, D-11 option C):** the tenant role loses all access to `job`, `webhook_delivery`,
+  `usage_event`, `failure_signature`, `audit_event` and `alembic_version`, INSERT/UPDATE on `installation` and
+  `repository`, and the unused sequences. The system role loses its unused DELETE. The documented matrix is updated.
+- **Usage breakdown (0014):** `analysis.cached_input_tokens`, `reasoning_output_tokens` (NULL when not reported,
+  never 0) and `usage_source` (`no_call`, `provider`, `partial`). The codecs now report an absent detail as unknown.
+  `ops report` shows the subsets with reported and not-reported counts.
+- **Check Run summary** starts with the superseded-commit-comment notice when it applies.
+- Decision notes: O-2 (new), O-5 §12 (final contract, provider matrix, DeepSeek gate), D-11/D-12 (§1.12–1.14).
+  New runbook: `docs/LIVE-VALIDATION-RUNBOOK.md`.
+- Changed test pins (deliberate): `test_rls.py`, `test_cross_phase.py` and `test_phase50_transfer.py` no longer use the
+  tenant role on the tables it lost; the schema head is 0015.
+
+## Unreleased: publication reconciliation, tool error integrity, source unavailable (2026-11-01, fourth batch; uncommitted)
+
+- **Publication reconciliation:** on a retried or taken-over job (generation > 1) PR comments and Check Runs are
+  rewritten in place even when the stored digest matches (`reconciled`): an unrecorded request of an earlier
+  generation may have changed GitHub. Before, such a surface could keep showing a stale report as `unchanged`.
+- **Commit comment:** still write-once (editing needs Contents write, not requested). When it does not carry the
+  current attempt's report it is kept, recorded truthfully, reported `superseded`, and the Check Run says so.
+- **D-C:** tool arguments are bound before execution; only they produce `invalid_args`. Tool errors have categories
+  (`tools.CATEGORY`). A defect inside a tool raises `ToolInternalError` (logged with its code location, no content):
+  the investigation ends and the job retries, then reports "could not complete". Per-file permanent GitHub errors are
+  now `read_failed`, distinct from `unavailable`.
+- **I-3, source unavailable:** a transiently unreachable code source skips the model; an inconclusive result after
+  transient read failures becomes `source_unavailable`. Both are retried, then "could not complete", never a completed
+  inconclusive analysis.
+- **Requeue:** concurrent requeues of one run are serialised (the loser used to report `rerun_limit`); the bound of 2
+  is marked provisional.
+- New events: `publication.attempted`, `publication.reconciled`, `publication.superseded_retained`,
+  `publication.outcome_uncertain`, `tool.error`, `tool.internal_error`, `context.source_unavailable`,
+  `analysis.source_unavailable`.
+- Changed test pins (deliberate): `test_04_duplicate_delivery_and_reexecution_publish_once` now expects one in-place
+  Check Run PATCH (`reconciled`) on re-execution; `test_contents_api` expects `read_failed` for 422/invalid JSON.
+
+## Unreleased: attempt fencing, read-error classes, dead-job re-run (2026-11-01, third batch; uncommitted)
+
+- **D-1/D-2, database-backed attempt fencing (migration 0012):** the job's `attempts` counter is the ownership
+  generation. Queue transitions are conditional on worker and attempt; tenant-plane writes (analysis, quota notice,
+  publication state, ops record) check ownership with `tracewise_job_owned` (FOR SHARE until commit). A stale attempt
+  can no longer overwrite a newer attempt's analysis, record a publication, complete, fail, cancel or renew. Before,
+  only a worker-local flag and `locked_by` guarded these (a reused worker id was not fenced at all). The in-flight
+  GitHub request at the moment of takeover remains the one documented boundary.
+- **D-A:** per-file permanent GitHub errors make that file unavailable instead of ending the job `dead`; a
+  `PermanentError` publishes the could-not-complete notice (credential faults excepted: nothing could be published).
+- **D-B:** transient code-read errors are retried in place within the attempt deadline; a validation read that still
+  fails is an infrastructure failure (`ValidationUnavailable`, attempt retried), never a verdict on the answer.
+- **I-6:** `python -m tracewise.ops requeue` re-runs one dead analysis job: bounded (2), audited, never alongside a
+  live attempt, never modifying the dead row.
+- New events: `job.stale_attempt_rejected`, `job.stale_attempt_stopped`, `job.claimed{takeover}`,
+  `context.read_retry`, `context.read_retries_exhausted`, `context.read_permanent_error`,
+  `analysis.validation_unavailable`, `analysis.permanent_failure`, `ops.requeue`.
+
+## Unreleased: read budgets, attempt deadline, validation edge cases, codec capabilities (2026-11-01, second batch; uncommitted)
+
+- **C-3:** validation reads have their own reserve inside the unchanged global read totals; tools can no longer
+  starve the location check (which used to come back as a misleading `location_unreadable`). Budget denials appear in
+  `files_skipped`; an exhausted validation reserve has its own reason (`location_validation_budget_exhausted`).
+- **C-4:** one attempt deadline (job deadline less a 60 s publication reserve) governs log downloads, the git fetch
+  and the investigation; with too little time left the investigation is skipped (`attempt_deadline_exhausted`).
+- **Validation edge cases:** H-1 removes causal claims split from their trigger reference by a pronoun sentence (4A);
+  GitHub Enterprise managed-user owner names (`name_shortcode`) are accepted (4B); a token grant without
+  `repositories` is refused (4C, new live gate G-PLAT-13).
+- **Codec capabilities:** `CodecCapabilities` per codec; providers the loop cannot run correctly are refused when
+  built.
+- **Corrections:** the replay comments and DATA-INVENTORY no longer claim replay is redacted (pending O-5); the gap
+  report no longer claims a D-11 revoke migration was prepared.
+- **Decision notes** (proposals only): I-3/I-6, D-11/D-12 with usage persistence, O-5, minimum observability, in
+  `research/product-strategy/decision-notes/`.
+
+## Unreleased: verification, MVP gaps and multi-provider steps 2–4 (2026-11-01; uncommitted)
+
+- **Reliability:** runtime database sessions get a 30 s `statement_timeout` and a 10 s `lock_timeout` (I-7); a signed
+  log URL older than 30 s is re-requested just before it is read (C-7); `grep` says how many files it did not search
+  (C-3, first half); recovery signs a fresh App JWT for every redelivery POST (C-9 cause).
+- **Secrets lifecycle:** expired installation tokens leave the token cache and the log scrubber (TK-1).
+- **Multi-provider foundation:** constant tool declarations with `tool_choice: "none"` / Gemini `NONE` on tool-free
+  steps (OpenAI smoke harness aligned; its step 3 now sends tools with `"none"`); `StepUsage` cached-input and
+  reasoning-output breakdown from recorded fields; `ProviderRefusal` and `ProviderTruncated` error kinds (outcome
+  unchanged); provider-neutral codec contract suite (`tests/investigate/test_codec_contract.py`).
+- **Research records:** Anthropic Messages and DeepSeek chat completions contracts (official documentation only; no
+  key, no request). No codec is added: both require replay on every assistant turn (design step 1, owner gate O-5).
+- **Tests:** a time-zone-dependent quota test fixed (it failed in the first hours of each local month east of UTC);
+  two helpers no longer collected as tests.
+- No live model or GitHub call; no service started.
+
+## Unreleased: review fixes, strategy and architecture (2026-10-30; uncommitted)
+
+- **Gemini codec (benchmark only):** tool schemas sent as `parametersJsonSchema` (the `parameters` Schema has no
+  `additionalProperties`; research record Addendum C); secret-shaped arguments no longer break replay; rejected calls to
+  undeclared tools no longer break the final step; failed encodes change no state; the model role is required;
+  tool-use prompt tokens count as input.
+- **Diagnosis integrity:** H-1 causal-claim removal no longer bypassed by dotted tokens such as file names; delimiter
+  neutralisation leaves no `<<`/`>>`; the investigation deadline is checked before each tool call.
+- **Resource and security bounds:** App JWTs no longer accumulate in the log scrubber; the git workspace root must be
+  private to the worker user; redelivery stops on a refused App JWT without counting an attempt; malformed token grants
+  fail closed; log redirects must use port 443; `workflow_run` repository names are shape-checked;
+  `REPORT_MAX_CHARS` is bounded at 60,000.
+- **Documents:** `research/product-strategy/` (competitor landscape, product strategy, feature roadmap,
+  implementation-gap report); `docs/architecture/multi-provider-design.md`; documentation mismatches corrected
+  (fake-provider outcomes, live-validation status, Node requirement, `.env.example`, ARCHITECTURE codec status).
+- No live model or GitHub call was made; every test is offline (mock transports, loopback sockets).
+
 ## Unreleased: Gemini native `generateContent` codec (2026-10-26; offline only, not run)
 
 - `investigate/gemini_generate.py`: a separate wire codec for the native API, reached only through the benchmark model

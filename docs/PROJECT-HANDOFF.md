@@ -81,8 +81,8 @@ workflow_run webhook → HMAC check, 25 MB cap, dedupe (web/) → durable Postgr
   `tracewise_app` (tenant plane, row-level security always applies), `tracewise_system` (system plane, the only
   `BYPASSRLS` role). Processes refuse the wrong role at startup; the migration CLI refuses runtime roles, superusers
   and non-owners. Details: [OPERATIONS.md](OPERATIONS.md) §1–§2, [DEPLOYMENT-BLUEPRINT.md](DEPLOYMENT-BLUEPRINT.md) §6.
-- **Providers:** `investigate/providers.py`. `fake` (scripted) is accepted **only** with `TW_ENV=test` and produces
-  "could not complete" reports. `openai` (codec `investigate/openai_responses.py`, adapter `investigate/http_adapter.py`)
+- **Providers:** `investigate/providers.py`. `fake` (scripted) is accepted **only** with `TW_ENV=test` and never names a
+  root cause (`inconclusive` when the log has no recognised error line, otherwise "could not complete"). `openai` (codec `investigate/openai_responses.py`, adapter `investigate/http_adapter.py`)
   is written and tested offline but **refuses to start** until the approvals in [SMOKE-RUNBOOK.md](SMOKE-RUNBOOK.md) §1.
 - **GitHub App permissions (exact):** Actions read, Contents read, Metadata read, Pull requests write, Checks write;
   event `workflow_run`. Publication: one write-once commit comment for push runs, one upserted PR comment for PR runs,
@@ -93,6 +93,16 @@ workflow_run webhook → HMAC check, 25 MB cap, dedupe (web/) → durable Postgr
   Compose bundle and runbook: [deploy/staging/](../deploy/staging/README.md) (plus `compose.local.yaml` for a local trial).
 
 ## C. Repository state at handoff
+
+> **Update 2026-10-30.** Local `main` is at **`a738c61`**, four commits ahead of `origin/main` (authentication fixes,
+> benchmark model mode, Gemini benchmark codec); `make ci` at that commit: 1,559 passed. A review on 2026-10-30 left
+> further fixes uncommitted (1,592 passed); see
+> [research/product-strategy/implementation-gap-report.md](../research/product-strategy/implementation-gap-report.md)
+> for the current capability status, the defects fixed and the remaining gaps. The text below describes the state at
+> `1b62ab0` and is kept as written.
+>
+> **Update 2026-11-01.** A further uncommitted batch (reliability gaps I-7, C-7, C-3; token lifecycle; multi-provider
+> steps 2–4; Anthropic and DeepSeek contract records) is described in the gap report's §0 and in CHANGELOG.
 
 - **Branch `main`** at merge commit **`1b62ab0`** ("Merge pull request #1 from Rarebuffalo/fix/preview-fetch-credentials";
   parents `a3de236`, the previous `main`, and `6042cd9`, the feature branch tip). Local `main` equals `origin/main`
