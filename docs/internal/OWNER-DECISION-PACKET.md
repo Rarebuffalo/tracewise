@@ -2,9 +2,9 @@
 
 One page of what is still waiting on you, rechecked against the repository at the end of Phase 52. Every item
 lists what is decided in code today, the question, the choices and their consequences. Nothing here is decided by
-the implementation. Detail lives in [DECISIONS.md](DECISIONS.md), [OWNER-DECISION-SHEET.md](OWNER-DECISION-SHEET.md),
-[SMOKE-RUNBOOK.md](SMOKE-RUNBOOK.md), [GITHUB-CONTRACT-AUDIT.md](GITHUB-CONTRACT-AUDIT.md) and
-[DEPLOYMENT-BLUEPRINT.md](DEPLOYMENT-BLUEPRINT.md).
+the implementation. Detail lives in [DECISIONS.md](../DECISIONS.md), [OWNER-DECISION-SHEET.md](OWNER-DECISION-SHEET.md),
+[SMOKE-RUNBOOK.md](../SMOKE-RUNBOOK.md), [GITHUB-CONTRACT-AUDIT.md](../GITHUB-CONTRACT-AUDIT.md) and
+[DEPLOYMENT-BLUEPRINT.md](../DEPLOYMENT-BLUEPRINT.md).
 
 **Independent of every item below:** the offline implementation is complete for everything specified. Each item
 blocks only the work named in its last line.

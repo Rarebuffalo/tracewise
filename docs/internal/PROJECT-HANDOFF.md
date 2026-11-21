@@ -14,8 +14,8 @@ support a conclusion it says so instead of guessing.
 
 - **Target user:** developers and maintainers of repositories that use GitHub Actions; MVP languages Python and
   TypeScript (D-2), generic extraction for everything else.
-- **MVP:** [SPEC.md](SPEC.md) (requirements FS-*), [ACCEPTANCE-TESTS.md](ACCEPTANCE-TESTS.md) (AT-*),
-  [TASKS.md](TASKS.md) (T-*), decisions in [DECISIONS.md](DECISIONS.md) and [ARCHITECTURE.md](ARCHITECTURE.md) (ADR-*).
+- **MVP:** [SPEC.md](../SPEC.md) (requirements FS-*), [ACCEPTANCE-TESTS.md](../ACCEPTANCE-TESTS.md) (AT-*),
+  [TASKS.md](../TASKS.md) (T-*), decisions in [DECISIONS.md](../DECISIONS.md) and [ARCHITECTURE.md](../ARCHITECTURE.md) (ADR-*).
 - **Comparable products:** other CI-failure diagnosis tools exist. The competitive research behind the MVP scope
   is kept outside this repository. **No comparative claim is made**; any would need AT-CMP-01 (a head-to-head in an
   approved test organisation).
@@ -53,24 +53,24 @@ workflow_run webhook → HMAC check, 25 MB cap, dedupe (web/) → durable Postgr
   `scripts/db/provision_roles.sql`: `tracewise_owner` (non-superuser; owns the schema; migrations only),
   `tracewise_app` (tenant plane, row-level security always applies), `tracewise_system` (system plane, the only
   `BYPASSRLS` role). Processes refuse the wrong role at startup; the migration CLI refuses runtime roles, superusers
-  and non-owners. Details: [OPERATIONS.md](OPERATIONS.md) §1–§2, [DEPLOYMENT-BLUEPRINT.md](DEPLOYMENT-BLUEPRINT.md) §6.
+  and non-owners. Details: [OPERATIONS.md](../OPERATIONS.md) §1–§2, [DEPLOYMENT-BLUEPRINT.md](../DEPLOYMENT-BLUEPRINT.md) §6.
 - **Providers:** `investigate/providers.py`. `fake` (scripted) is accepted **only** with `TW_ENV=test` and never names a
   root cause (`inconclusive` when the log has no recognised error line, otherwise "could not complete"). `openai` (codec `investigate/openai_responses.py`, adapter `investigate/http_adapter.py`)
-  is written and tested offline but **refuses to start** until the approvals in [SMOKE-RUNBOOK.md](SMOKE-RUNBOOK.md) §1.
+  is written and tested offline but **refuses to start** until the approvals in [SMOKE-RUNBOOK.md](../SMOKE-RUNBOOK.md) §1.
 - **GitHub App permissions (exact):** Actions read, Contents read, Metadata read, Pull requests write, Checks write;
   event `workflow_run`. Publication: one write-once commit comment for push runs, one upserted PR comment for PR runs,
   one neutral Check Run "Tracewise" (`external_id` = run id), all reconciled before creating, so retries never
   duplicate. Missing permissions are recorded as `unpublished_permission`, never escalated.
 - **Operations CLIs:** `python -m tracewise.{preflight,db.migrate,worker,recovery,retention,ops}`; web:
-  `uvicorn --factory tracewise.web.asgi:create_runtime_app`. Self-hosting guide: [SELF-HOSTING.md](SELF-HOSTING.md);
-  Compose bundle and runbook: [deploy/staging/](../deploy/staging/README.md) (plus `compose.local.yaml` for a local trial).
+  `uvicorn --factory tracewise.web.asgi:create_runtime_app`. Self-hosting guide: [SELF-HOSTING.md](../SELF-HOSTING.md);
+  Compose bundle and runbook: [deploy/staging/](../../deploy/staging/README.md) (plus `compose.local.yaml` for a local trial).
 
 ## C. Repository state at handoff
 
 > **Update 2026-10-30.** Local `main` is at **`a738c61`**, four commits ahead of `origin/main` (authentication fixes,
 > benchmark model mode, Gemini benchmark codec); `make ci` at that commit: 1,559 passed. A review on 2026-10-30 left
 > further fixes uncommitted (1,592 passed); see
-> [research/product-strategy/implementation-gap-report.md](../research/product-strategy/implementation-gap-report.md)
+> [research/product-strategy/implementation-gap-report.md](../../research/product-strategy/implementation-gap-report.md)
 > for the current capability status, the defects fixed and the remaining gaps. The text below describes the state at
 > `1b62ab0` and is kept as written.
 >
@@ -100,9 +100,9 @@ workflow_run webhook → HMAC check, 25 MB cap, dedupe (web/) → durable Postgr
 
 ## D. Completed work (evidence in the linked docs and tests)
 
-- The whole webhook-to-report pipeline offline, with scripted providers: [CHANGELOG.md](CHANGELOG.md), TASKS T-101…T-503.
+- The whole webhook-to-report pipeline offline, with scripted providers: [CHANGELOG.md](../CHANGELOG.md), TASKS T-101…T-503.
 - Synthetic benchmark (26 cases, truth lock) and META cases P-01…P-03 from recorded public metadata:
-  [BENCHMARK.md](BENCHMARK.md), [benchmark-runs/](benchmark-runs/).
+  [BENCHMARK.md](../BENCHMARK.md), [benchmark-runs/](../benchmark-runs/).
 - Tenancy and least privilege: RLS, role contracts, privilege matrix and catalogue guards
   (`tests/db/test_rls.py`, `test_privilege_matrix.py`, `test_least_privilege.py`).
 - Reliability: queue leases and retries, redelivery and sweep with overlap locks, idempotent publication, D-10
@@ -111,7 +111,7 @@ workflow_run webhook → HMAC check, 25 MB cap, dedupe (web/) → durable Postgr
 - Operations: preflight, migration CLI, health/readiness, troubleshooting runbook (OPERATIONS §8a), runtime image,
   staging Compose bundle rehearsed locally (deploy/staging/README.md "Readiness status").
 - Latest fix this sprint: AT-EVT-03 (a job GitHub ended `timed_out` is now named in every report).
-- Self-hosting: [SELF-HOSTING.md](SELF-HOSTING.md) and a loopback-only local trial, rehearsed on amd64 with measured
+- Self-hosting: [SELF-HOSTING.md](../SELF-HOSTING.md) and a loopback-only local trial, rehearsed on amd64 with measured
   idle memory (about 210 MiB for the four services).
 
 ## E. Remaining work
@@ -182,7 +182,7 @@ item true.
 
 Paste this:
 
-> You are continuing the Tracewise project. First read `docs/PROJECT-HANDOFF.md`. Then verify the live repository
+> You are continuing the Tracewise project. First read `docs/internal/PROJECT-HANDOFF.md`. Then verify the live repository
 > state (branch, HEAD, `git status`, migration head) before relying on it. Read only the source files the next task
 > needs. Preserve any uncommitted changes, `.claude/`, `tracewise-brand/` and every protected path listed in §G; do
 > not commit, push, deploy or contact external services unless I authorise it. Continue from the next unresolved

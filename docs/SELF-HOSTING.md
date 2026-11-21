@@ -24,8 +24,8 @@ Re-runs update the existing Check Run and comment; duplicate webhooks are ignore
 
 | | Status |
 |---|---|
-| Real AI diagnoses | **Not available yet.** The OpenAI provider is implemented and tested offline but refuses to start until the smoke test is approved and run (§9). |
-| What runs today | The **fake provider** (`LLM_PROVIDER=fake`, only with `TW_ENV=test`). No analysis names a root cause. Two outcomes depend on the failed job's log: **(1) no recognised error line** (for example only `Process completed with exit code 1`): the deterministic pre-pass ends the analysis as `inconclusive` (`no_error_line`) **without invoking the provider**; this is a completed analysis, so it is published under the existing policy (commit comment on push runs, PR comment on PR runs, and the Check Run). **(2) a recognised error line** (for example a Python traceback): the investigation runs, the fake provider fails each attempt, and after the retries (about 1–3 minutes) the run ends `could_not_complete`, published on the Check Run (and the PR comment on PR runs), never as a commit comment (FS-ERR-1, D-8). Either way it proves the GitHub pipeline (delivery, queue, logs, permissions, publication), **not** diagnosis quality. |
+| Real AI diagnoses | **Bring your own key** (§9): OpenAI or Gemini. Both adapters are tested offline against recorded API contracts; this project has not yet run them against the live APIs, so treat early reports as unverified. |
+| Without a key | The **fake provider** (`LLM_PROVIDER=fake`, only with `TW_ENV=test`). No analysis names a root cause. Two outcomes depend on the failed job's log: **(1) no recognised error line** (for example only `Process completed with exit code 1`): the deterministic pre-pass ends the analysis as `inconclusive` (`no_error_line`) **without invoking the provider**; this is a completed analysis, so it is published under the existing policy (commit comment on push runs, PR comment on PR runs, and the Check Run). **(2) a recognised error line** (for example a Python traceback): the investigation runs, the fake provider fails each attempt, and after the retries (about 1–3 minutes) the run ends `could_not_complete`, published on the Check Run (and the PR comment on PR runs), never as a commit comment (FS-ERR-1, D-8). Either way it proves the GitHub pipeline (delivery, queue, logs, permissions, publication), **not** diagnosis quality. |
 | Live GitHub validation | **Not done.** The staged plan is [LIVE-VALIDATION-PLAN.md](LIVE-VALIDATION-PLAN.md). |
 | Architectures | **amd64 verified** (image build and stack checks). **arm64 not verified** (§11). |
 
@@ -146,7 +146,7 @@ published one commit comment and one Check Run, as the existing policy requires.
 | App private key | Minting short-lived installation tokens | `app.pem` (mode 600, owner uid 10001) | Generate it in the App's settings, move the downloaded `.pem` (never paste it) with `install -m 600 <download> "$TW_SECRETS_DIR/app.pem"`, then `sudo chown 10001 "$TW_SECRETS_DIR/app.pem"`, and delete the download |
 | Webhook secret | Verifying deliveries (web) | `web.env` | Already set (Stage 1) |
 | Installation ID | — | **not configured** | Read from each webhook payload; tokens are minted per installation, repository and purpose |
-| Model credentials | — | none | The fake provider needs none; OpenAI stays refused |
+| Model credentials | Calling your model provider (worker) | `worker.env` | `LLM_PROVIDER`, `LLM_MODEL` and `OPENAI_API_KEY` or `GEMINI_API_KEY` (§9). The fake provider needs none |
 
 **Test repository.** Create a new repository used for nothing else (for example `tracewise-s0-test`, public or
 private), containing only a deliberately failing workflow, for example `.github/workflows/s0.yml`:
@@ -278,11 +278,27 @@ proves delivery, queueing, log access and publication permissions; it says nothi
 
 ## 9. The real model (separate approval)
 
-`LLM_PROVIDER=openai` refuses to start in this build. Enabling it is three separately approved steps:
-(1) one smoke test of the API contract, run by the owner on their own machine with a project-scoped key file
-([SMOKE-RUNBOOK.md](SMOKE-RUNBOOK.md) §1–§6); (2) wiring the provider; (3) the measured evaluation (T-605). Until
-then no logs or code are sent to any model provider. What would be sent, and the limits applied, is listed in
-[DATA-INVENTORY.md](DATA-INVENTORY.md) §3 and §5.
+Tracewise uses **your own** model provider account. In `worker.env` set (with `TW_ENV` other than `test`):
+
+```
+LLM_PROVIDER=openai            # or gemini
+LLM_MODEL=<exact model id>     # required; no default, no fallback
+OPENAI_API_KEY=<your key>      # or GEMINI_API_KEY for gemini
+# optional, from your provider's price list, for the cost record:
+# LLM_PRICE_INPUT_PER_MTOK=
+# LLM_PRICE_OUTPUT_PER_MTOK=
+```
+
+Run the preflight (`llm_provider` must pass), then restart the worker. A missing or malformed key or model stops the
+worker at startup; a provider failure during an analysis ends that run "inconclusive" or "could not complete", never
+a guessed diagnosis, and never falls back to another provider.
+
+**What is sent to your provider:** the redacted failed-job log excerpts, the trigger diff and the source windows the
+investigator reads (limits in [DATA-INVENTORY.md](DATA-INVENTORY.md) §3 and §5). Redaction is pattern-based. Check your
+provider's data-retention and training settings before using it on private code.
+
+**Not yet verified by this project:** neither adapter has been run against the live API (G-4) and no accuracy has
+been measured (T-605). To check the OpenAI contract yourself first, see [SMOKE-RUNBOOK.md](SMOKE-RUNBOOK.md).
 
 ## 10. Operating it
 

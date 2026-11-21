@@ -15,4 +15,4 @@ field to a fact in these records), and the implementation-gap report with its de
 
 Earlier market and competitor research, the original planning set and their evidence were removed from the repository
 on 2026-11-21 and are kept privately by the maintainer. Older documents (notably `docs/CHANGELOG.md` and
-`docs/DOC-CHANGE-PLAN.md`) still name some of those paths as plain text; they no longer exist here.
+`docs/internal/DOC-CHANGE-PLAN.md`) still name some of those paths as plain text; they no longer exist here.

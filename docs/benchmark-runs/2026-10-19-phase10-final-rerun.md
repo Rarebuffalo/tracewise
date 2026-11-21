@@ -25,7 +25,7 @@ Run id `04e8c1a72a5291fc`. The outcome of every one of the 115 required runs is 
 |---|---|---|---|---|---|---|
 | 115 | 111 | 0 | 0 | 0 | 4 | yes |
 
-Unchanged review items (`docs/BENCHMARK-REVIEW-QUEUE.md`):
+Unchanged review items (`docs/internal/BENCHMARK-REVIEW-QUEUE.md`):
 
 - A-05 fails only `first_error`.
 - B-04/C1 is the one safety failure (`high_confidence_wrong`).

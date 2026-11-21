@@ -1,6 +1,6 @@
 # Owner decision sheet (Phase 43)
 
-Plain-language summary of what is waiting on you. Detail and evidence are in [DECISION-MEMOS.md](DECISION-MEMOS.md), [BENCHMARK-REVIEW-QUEUE.md](BENCHMARK-REVIEW-QUEUE.md), [MODEL-ADAPTER.md](MODEL-ADAPTER.md) and [LIVE-VALIDATION-PLAN.md](LIVE-VALIDATION-PLAN.md). Nothing here is decided in code.
+Plain-language summary of what is waiting on you. Detail and evidence are in [DECISION-MEMOS.md](DECISION-MEMOS.md), [BENCHMARK-REVIEW-QUEUE.md](BENCHMARK-REVIEW-QUEUE.md), [MODEL-ADAPTER.md](../MODEL-ADAPTER.md) and [LIVE-VALIDATION-PLAN.md](../LIVE-VALIDATION-PLAN.md). Nothing here is decided in code.
 
 ## Phase 45: approved and implemented (DECISIONS D-13)
 
@@ -14,7 +14,7 @@ Plain-language summary of what is waiting on you. Detail and evidence are in [DE
 
 Items 5–8 and 10 remain open below.
 
-**Next decision (Phase 47):** whether to authorise **one** OpenAI smoke evaluation. Everything it needs (A-1 to A-7: authorisation, model id, project-scoped key file, account data settings, approval of the synthetic content, the command, and the cost bound) is listed in [SMOKE-RUNBOOK.md](SMOKE-RUNBOOK.md) §1. Nothing has been run.
+**Next decision (Phase 47):** whether to authorise **one** OpenAI smoke evaluation. Everything it needs (A-1 to A-7: authorisation, model id, project-scoped key file, account data settings, approval of the synthetic content, the command, and the cost bound) is listed in [SMOKE-RUNBOOK.md](../SMOKE-RUNBOOK.md) §1. Nothing has been run.
 
 ## Already settled by the spec (no decision needed)
 

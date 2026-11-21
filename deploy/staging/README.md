@@ -182,7 +182,8 @@ container's environment: keep the VM's Docker access to the database administrat
 
 ## Milestone B: real-model smoke test (T-605), separate
 
-Nothing here is enabled: `LLM_PROVIDER=openai` refuses to start in this build. Prerequisites (SMOKE-RUNBOOK §1,
+Since 2026-11-21 a self-hosted worker can use `LLM_PROVIDER=openai` or `gemini` with the operator's own key
+(docs/SELF-HOSTING.md §9). For this staging milestone the prerequisites still apply. Prerequisites (SMOKE-RUNBOOK §1,
 items A-1 to A-7): your written authorisation for one smoke run (≤3 requests); the exact model id and its source; a
 project-scoped key in a file outside the repository (`chmod 600`, never an env var or chat); confirmation of the
 account's retention and training settings; approval of the request content, the command and the cost bound.

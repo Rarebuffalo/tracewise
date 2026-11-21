@@ -2,7 +2,7 @@
 
 - **Date:** 2026-11-01
 - **Status:** Proposal for owner decision; nothing implemented
-- **Sources:** `implementation-gap-report.md` §0a and §3 (rows I-3, I-6); `docs/OWNER-DECISION-PACKET.md` §4a
+- **Sources:** `implementation-gap-report.md` §0a and §3 (rows I-3, I-6); `docs/internal/OWNER-DECISION-PACKET.md` §4a
   (the "re-enqueueing runs lost during a credential fault" follow-up).
 - **Caveat:** citations are against the working tree at the time of reading. Several cited files have uncommitted
   changes (for example `jobs/handlers/analyze.py` gained `AttemptDeadline` while this note was being written), so

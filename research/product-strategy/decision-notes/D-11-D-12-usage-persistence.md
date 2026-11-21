@@ -17,7 +17,7 @@
 
 ### 1.1 Correction to the planning documents
 
-`implementation-gap-report.md:70` says "Migration prepared" and `:147` says "Apply the prepared migration". **No revoke migration exists.** `src/tracewise/db/migrations/versions/` holds 0001–0011 only, and the head is 0011 (`0011_analysis_quota.py`). Outside the migrations, `REVOKE` targeting `tracewise_app` appears only in `scripts/db/provision_roles.sql` (PUBLIC TEMP/CREATE) and in tests. The only text describing the migration is a *proposal* (`docs/OWNER-DECISION-PACKET.md:51-53`). Before anyone can approve it, it has to be written (size S).
+`implementation-gap-report.md:70` says "Migration prepared" and `:147` says "Apply the prepared migration". **No revoke migration exists.** `src/tracewise/db/migrations/versions/` holds 0001–0011 only, and the head is 0011 (`0011_analysis_quota.py`). Outside the migrations, `REVOKE` targeting `tracewise_app` appears only in `scripts/db/provision_roles.sql` (PUBLIC TEMP/CREATE) and in tests. The only text describing the migration is a *proposal* (`docs/internal/OWNER-DECISION-PACKET.md:51-53`). Before anyone can approve it, it has to be written (size S).
 
 ### 1.2 Current grants (as migrated through 0011)
 

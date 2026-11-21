@@ -32,9 +32,10 @@ report back to GitHub (a Check Run, plus a PR comment or a commit comment). Ever
 by evidence it actually examined. When the evidence is not enough, the report says **"inconclusive"** instead of
 guessing.
 
-> **Status: pre-release, not production-ready.** The offline implementation is complete and heavily tested, but it
-> has **not** been run against live GitHub, no real AI model has been connected, and there is no hosted deployment.
-> See [Project status](#project-status-and-limitations).
+> **Status: pre-release, self-hosted, bring your own model key.** The pipeline is complete and heavily tested
+> offline, and has been run against live GitHub with a test model. The OpenAI and Gemini adapters have **not yet been
+> run against the live APIs** by this project, and accuracy is unmeasured. Try it on a test repository first. See
+> [Project status](#project-status-and-limitations) and [Getting started](docs/GETTING-STARTED.md).
 
 ---
 
@@ -76,7 +77,8 @@ flowchart LR
    redacted and bounded.
 4. The deterministic pre-pass extracts primary errors from pytest, Python tracebacks, ruff, mypy, tsc, jest,
    vitest, eslint and installer output (pip, npm, uv).
-5. The investigator runs within its tool and time budget against a model provider (see the status note below).
+5. The investigator runs within its tool and time budget against your model provider (OpenAI or Gemini, with
+   your own key).
 6. The validator turns the draft into a diagnosis or an explicit "inconclusive" with next steps.
 7. The publisher writes the report, re-checking that the installation still authorises it before each surface.
    Failures that leave nothing published produce a "could not complete" notice.
@@ -97,8 +99,8 @@ More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 | Operations | `/healthz`, `/readyz`, structured secret-safe JSON logs, an ops report and failure-rate alert, a retention purge, backup/restore verified |
 | Quality | Offline benchmark harness with a frozen truth set; CI workflow with a network guard |
 
-**Built but not yet validated externally:** every GitHub interaction (validated only against fakes and recorded
-responses), and the OpenAI Responses API adapter (implemented against the recorded contract; never called).
+**Built but not yet validated externally:** most GitHub interactions (only stage S0 has run live), and the OpenAI
+and Gemini adapters (implemented against the recorded API contracts; not yet called by this project).
 
 ## Tech stack
 
@@ -118,9 +120,8 @@ waitlist.
 
 ## Quick start
 
-> Running the processes locally is useful for development, but **no real diagnosis is produced yet**: the only
-> runnable model provider is the test fake. To see the analysis pipeline end to end, use the test suite or the
-> offline benchmark below.
+> **To run Tracewise on your repositories, follow [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md).** The steps
+> below are for working on the code: they use the offline test fake, which never names a root cause.
 
 **Prerequisites:** [uv](https://docs.astral.sh/uv/), Python 3.12+, PostgreSQL server binaries (`initdb`,
 `pg_ctl`) on `PATH`, and `git`.
@@ -162,10 +163,9 @@ make image-check
 ```
 
 That builds the image and runs every process from it against a throwaway database with container networking
-disabled. Until the real model is approved, a live installation runs the fake provider and never names a root
-cause: a failed log with no recognised error line ends `inconclusive` (commit comment and Check Run), one with a
-recognised error line ends `could_not_complete` (Check Run only). It proves the GitHub pipeline, not diagnosis
-quality.
+disabled. With your own model key configured (`LLM_PROVIDER`, `LLM_MODEL` and the provider's key; see
+[docs/CONFIGURATION.md](docs/CONFIGURATION.md)) the worker produces real diagnoses. Without one, an installation can
+run the test fake (`TW_ENV=test`), which never names a root cause and only proves the GitHub pipeline.
 
 ## Configuration
 
@@ -176,8 +176,8 @@ All settings come from environment variables. [`.env.example`](.env.example) lis
   `DATABASE_URL_SYSTEM` (system plane). Processes refuse to start on the wrong role.
 - `GITHUB_WEBHOOK_SECRET` (≥16 characters), `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY_PATH` come from your own
   GitHub App.
-- `LLM_PROVIDER=fake` is accepted only with `TW_ENV=test`. `LLM_PROVIDER=openai` still refuses to start until the
-  adapter has been validated.
+- `LLM_PROVIDER` is `openai` or `gemini`, with **your own** API key (`OPENAI_API_KEY` or `GEMINI_API_KEY`) and an
+  explicit `LLM_MODEL`. `fake` is accepted only with `TW_ENV=test`.
 - Never commit real values. `.env` files, keys and PEMs are git-ignored.
 
 ## Testing and quality
@@ -224,13 +224,13 @@ Report vulnerabilities as described in [SECURITY.md](SECURITY.md). Findings and 
 |---|---|
 | Offline implementation and tests | Complete for the specified MVP |
 | Live GitHub validation (stages S0–S5) | **S0 exercised with the fake provider** (App installed 2026-10-22; publishing runs, re-runs and the redelivery 2026-10-23), from the local trial on a laptop through a tunnel, against a development App on one test repository: both fake-provider outcomes, re-runs updating the same Check Run, a redelivery rejected as a duplicate ([LIVE-VALIDATION-PLAN.md](docs/LIVE-VALIDATION-PLAN.md) §S0). G-PLAT-5 deferred. **S1–S5 not done** |
-| AI model | **Not connected.** OpenAI adapter implemented offline; a single smoke call, provider activation and the accuracy evaluation each need separate approval |
+| AI model | **Bring your own key:** OpenAI (Responses API) or Gemini (`generateContent`). Both adapters follow recorded API contracts and are tested offline; this project has **not yet run them against the live APIs** or measured accuracy |
 | Self-hosted deployment | Docker image and Compose bundle, rehearsed locally on amd64 (local trial and server layout); the local trial received live GitHub webhooks through a tunnel for S0; **not yet run on a real server**; no production deployment; arm64 unverified |
 | Accuracy, latency, cost | **No claims.** Nothing has been measured with a real model |
 | Privacy notice and terms | Draft only; not legally reviewed |
 
-Open owner decisions (retention, database roles, alert threshold, benchmark policy and others) are collected in
-[docs/OWNER-DECISION-PACKET.md](docs/OWNER-DECISION-PACKET.md).
+Open maintainer decisions (retention, alert threshold, benchmark policy and others) are collected in
+[docs/internal/OWNER-DECISION-PACKET.md](docs/internal/OWNER-DECISION-PACKET.md).
 
 ## Roadmap
 
@@ -238,10 +238,9 @@ No dates are promised. In dependency order:
 
 1. **Live GitHub validation:** run stages S0–S5 in a dedicated test organisation, then decide the open GitHub
    items (G-PLAT-11).
-2. **Model connection:** one authorised smoke call, then provider activation, then the T-605 evaluation
-   (accuracy, injection resistance, cost, latency).
-3. **Owner decisions:** retention (D-12), database roles (D-11), publication on ambiguous final failures (D-14),
-   benchmark policy items, alert threshold.
+2. **Model validation:** a first live call through each adapter, then the T-605 evaluation (accuracy, injection
+   resistance, cost, latency) and a published accuracy report.
+3. **Defaults to settle:** retention (D-12), publication on ambiguous final failures (D-14), alert threshold.
 4. **Self-hosted beta:** a first real server (staging) with the live stages, scheduling, alert routing and a soak.
 5. **Later features (P2):** surfacing failure history across runs and dependency drift in reports (both computed,
    not yet shown; they need a held-out evaluation first), flaky-test detection from attempt history.

@@ -1,6 +1,10 @@
 # Model adapter status (T-605 preparation)
 
-**Status:** the adapter core is built and contract-tested offline. **No real model is integrated or evaluated.** `LLM_PROVIDER=openai` refuses to start until an OpenAI wire codec exists, and that codec needs the recorded contract in §2.
+**Status (2026-11-21): bring your own key.** `LLM_PROVIDER=openai` or `gemini`, with the operator's own key
+(`OPENAI_API_KEY` / `GEMINI_API_KEY`) and an explicit `LLM_MODEL`, builds the product's `HTTPProvider` with the matching
+codec (`investigate/providers.py`). Both codecs follow the recorded contracts and are contract-tested offline. **This
+project has not yet observed either live API (G-4) or measured accuracy (T-605)**; the gates below remain the plan for
+doing so. Sections written before this date that say `openai` "refuses" describe the earlier state.
 
 ## 1. What exists (`src/tracewise/investigate/http_adapter.py`)
 
@@ -47,13 +51,13 @@ Then `OpenAIWire` can be written and golden-tested offline.
 
 **A key is needed only later**, for the separately authorised T-605 evaluation.
 
-**Until then** `LLM_PROVIDER=openai` refuses at startup (`investigate/providers.py`; `test_process_entrypoints.py`, case `LLM_PROVIDER=openai`). There is no fallback to `fake` or to any other provider.
+**Since 2026-11-21** the worker builds the configured provider at startup and refuses a missing key or model, or a malformed one (`investigate/providers.py`; `test_providers.py`, `test_process_entrypoints.py`). There is no fallback to `fake` or to any other provider.
 
 ## 2a. Offline readiness report (Phase 39)
 
 | Question | Answer |
 |---|---|
-| Can a real model be reached today? | **No.** `HTTPProvider` is never constructed in product code. No vendor codec exists. `LLM_PROVIDER=openai` refuses in every environment. The fake provider is refused outside `TW_ENV=test`. The benchmark CLI offers scripted providers only. Evidence: `tests/investigate/test_providers.py` (including the structural test `test_no_code_path_can_reach_a_real_model_today`), `test_process_entrypoints.py`, and the network-guarded full suite. |
+| Can a real model be reached today? | *(Phase 39 answer; since 2026-11-21 yes, with the operator's own key, see Status.)* **No.** `HTTPProvider` is never constructed in product code. No vendor codec exists. `LLM_PROVIDER=openai` refuses in every environment. The fake provider is refused outside `TW_ENV=test`. The benchmark CLI offers scripted providers only. Evidence: `tests/investigate/test_providers.py` (including the structural test `test_no_code_path_can_reach_a_real_model_today`), `test_process_entrypoints.py`, and the network-guarded full suite. |
 | Reference material that needs your approval | The official OpenAI API reference pages, for the chosen API (C-1), covering: the request schema with messages and tools (C-2, C-3); the response schema with tool calls, refusals and finish reasons (C-4); structured output (C-5); usage fields (C-6); the error format and rate-limit headers (C-7); authentication and organisation/project headers (C-8); the model list, limits and prices (C-9). Recorded as dated evidence with example requests and responses. |
 | Implementable offline after that approval | `OpenAIWire` (`endpoint`, `auth_headers`, `encode`, `decode`); `providers.py` wiring for `LLM_PROVIDER=openai`; golden encode/decode tests from the recorded examples; error and rate-limit classification tests for C-7; configuration validation for C-9 |
 | Needs a key and an authorised evaluation later | One reachability smoke call (C-1); behavioural checks (tool-use compliance, refusal and truncation frequency, structured-output conformance); usage-versus-billing reconciliation (C-6, C-9); real 429 behaviour; the T-605 benchmark run, E-01 injection resistance, model choice (UD-3), latency and cost |
@@ -108,7 +112,7 @@ present) are open questions for the smoke call.
 **P-2 on the real codec:** the redacted `provider_view` is what the codec serialises; the end-to-end test plants a
 secret-shaped value in a source file and checks the serialised bytes. Pattern-based redaction remains incomplete (P-4).
 
-**Why `LLM_PROVIDER=openai` still refuses** (`investigate/providers.py`; `test_providers.py`):
+**Why `LLM_PROVIDER=openai` refused until 2026-11-21** (the open points still apply to anyone relying on the output):
 1. Nothing has been observed from the real endpoint (G-4). The fixtures prove the codec follows the recorded
    contract, not that the service behaves as recorded.
 2. Real-model evaluation (T-605), the key (O-2) and the model choice (UD-3, C-9) are not authorised.
@@ -153,7 +157,7 @@ Each open question is classified using only the recorded contract. "Fails closed
 `python -m tracewise.bench run --kind model --model ID --key-file PATH --authorization-ref REF --max-requests N
 [--case ID ...] [--reps N] --out DIR` runs the frozen cases through the product's own `HTTPProvider` and
 `OpenAIResponsesWire` (`src/tracewise/bench/model_provider.py`). It needs the T-605 approval and is owner-run only.
-Product selection is unchanged: `LLM_PROVIDER=openai` still refuses.
+Product selection builds the same adapter from the operator's settings since 2026-11-21 (see Status).
 
 - **Refused before the key is read:** under a test runner or CI (`PYTEST_CURRENT_TEST` or `CI` set); without an
   authorisation reference; without an explicit model id; without `--max-requests`. The flag accepts 1 to 2000:
@@ -236,8 +240,8 @@ Product selection is unchanged: `LLM_PROVIDER=openai` still refuses.
 
 `src/tracewise/investigate/gemini_generate.py` (`GeminiGenerateContentWire`), written against the recorded contract
 in `research/gemini-api-reference-2026-10-26/README.md` (Addendum A). It is reached only through the benchmark's model
-mode, `--api gemini-generate-content` (`--api` defaults to `openai-responses`, the unchanged OpenAI path). Product
-selection does not know it: `LLM_PROVIDER` accepts only `openai` (refused) and `fake`. Tests:
+mode, `--api gemini-generate-content` (`--api` defaults to `openai-responses`, the unchanged OpenAI path). Since
+2026-11-21 product selection also builds it (`LLM_PROVIDER=gemini`). Tests:
 `tests/investigate/test_gemini_generate.py` (synthetic fixtures, mock transports). Nothing has been observed from the
 real endpoint.
 

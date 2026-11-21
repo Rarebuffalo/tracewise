@@ -18,7 +18,7 @@ structure and copy, not from seeing it. Sources that couldn't be read are listed
 - Permissions: Actions, Contents, Metadata *read*; Checks, Pull requests *write*.
 - **Status:** pre-release.
   - Not run on live GitHub.
-  - No AI model connected (OpenAI planned, not enabled).
+  - Bring your own model key (OpenAI or Gemini); adapters tested offline, not yet against the live APIs.
   - No hosting.
   - No accuracy, latency or cost claims.
   - Privacy notice is a draft.

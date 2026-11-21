@@ -10,8 +10,8 @@ connection attempts, truth lock unchanged.
 known gap. *Missing*: not implemented. *Under-tested*: implemented, tests do not exercise the risky path. *Blocked*:
 needs external configuration or an owner decision. *Unknown*: the evidence does not settle it.
 
-This report does not replace [docs/PROJECT-HANDOFF.md](../../docs/PROJECT-HANDOFF.md) (the canonical project state) or
-[docs/OWNER-DECISION-PACKET.md](../../docs/OWNER-DECISION-PACKET.md) (the decisions); it cites them.
+This report does not replace [docs/internal/PROJECT-HANDOFF.md](../../docs/internal/PROJECT-HANDOFF.md) (the canonical project state) or
+[docs/internal/OWNER-DECISION-PACKET.md](../../docs/internal/OWNER-DECISION-PACKET.md) (the decisions); it cites them.
 
 ## 0. Update 2026-11-01: verification of the 2026-10-30 batch, further fixes, status matrix
 

@@ -24,7 +24,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DOCS = ROOT / "docs"
 
-ACTIVE = sorted(DOCS.glob("*.md")) + [p for p in [ROOT / "research" / "README.md"] if p.exists()]
+ACTIVE = [
+    *sorted(DOCS.glob("*.md")),
+    *sorted((DOCS / "internal").glob("*.md")),
+    *[p for p in [ROOT / "research" / "README.md"] if p.exists()],
+]
 # Change records describe removed instructions on purpose; they are exempt from check 3.
 CHANGE_RECORDS = {"DOC-CHANGE-PLAN.md", "CHANGELOG.md"}
 

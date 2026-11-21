@@ -1,7 +1,25 @@
 # Change Log
 
 > **Commit hashes in this file before 2026-10-20 (bb) are pre-rewrite hashes.** The history was rewritten once to
-> redact signed URLs before the first push; map them with [HISTORY-REWRITE.md](HISTORY-REWRITE.md).
+> redact signed URLs before the first push; map them with [HISTORY-REWRITE.md](internal/HISTORY-REWRITE.md).
+
+## Unreleased: bring your own model key, open-source preparation (2026-11-21)
+
+- **Real providers enabled with the operator's own key:** `LLM_PROVIDER=openai` (`OPENAI_API_KEY`) or `gemini`
+  (`GEMINI_API_KEY`), with a required `LLM_MODEL`. `investigate/providers.py` builds one `HTTPProvider` per worker at
+  startup over the deadline-bounded transport the benchmark uses (no redirects, no proxy settings, a wall-clock
+  deadline per request). A missing or malformed key or model stops the worker (exit 2) and fails preflight;
+  `llm_config_problem` (config.py) holds the rule, network-free, for both. No fallback between providers; `fake`
+  stays test-only. Neither adapter has been run against the live API by this project (G-4, T-605 still open).
+- **Preflight:** `llm_provider` passes for a well-formed real configuration; new `llm_prices` warns when prices are
+  unset (cost reported as unpriced).
+- **Tests (deliberately changed pins):** `test_providers.py` (real-provider wiring with a mock transport; the
+  structural test now allows exactly two `HTTPProvider` construction sites), `test_github_client.py` (product
+  selection joins the network allowlist with its own assertions), `test_gemini_generate.py`,
+  `test_process_entrypoints.py`, `test_preflight.py`.
+- **Open source:** Apache-2.0 (`LICENSE`, `NOTICE`); competitor research and evidence removed from the repository and
+  its history; internal planning records moved to `docs/internal/`; new `docs/GETTING-STARTED.md`; docs index
+  reorganised; README status rewritten for outside users.
 
 ## Unreleased: B-04 confidence cap (2026-11-03, tenth batch; uncommitted)
 
@@ -35,7 +53,7 @@
 - **Permissions re-checked** against docs.github.com (commit comment create = Contents read; edit = Contents write,
   not requested). The fake GitHub now names the right permission for a refused commit comment. New
   partial-publication test.
-- **Release candidate:** `docs/RELEASE-CANDIDATE-V0.md` (commit plan, staging gates, acceptance matrix, approvals).
+- **Release candidate:** `docs/internal/RELEASE-CANDIDATE-V0.md` (commit plan, staging gates, acceptance matrix, approvals).
 
 ## Unreleased: publication recovery, per-surface tokens, report acceptance (2026-11-02, seventh batch; uncommitted)
 
@@ -365,7 +383,7 @@ Two offline audits; every defect was reproduced by a failing test before the fix
 
 - **Installer reports (prepass):** one npm error block, and pip's conflict report ending in `ResolutionImpossible`, each yield one primary. uv's `No solution found` is an installer error. Built against a 12-case development set. The **frozen evaluation set** (SHA-256 `45121652c5c2c829b3d1a9db85c921bd403310207701957b180646084b7ac852`, recorded before any code change and re-checked before its single run) scored **6/9 raw**: the 3 failures were mis-specified expectations about the runner `exit code` fallback, corrected and marked afterwards. Benchmark scores are unchanged; only B-06's primary count changed (2 → 1; not scored).
 - **Network guard:** permanent decision tests. The restore test now also requires the grants to equal the documented matrix.
-- **Owner-decision packet:** `docs/OWNER-DECISION-PACKET.md` (D-12, D-14 comparison and recommendation, D-11 excess grants, benchmark items, alert threshold, G-PLAT-11, the three OpenAI authorisations, signed URLs, hosting, live and legal).
+- **Owner-decision packet:** `docs/internal/OWNER-DECISION-PACKET.md` (D-12, D-14 comparison and recommendation, D-11 excess grants, benchmark items, alert threshold, G-PLAT-11, the three OpenAI authorisations, signed URLs, hosting, live and legal).
 - No change to D-14 behaviour, grants, the threshold, truth or providers.
 
 ## 2026-10-20 (ba): Phase 51 production-readiness closure (offline)
@@ -422,14 +440,14 @@ Two offline audits; every defect was reproduced by a failing test before the fix
 
 - **B-02 resolved (documentation only):** the catalogue row keeps doc-04's literal, which `scripts/check_docs.py` enforces, and now points to §7, where the replica's `1.21` is recorded. The earlier advice to edit the literal was withdrawn, because it would have broken the fidelity check. No benchmark behaviour, truth or fixture changed.
 - **B-04 wording corrected:** the canonical sources share a floor (no *high* without attempt metadata) but differ on the replacement (≤ medium in BENCHMARK §2; inconclusive in AT-DX-11). Owner choice needed; no behaviour change.
-- `docs/DECISION-IMPLEMENTATION-PLAN.md`: a conditional per-decision plan (files, tests, behaviour change, commit boundary).
+- `docs/internal/DECISION-IMPLEMENTATION-PLAN.md`: a conditional per-decision plan (files, tests, behaviour change, commit boundary).
 
 ## 2026-10-19 (at): Phase 43 final independent review
 
 - **P-5b fixed:** stored error text could still carry input through PostgreSQL primary messages, pydantic locations, or foreign exception text. It now depends only on SQLSTATE and schema identifiers, fixed pydantic codes, Tracewise's own messages, or the class name.
 - L-2 wording now covers partly unavailable logs as well as truncated ones.
 - W-1: a test for the window between start-up and the first claim.
-- `docs/OWNER-DECISION-SHEET.md`: a plain-language decision list, with spec-settled items cited.
+- `docs/internal/OWNER-DECISION-SHEET.md`: a plain-language decision list, with spec-settled items cited.
 
 ## 2026-10-19 (as): Phase 41 final local gate
 
@@ -510,7 +528,7 @@ Also updated: MODEL-ADAPTER §2a (offline readiness report); SECURITY-AUDIT §7;
 
 ### Documentation
 
-- `docs/DECISION-MEMOS.md`: P-2 options; P-3 (the log-excerpt half resolved, the snippet half open); C-CFG-1 resolution.
+- `docs/internal/DECISION-MEMOS.md`: P-2 options; P-3 (the log-excerpt half resolved, the snippet half open); C-CFG-1 resolution.
 - `docs/DATA-INVENTORY.md` §5: the stage-by-stage privacy data flow.
 - Reconciled: OPERATIONS §9 (no longer claims "no source stored"), the DEPLOYMENT-BLUEPRINT environment inventory, IMPLEMENTATION-PLAN, and the privacy notice (P-3 pending).
 - MODEL-ADAPTER: no C-item is established by repository evidence.
@@ -826,7 +844,7 @@ A mutation check confirmed the new tests fail without the fixes.
 
 - Truth lock verified; no case file changed since d4745aa.
 - `tests/bench/test_review_items.py` (4) pins today's oracle outcomes for D-5 (B-01), B-04, B-12 and B-02.
-- `docs/BENCHMARK-REVIEW-QUEUE.md` lists options and recommendations for D-5, B-04, B-12, A-05, E-01 and B-02, kept separate from the canonical benchmark.
+- `docs/internal/BENCHMARK-REVIEW-QUEUE.md` lists options and recommendations for D-5, B-04, B-12, A-05, E-01 and B-02, kept separate from the canonical benchmark.
 
 No truth, scorer or policy change.
 
@@ -1800,7 +1818,7 @@ A log chunk crossing the download cap was discarded whole, losing complete lines
 
 ## 2026-10-18: canonical documentation set, archive cleanup, git initialisation
 
-**Decisions applied:** Q1–Q6 (user, 2026-10-18), plus defaults D-1…D-3 ([DECISIONS.md](DECISIONS.md)). The plan of changes was written first: [DOC-CHANGE-PLAN.md](DOC-CHANGE-PLAN.md).
+**Decisions applied:** Q1–Q6 (user, 2026-10-18), plus defaults D-1…D-3 ([DECISIONS.md](DECISIONS.md)). The plan of changes was written first: [DOC-CHANGE-PLAN.md](internal/DOC-CHANGE-PLAN.md).
 
 ### Created (canonical, `docs/`)
 

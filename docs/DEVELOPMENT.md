@@ -56,10 +56,10 @@ See [TESTING.md](TESTING.md) for focused runs and the CI command.
 
 ## 4. Running the processes against a local database
 
-This is for exercising startup, readiness and the queue. **No real diagnosis is produced**: the worker accepts the
-fake provider only with `TW_ENV=test`, and the fake fails every model call, so analyses end as "could not
-complete". `LLM_PROVIDER=openai` refuses to start until the adapter is validated
-([MODEL-ADAPTER.md](MODEL-ADAPTER.md)).
+This is for exercising startup, readiness and the queue. With the fake provider **no real diagnosis is produced**:
+the worker accepts it only with `TW_ENV=test`, and it fails every model call, so analyses end as "could not
+complete". For real diagnoses set `LLM_PROVIDER=openai` or `gemini` with your own key and `LLM_MODEL`
+([CONFIGURATION.md](CONFIGURATION.md), [MODEL-ADAPTER.md](MODEL-ADAPTER.md)).
 
 **4.1 A throwaway cluster** (Unix socket only, no TCP, no passwords; never use this for real data):
 

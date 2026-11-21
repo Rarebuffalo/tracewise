@@ -44,7 +44,7 @@ This inventory was derived from the code and schema at the Phase 23 commit, **no
 | Destination | What | Notes |
 |---|---|---|
 | GitHub: commit comment, PR comment, Check Run in **your** repository | The rendered report: excerpts, snippet, location, fix, next steps | Redacted at render time. **Stored by GitHub under your repository's control. The Tracewise purge does not delete it.** |
-| Model provider (**not enabled**; only the offline `fake` exists) | The system prompt; the evidence bundle; tool results (source windows ≤250 lines and ≤8000 chars per call, grep lines, directory listings, the trigger diff); the model's own replayed turns | **All of it is redacted at the provider boundary** (`investigate/loop.py::provider_view`; P-2 approved option A), with the same pattern-based redaction as logs. The provider's own retention and training terms are unknown until recorded (MODEL-ADAPTER C-8). |
+| Model provider (the operator's own OpenAI or Gemini account, `LLM_PROVIDER`; tests use the offline `fake`) | The system prompt; the evidence bundle; tool results (source windows ≤250 lines and ≤8000 chars per call, grep lines, directory listings, the trigger diff); the model's own replayed turns | **All of it is redacted at the provider boundary** (`investigate/loop.py::provider_view`; P-2 approved option A), with the same pattern-based redaction as logs. The provider's own retention and training terms are unknown until recorded (MODEL-ADAPTER C-8). |
 | Operational logs (stderr JSON) | Event names, ids (delivery, job, installation, repo, run), outcomes, counts, timings, error **types** | No content fields (deny-list); scrubbing of secrets, URL queries, auth and cookie values (ARCHITECTURE §4.8) |
 
 ## 4. Never stored (as verified)

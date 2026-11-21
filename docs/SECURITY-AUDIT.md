@@ -7,7 +7,7 @@ Offline audit. No URL was fetched, no AWS or GitHub endpoint was contacted, and 
 > **Status update (2026-10-20, Phases 53–54):** with the owner's approval (option 3), the values of
 > `X-Amz-Credential`, `X-Amz-Signature` and `jwt` in this file were replaced with `REDACTED`, and the local history
 > was rewritten before the first push so that no commit carries them. The record and the old → new commit map are in
-> [HISTORY-REWRITE.md](HISTORY-REWRITE.md). The rows below describe the file **as it was** on 2026-10-19; the commit
+> [HISTORY-REWRITE.md](internal/HISTORY-REWRITE.md). The rows below describe the file **as it was** on 2026-10-19; the commit
 > hash quoted there is pre-rewrite. **Not verified:** a history-wide search for the original values in other files
 > (it was blocked), and the other files in research/final-audit-public/evidence/ (not inspected, by instruction).
 
