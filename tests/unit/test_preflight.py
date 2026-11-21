@@ -75,6 +75,20 @@ def test_each_missing_or_malformed_input_fails_its_own_check(tmp_path: Path, ove
     assert results(settings(tmp_path, **over))[check] == "fail"
 
 
+@pytest.mark.parametrize("name", ["openai", "gemini"])
+def test_a_real_provider_passes_preflight_without_sending_anything(tmp_path: Path, name: str) -> None:
+    key = {f"{name}_api_key": "placeholder-not-a-key-000000"}
+    r = results(settings(tmp_path, tw_env="prod", llm_provider=name, llm_model="m-1", **key))
+    assert r["llm_provider"] == "pass" and r["llm_prices"] == "warn"
+    priced = settings(
+        tmp_path, llm_provider=name, llm_model="m-1", llm_price_input_per_mtok=1, llm_price_output_per_mtok=2, **key
+    )
+    assert results(priced)["llm_prices"] == "pass"
+    checks = preflight.config_checks(settings(tmp_path, llm_provider=name, llm_model=None, **key), "worker")
+    bad = {c.name: c for c in checks}["llm_provider"]
+    assert bad.result == "fail" and "LLM_MODEL" in bad.detail and "placeholder" not in bad.detail
+
+
 def test_the_private_key_must_be_owner_only_and_an_rsa_pem(tmp_path: Path) -> None:
     loose = settings(tmp_path, github_app_private_key_path=key_file(tmp_path, mode=0o644))
     assert results(loose)["github_app_private_key"] == "fail"

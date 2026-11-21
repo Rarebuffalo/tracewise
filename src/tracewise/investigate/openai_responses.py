@@ -5,7 +5,7 @@ R-1..R-14). Choices that the documentation leaves to the integrator are marked D
 docs/MODEL-ADAPTER.md and are NOT papered over here: an unknown response shape fails closed (WireError → the
 investigator reports `provider_failed`, never a guessed diagnosis).
 
-Selection: `investigate/providers.py` still refuses `LLM_PROVIDER=openai` (see MODEL-ADAPTER.md §2b for the gates).
+Selection: `investigate/providers.py` builds it for `LLM_PROVIDER=openai` with the operator's key (MODEL-ADAPTER.md).
 """
 
 from __future__ import annotations

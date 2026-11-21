@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from tracewise.config import Settings, invalid_fields
+from tracewise.config import Settings, invalid_fields, llm_config_problem
 
 PLACEHOLDER_MARKERS = ("<", ">", "change-me", "changeme", "placeholder", "example", "xxxx")
 MANUAL = (
@@ -131,13 +131,31 @@ def config_checks(st: Settings, process: str) -> list[Check]:
             else:
                 add(Check("llm_provider", "fail", "LLM_PROVIDER=fake is refused outside TW_ENV=test"))
         else:
-            add(Check("llm_provider", "fail", "LLM_PROVIDER=openai is not enabled in this build (MODEL-ADAPTER §2b)"))
+            add(_real_provider_check(st))
+            priced = st.llm_price_input_per_mtok is not None and st.llm_price_output_per_mtok is not None
+            add(
+                Check(
+                    "llm_prices",
+                    "pass" if priced else "warn",
+                    "model prices are configured"
+                    if priced
+                    else "LLM_PRICE_INPUT_PER_MTOK / LLM_PRICE_OUTPUT_PER_MTOK unset: costs are reported as unpriced",
+                )
+            )
     if st.analysis_quota_monthly is None:
         add(Check("analysis_quota_monthly", "warn", "no monthly analysis quota configured (owner decision)"))
     else:
         add(Check("analysis_quota_monthly", "pass", "monthly analysis quota is configured"))
     out.extend(Check(f"manual_{i + 1}", "manual", text) for i, text in enumerate(MANUAL))
     return out
+
+
+def _real_provider_check(st: Settings) -> Check:
+    """The same configuration rules the worker applies when it builds the provider; nothing is sent (no network)."""
+    problem = llm_config_problem(st)
+    if problem is not None:
+        return Check("llm_provider", "fail", problem)
+    return Check("llm_provider", "pass", f"LLM_PROVIDER={st.llm_provider} with model {st.llm_model}")
 
 
 def _key_check(path: Path | None) -> Check:

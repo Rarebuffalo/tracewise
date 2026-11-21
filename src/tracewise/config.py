@@ -6,6 +6,7 @@ No personal, global or CLI GitHub credentials are read (FS-SEC-5, ADR-16).
 
 from __future__ import annotations
 
+import re
 from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
@@ -29,9 +30,11 @@ class Settings(BaseSettings):
     github_app_private_key_path: Path | None = None
     github_webhook_secret: SecretStr | None = None
 
-    llm_provider: Literal["fake", "openai"] = "fake"
+    # Bring your own key: the operator's own provider account. `fake` is for tests only (TW_ENV=test).
+    llm_provider: Literal["fake", "openai", "gemini"] = "fake"
     openai_api_key: SecretStr | None = None
-    llm_model: str | None = None
+    gemini_api_key: SecretStr | None = None
+    llm_model: str | None = None  # required for openai and gemini; there is no default model
     # T-706: USD per million tokens. Unset → cost_usd stays NULL ("unpriced"); never guessed (prices are T-605).
     llm_price_input_per_mtok: Decimal | None = Field(None, ge=0)
     llm_price_output_per_mtok: Decimal | None = Field(None, ge=0)
@@ -48,6 +51,8 @@ class Settings(BaseSettings):
     def _provider_needs_key(self) -> Settings:
         if self.llm_provider == "openai" and not self.openai_api_key:
             raise ValueError("LLM_PROVIDER=openai requires OPENAI_API_KEY in the local environment")
+        if self.llm_provider == "gemini" and not self.gemini_api_key:
+            raise ValueError("LLM_PROVIDER=gemini requires GEMINI_API_KEY in the local environment")
         return self
 
     def secret_values(self) -> list[str]:
@@ -60,10 +65,35 @@ class Settings(BaseSettings):
             self.database_url_operator,
             self.github_webhook_secret,
             self.openai_api_key,
+            self.gemini_api_key,
         ):
             if s is not None and s.get_secret_value():
                 out.append(s.get_secret_value())
         return out
+
+
+LLM_KEY_SETTING = {"openai": "OPENAI_API_KEY", "gemini": "GEMINI_API_KEY"}
+# The model-id shape both codecs accept (the adapter's rule, with Gemini's 64-character limit).
+_LLM_MODEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")
+
+
+def llm_config_problem(st: Settings) -> str | None:
+    """Why the configured real provider cannot be built, or None. Network-free (preflight uses it); the message names
+    settings, never values."""
+    name = st.llm_provider
+    if name not in LLM_KEY_SETTING:
+        return None
+    key = st.openai_api_key if name == "openai" else st.gemini_api_key
+    value = key.get_secret_value() if key is not None else ""
+    if not value:
+        return f"LLM_PROVIDER={name} requires {LLM_KEY_SETTING[name]}"
+    if len(value) < 8 or any(c.isspace() for c in value):
+        return f"{LLM_KEY_SETTING[name]} is malformed"
+    if not st.llm_model:
+        return f"LLM_PROVIDER={name} requires LLM_MODEL (an explicit model id; there is no default)"
+    if not _LLM_MODEL.match(st.llm_model):
+        return "LLM_MODEL is malformed"
+    return None
 
 
 @lru_cache(maxsize=1)

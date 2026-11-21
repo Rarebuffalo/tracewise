@@ -18,8 +18,8 @@ What this module guarantees, independent of any vendor (all verified offline wit
   request content, headers or the key.
 
 The vendor wire format lives in a `WireCodec`. The only vendor codec is `openai_responses.OpenAIResponsesWire`,
-written against the recorded contract and tested offline only. Product code never constructs `HTTPProvider`, and
-`LLM_PROVIDER=openai` still refuses to start (docs/MODEL-ADAPTER.md §2b).
+written against the recorded contract and tested offline only. Product selection (`investigate/providers.py`) builds
+one `HTTPProvider` from the operator's settings (bring your own key); the benchmark's model mode builds its own.
 """
 
 from __future__ import annotations

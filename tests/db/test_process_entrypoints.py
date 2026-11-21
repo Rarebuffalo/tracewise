@@ -264,7 +264,12 @@ def _events(err: str) -> list[str]:
         ({"DATABASE_URL_SYSTEM": "APP2"}, "not the BYPASSRLS system role", 2),  # tenant role as system
         ({"DATABASE_URL_SYSTEM": "OWNER"}, "not the BYPASSRLS system role", 2),
         ({"DATABASE_URL": "OWNER"}, "not subject to row-level security", 2),
-        ({"LLM_PROVIDER": "openai", "OPENAI_API_KEY": "placeholder-not-a-key"}, "LLM_PROVIDER=openai", 2),
+        ({"LLM_PROVIDER": "openai", "OPENAI_API_KEY": "placeholder-not-a-key"}, "LLM_PROVIDER=openai requires LLM_MODEL", 2),
+        (
+            {"LLM_PROVIDER": "gemini", "GEMINI_API_KEY": "placeholder-not-a-key", "LLM_MODEL": "bad model"},
+            "LLM_MODEL is malformed",
+            2,
+        ),
     ],
 )
 def test_worker_refuses_unsafe_configuration(pg, owner, key_path, over, needle, code) -> None:  # type: ignore[no-untyped-def]

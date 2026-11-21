@@ -19,9 +19,10 @@ scrubber.
 | `GITHUB_WEBHOOK_SECRET` | — | web | The webhook secret from your GitHub App; at least 16 characters. |
 | `GITHUB_APP_ID` | — | worker, `recovery` | Your GitHub App's id. |
 | `GITHUB_APP_PRIVATE_KEY_PATH` | — | worker, `recovery` | Path to the App's RSA private key (PEM, mode 0600). The key is never stored in an environment variable. |
-| `LLM_PROVIDER` | `fake` | worker | `fake` (test only) or `openai`. **`openai` currently refuses to start**: the adapter is implemented offline but not yet validated ([MODEL-ADAPTER.md](MODEL-ADAPTER.md)). |
+| `LLM_PROVIDER` | `fake` | worker | `openai` or `gemini` with your own API key, or `fake` (tests only; refused unless `TW_ENV=test`). Both real adapters follow recorded API contracts and are tested offline; they have not yet been validated against the live APIs by this project ([MODEL-ADAPTER.md](MODEL-ADAPTER.md)). There is never a fallback to another provider. |
 | `OPENAI_API_KEY` | — | worker | Required by `openai`; never logged. |
-| `LLM_MODEL` | — | worker (reserved) | Model id; no default, no fallback. Not read by product code yet: product selection refuses every real provider. |
+| `GEMINI_API_KEY` | — | worker | Required by `gemini`; never logged. |
+| `LLM_MODEL` | — | worker | Required by `openai` and `gemini`: the exact model id from your provider. No default, no fallback; a malformed id stops the worker at startup. |
 | `LLM_PRICE_INPUT_PER_MTOK`, `LLM_PRICE_OUTPUT_PER_MTOK` | unset | worker | USD per million tokens for the cost record. Unset means cost is recorded as unpriced. |
 | `INVESTIGATION_MAX_TOOL_CALLS` | `12` | worker | 1–12 (the spec's ceiling). |
 | `INVESTIGATION_TIMEOUT_S` | `120` | worker | 1–120 seconds. |

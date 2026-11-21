@@ -492,16 +492,14 @@ def test_replay_refuses_pickling_and_copying() -> None:
         assert SIG not in str(ei.value)
 
 
-def test_product_settings_reject_gemini_and_selection_is_unchanged() -> None:
+def test_product_settings_accept_gemini_only_with_its_own_key() -> None:
     from pydantic import ValidationError
 
     from tracewise.config import Settings
-    from tracewise.investigate import providers
 
-    with pytest.raises(ValidationError):
-        Settings(llm_provider="gemini")  # type: ignore[arg-type]
-    with pytest.raises(providers.ProviderConfigError, match="not enabled"):
-        providers.provider_factory(Settings(tw_env="test", llm_provider="openai", openai_api_key=SecretStr("x" * 12)))
+    with pytest.raises(ValidationError, match="GEMINI_API_KEY"):
+        Settings(llm_provider="gemini")
+    assert Settings(llm_provider="gemini", gemini_api_key=SecretStr("x" * 12), llm_model="m").llm_provider == "gemini"
 
 
 def test_repair_turn_after_a_signed_text_answer_is_an_explicit_limitation_that_fails_closed() -> None:

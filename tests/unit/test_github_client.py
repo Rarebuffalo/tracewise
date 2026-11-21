@@ -62,11 +62,15 @@ MODEL_MODE = {
 WAITLIST_OUTBOUND = SRC / "waitlist" / "outbound.py"
 
 
+# Product model selection (bring your own key, 2026-11-21): builds the one configured adapter. Checked below.
+PRODUCT_SELECTION = SRC / "investigate" / "providers.py"
+
+
 def test_sec01_no_http_or_github_urls_outside_the_client() -> None:
     # The two network modules: the GitHub client, and the model adapter core (T-605 prep), which may only reach
     # its codec's single endpoint (see test_model_adapter_is_the_only_other_network_module below).
     network = {SRC / "github" / "client.py", SRC / "investigate" / "http_adapter.py", WAITLIST_OUTBOUND}
-    allowed = {*network, *BENCH_OFFLINE, *MODEL_MODE}
+    allowed = {*network, *BENCH_OFFLINE, *MODEL_MODE, PRODUCT_SELECTION}
     fixtures = SRC / "bench" / "cases"  # benchmark fixture repositories: data, not product code
     for f in SRC.rglob("*.py"):
         if f in allowed or fixtures in f.parents:
@@ -105,6 +109,23 @@ def test_sec01_model_mode_names_no_host_and_builds_only_a_locked_client() -> Non
     assert "EndpointBudgetTransport(timed,codec.endpoint,max_requests,max_request_bytes=MAX_REQUEST_BYTES)" in compact
     assert "HTTPProvider(codec, key, config, client=client)" in provider
     assert "trust_env=False" in (SRC / "investigate" / "deadline_http.py").read_text()
+
+
+def test_sec01_product_selection_names_no_host_and_bounds_every_request() -> None:
+    """Product selection names no host (the endpoint is the codec's recorded constant), never follows redirects or
+    reads proxy settings, and sends every request through the per-request wall-clock deadline."""
+    text = PRODUCT_SELECTION.read_text()
+    assert "http://" not in text and "https://" not in text and "api.github.com" not in text
+    calls = [
+        n
+        for n in ast.walk(ast.parse(text))
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and ast.unparse(n.func.value) == "httpx"
+    ]
+    assert [c.func.attr for c in calls if isinstance(c.func, ast.Attribute)] == ["Client"]
+    kw = {k.arg: ast.unparse(k.value) for k in calls[0].keywords}
+    assert kw["follow_redirects"] == "False" and kw["trust_env"] == "False"
+    assert kw["transport"] == "deadline_http.RequestDeadlineTransport(network, deadline)"
+    assert "network = transport or deadline_http.DeadlineHTTPTransport(deadline)" in text
 
 
 def test_sec01_bench_exemptions_only_use_in_process_transports() -> None:

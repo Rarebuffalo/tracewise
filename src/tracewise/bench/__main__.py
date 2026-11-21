@@ -16,7 +16,7 @@ except `run --kind model` (below), which is owner-run only.
                                  DIR (bench/meta.py RECORDED_INDEX). Separate from the synthetic benchmark; no network
   signals [--out FILE]           P2 signal evaluation (dependency drift) over the frozen cases; truth is read only
 Scripted providers: oracle, wrong_cause, wrong_location, fabricated, abstain, timeout, malformed, adversarial.
-Product provider selection is unaffected: `LLM_PROVIDER=openai` is still refused (investigate/providers.py).
+Product provider selection (investigate/providers.py) is separate: it never imports the model mode or its key-file guards.
 """
 
 from __future__ import annotations

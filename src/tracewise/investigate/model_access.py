@@ -1,7 +1,7 @@
 """Guards for the owner-run tools that may reach a real model endpoint (T-605 preparation). NOT provider selection.
 
-Product selection (`investigate/providers.py`) still refuses `LLM_PROVIDER=openai`. The only callers of this module
-are owner-run tools: the API smoke harness under `scripts/` and the benchmark's model mode
+Product selection (`investigate/providers.py`) takes its key from settings and never uses this module. The only
+callers of this module are owner-run tools: the API smoke harness under `scripts/` and the benchmark's model mode
 (`python -m tracewise.bench run --kind model`). Each of them refuses to run under a test runner or CI, needs a written
 authorisation reference, and reads the key only from an owner-only file outside the repository.
 

@@ -4,9 +4,9 @@ Codecs (`--api`): `openai-responses` (default; `OpenAIResponsesWire`) or `gemini
 (`GeminiGenerateContentWire`, offline-tested only). The exact endpoint comes from the codec; for Gemini it embeds the
 explicit model id, and the host lock compares the whole URL.
 
-This is the only module outside `investigate/http_adapter.py` that constructs an `HTTPProvider`. It is reached only
-from `python -m tracewise.bench run --kind model`; product provider selection (`investigate/providers.py`) still
-refuses `LLM_PROVIDER=openai`, and no product module imports this one (structural test in
+Besides product selection (`investigate/providers.py`, which builds its own provider from settings), this is the
+only module outside `investigate/http_adapter.py` that constructs an `HTTPProvider`. It is reached only from
+`python -m tracewise.bench run --kind model`, and no product module imports this one (structural test in
 `tests/investigate/test_providers.py`).
 
 Guards (each a refusal before anything is sent):
