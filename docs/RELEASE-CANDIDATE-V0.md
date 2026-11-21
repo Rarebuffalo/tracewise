@@ -46,8 +46,8 @@ the code commit. Their order is enforced by Alembic's `down_revision` chain, not
 
 **Not in the release:**
 - `.claude/`, `marketing/` and `tracewise-brand/` (protected, never staged).
-- **Requires owner decision:** `research/product-strategy/competitor-landscape.md`, `feature-roadmap.md` and
-  `product-strategy.md`. These are product research, not release material; commit them separately or keep them out.
+- The competitor landscape, product strategy and feature roadmap drafts: kept outside the repository (owner
+  decision, 2026-11-21), together with the competitor audit and evidence that research/ used to hold.
 
 Checked before this plan:
 - no secret-shaped strings in the diff or the untracked files;

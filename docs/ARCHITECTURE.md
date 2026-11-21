@@ -1,6 +1,6 @@
 # Architecture and Decisions (canonical)
 
-Version 2.0, 2026-10-18. This supersedes `research/archive/2026-10-15-s1-plan/ARCHITECTURE-DECISIONS.md` and `DECISION-REGISTER.md` (they are kept for history). Evidence IDs (EV-…) are in `research/final-evidence-review/EVIDENCE-LEDGER.md`.
+Version 2.0, 2026-10-18. This supersedes research/archive/2026-10-15-s1-plan/ARCHITECTURE-DECISIONS.md and `DECISION-REGISTER.md` (they are kept for history). Evidence IDs (EV-…) are in research/final-evidence-review/EVIDENCE-LEDGER.md.
 
 **Basis tags**
 

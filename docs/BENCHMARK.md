@@ -2,9 +2,9 @@
 
 Version 2.0, 2026-10-18. This consolidates, without loss:
 
-- `research/archive/2026-10-15-s1-research/04-failure-benchmark.md` §2 ("doc 04": the original case definitions);
-- the amendments in `research/archive/2026-10-15-s1-plan/TEST-AND-RELEASE-PLAN.md` §2;
-- `research/final-evidence-review/BENCHMARK-AND-GROUND-TRUTH-REVIEW.md` §3–4;
+- research/archive/2026-10-15-s1-research/04-failure-benchmark.md §2 ("doc 04": the original case definitions);
+- the amendments in research/archive/2026-10-15-s1-plan/TEST-AND-RELEASE-PLAN.md §2;
+- research/final-evidence-review/BENCHMARK-AND-GROUND-TRUTH-REVIEW.md §3–4;
 - B-17 from the S3 acceptance tests.
 
 **Rules (decided 2026-10-17/18):**
@@ -95,7 +95,7 @@ This check is also automated by `scripts/check_docs.py` (case IDs and key ground
 
 ### 3.2 Track D, public-metadata cases
 
-Anonymous REST, fetched 2026-10-17; artifacts in `research/final-evidence-review/evidence/public-ci/`.
+Anonymous REST, fetched 2026-10-17; artifacts in research/final-evidence-review/evidence/public-ci/.
 
 | ID | Lane | Label (job/step level only) | Supports |
 |---|---|---|---|

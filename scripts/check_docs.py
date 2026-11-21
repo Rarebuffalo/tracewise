@@ -8,7 +8,8 @@ Checks:
      plain text, not as a link or a backticked path.
   2. SPEC <-> TASKS <-> ACCEPTANCE-TESTS traceability.
   3. No obsolete or forbidden instructions in active docs.
-  4. Benchmark cases B-01..B-16 from doc 04 are consolidated in docs/BENCHMARK.md.
+  4. Benchmark cases B-01..B-16 (originally from research doc 04, now kept outside the repository) are present in
+     docs/BENCHMARK.md with their ground-truth phrases.
 
 Exit code 0 when all checks pass, 1 otherwise. Read-only; no network.
 """
@@ -23,16 +24,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DOCS = ROOT / "docs"
 
-ACTIVE = sorted(DOCS.glob("*.md")) + [
-    p for p in [ROOT / "research" / "README.md", *sorted((ROOT / "research" / "archive").glob("*/README.md"))] if p.exists()
-]
+ACTIVE = sorted(DOCS.glob("*.md")) + [p for p in [ROOT / "research" / "README.md"] if p.exists()]
 # Change records describe removed instructions on purpose; they are exempt from check 3.
 CHANGE_RECORDS = {"DOC-CHANGE-PLAN.md", "CHANGELOG.md"}
 
-DOC04_CANDIDATES = [
-    ROOT / "research" / "04-failure-benchmark.md",
-    ROOT / "research" / "archive" / "2026-10-15-s1-research" / "04-failure-benchmark.md",
-]
+BENCH_CASES = [f"B-{i:02d}" for i in range(1, 17)]
 
 BANNED = [
     (r"gh auth login", "CLI login (no-credentials rule)"),
@@ -185,25 +181,19 @@ KEY_PHRASES = {
 
 
 def check_benchmark() -> None:
-    doc04 = next((p for p in DOC04_CANDIDATES if p.exists()), None)
     bench = (DOCS / "BENCHMARK.md").read_text(encoding="utf-8")
-    if doc04 is None:
-        errors.append("[bench] doc 04 not found in research/ or archive")
-        return
-    src = doc04.read_text(encoding="utf-8")
-    src_ids = set(re.findall(r"^\| (B-\d\d) \|", src, re.M))
     rows: dict[str, str] = {}
     for m in re.finditer(r"^\| (B-\d\d) \|.*$", bench, re.M):
         rows.setdefault(m.group(1), m.group(0))  # first occurrence = case catalogue row
-    for cid in sorted(src_ids):
+    for cid in BENCH_CASES:
         row = rows.get(cid)
         if row is None:
-            errors.append(f"[bench] {cid} from doc 04 missing in docs/BENCHMARK.md")
+            errors.append(f"[bench] {cid} missing in docs/BENCHMARK.md")
             continue
         for phrase in KEY_PHRASES.get(cid, []):
             if phrase not in row:
                 errors.append(f"[bench] {cid}: ground-truth phrase '{phrase}' not in consolidated row")
-    notes.append(f"doc 04 cases verified: {len(src_ids)} (source: {doc04.relative_to(ROOT)})")
+    notes.append(f"benchmark cases verified: {len(BENCH_CASES)}")
 
 
 def main() -> int:

@@ -1,7 +1,7 @@
 # GitHub integration contract audit: 2026-10-19 (Phase 8)
 
 Offline. The sources are:
-- recorded GitHub documentation in `research/final-evidence-review/evidence/docs/` (fetched 2026-10-17), with ledger ids EV-P…;
+- recorded GitHub documentation in research/final-evidence-review/evidence/docs/ (fetched 2026-10-17), with ledger ids EV-P…;
 - recorded public API responses in `tests/fixtures/github/recorded/`;
 - the local fake GitHub API.
 

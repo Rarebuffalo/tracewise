@@ -1820,18 +1820,18 @@ A log chunk crossing the download cap was discarded whole, losing complete lines
 
 | Destination | Files |
 |---|---|
-| `research/archive/2026-10-15-s1-research/` | 01, 02, 03, 04, 05, 06, 07, 08, EXECUTIVE-SUMMARY, PLAN-REVIEW |
-| `research/archive/2026-10-15-s1-plan/` | IMPLEMENTATION-PLAN, IMPLEMENTATION-TASKS, ARCHITECTURE-DECISIONS, DECISION-REGISTER, TEST-AND-RELEASE-PLAN, RESOURCE-AND-SETUP-CHECKLIST, OPEN-QUESTIONS |
-| `research/archive/2026-10-17-s2-audit-quarantined/` | S2 FINAL-REVERSE-ENGINEERING-AUDIT, VERIFIED-FEATURE-SPEC, TRACEWISE-PARITY-ACCEPTANCE-TESTS |
+| research/archive/2026-10-15-s1-research/ | 01, 02, 03, 04, 05, 06, 07, 08, EXECUTIVE-SUMMARY, PLAN-REVIEW |
+| research/archive/2026-10-15-s1-plan/ | IMPLEMENTATION-PLAN, IMPLEMENTATION-TASKS, ARCHITECTURE-DECISIONS, DECISION-REGISTER, TEST-AND-RELEASE-PLAN, RESOURCE-AND-SETUP-CHECKLIST, OPEN-QUESTIONS |
+| research/archive/2026-10-17-s2-audit-quarantined/ | S2 FINAL-REVERSE-ENGINEERING-AUDIT, VERIFIED-FEATURE-SPEC, TRACEWISE-PARITY-ACCEPTANCE-TESTS |
 
 Doc 04 was moved only **after** the checker verified all 16 cases and their ground-truth phrases in `docs/BENCHMARK.md`.
 
 ### Unchanged
 
-- `research/final-evidence-review/**`
-- `research/final-audit-public/**`
-- `research/final-audit/**`, including the quarantined evidence, untouched
-- `research/REPOSITORY-AUDIT-2026-10-18.md`
+- research/final-evidence-review/**
+- research/final-audit-public/**
+- research/final-audit/**, including the quarantined evidence, untouched
+- research/REPOSITORY-AUDIT-2026-10-18.md
 
 **Deleted:** nothing.
 
@@ -1843,7 +1843,7 @@ Doc 04 was moved only **after** the checker verified all 16 cases and their grou
 ### Git
 
 - `git init` on branch `main`, **no remote**.
-- `.gitignore` excludes virtualenvs and caches, `.env*` (except `.env.example`), `*.pem`, `*.key`, and `research/final-audit/evidence/` (D-3).
+- `.gitignore` excludes virtualenvs and caches, `.env*` (except `.env.example`), `*.pem`, `*.key`, and research/final-audit/evidence/ (D-3).
 
 **Pre-staging scan:**
 

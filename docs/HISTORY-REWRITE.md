@@ -1,7 +1,7 @@
 # History rewrite record (2026-10-20)
 
 Before the first push, the local history was rewritten **once** with `git filter-branch`, with the owner's approval
-(Phase 53, option 3). The only change: in `research/final-audit-public/evidence/marketplace.html`, the values of
+(Phase 53, option 3). The only change: in research/final-audit-public/evidence/marketplace.html, the values of
 the signed-URL parameters `X-Amz-Credential`, `X-Amz-Signature` and `jwt` were replaced with `REDACTED`, from the
 commit that introduced the file onward. Commit order, messages, authors and dates are unchanged, and every
 commit's tree is identical apart from that file. See [SECURITY-AUDIT.md](SECURITY-AUDIT.md) §1.

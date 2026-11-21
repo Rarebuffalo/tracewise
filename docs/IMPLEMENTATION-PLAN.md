@@ -11,7 +11,7 @@ Version 2.0, 2026-10-18.
 | Benchmark | [BENCHMARK.md](BENCHMARK.md) |
 | Commercial gate | [VALIDATION-PLAN.md](VALIDATION-PLAN.md) |
 
-This replaces `research/archive/2026-10-15-s1-plan/IMPLEMENTATION-PLAN.md` (attribution-only, LLM off). The S1 plan's still-valid detail on tenancy, threat model and operations is summarised in §5–§6; the archived file remains available for history.
+This replaces research/archive/2026-10-15-s1-plan/IMPLEMENTATION-PLAN.md (attribution-only, LLM off). The S1 plan's still-valid detail on tenancy, threat model and operations is summarised in §5–§6; the archived file remains available for history.
 
 ## 1. Gates
 

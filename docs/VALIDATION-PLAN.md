@@ -1,6 +1,6 @@
 # Commercial Validation Plan: Gate G-0 (canonical)
 
-Version 2.0, 2026-10-18. This carries over the ICP and interview script from `research/archive/2026-10-15-s1-research/07-validation-and-gtm.md`, with corrections:
+Version 2.0, 2026-10-18. This carries over the ICP and interview script from research/archive/2026-10-15-s1-research/07-validation-and-gtm.md, with corrections:
 
 - **no credentials**: the `gh run list` labelling is replaced by anonymous metadata;
 - G-2 redefined (CM-27, D-1);

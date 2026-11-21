@@ -35,7 +35,7 @@ which is approved separately.
 
 - D-12 retention decisions.
 - Confirmation of the provisional 0.2 alert threshold.
-- **Signed URLs in `research/final-audit-public/evidence/marketplace.html`:** the query strings must be redacted before any push or publication. This file was not opened or edited in Phase 47; the remediation stays an owner decision (OWNER-DECISION-SHEET item 7).
+- **Signed URLs in research/final-audit-public/evidence/marketplace.html:** the query strings must be redacted before any push or publication. This file was not opened or edited in Phase 47; the remediation stays an owner decision (OWNER-DECISION-SHEET item 7).
 - Benchmark decisions: B-04, A-05, A-04, B-12, D-5 and E-01.
 - Database roles provisioned with separate credentials (D-11).
 - G-PLAT-11, and the live GitHub stages S0–S5 ([LIVE-VALIDATION-PLAN.md](LIVE-VALIDATION-PLAN.md)).

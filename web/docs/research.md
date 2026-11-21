@@ -22,7 +22,7 @@ structure and copy, not from seeing it. Sources that couldn't be read are listed
   - No hosting.
   - No accuracy, latency or cost claims.
   - Privacy notice is a draft.
-  - No license chosen.
+  - Licensed under Apache-2.0.
 
 Sources: `README.md`, `docs/PRIVACY-NOTICE-DRAFT.md`, `docs/DEPLOYMENT-BLUEPRINT.md`, `src/tracewise/report/render.py`.
 

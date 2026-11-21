@@ -257,13 +257,12 @@ and the rules for tenant isolation, offline tests and secrets. Please follow the
 The canonical documentation index is [docs/README.md](docs/README.md). To run it yourself, start with
 [docs/SELF-HOSTING.md](docs/SELF-HOSTING.md). To work on it, start with
 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and
-[docs/SPEC.md](docs/SPEC.md). `research/` holds dated research and evidence, not current guidance.
+[docs/SPEC.md](docs/SPEC.md). `research/` holds the recorded model-API contracts and dated planning notes, not current guidance.
 
 ## License
 
-**No license has been chosen yet.** Until a `LICENSE` file is added, all rights are reserved by the copyright
-holder, and no permission to use, copy, modify or distribute the code is granted. Choosing a license is an open
-owner decision.
+Tracewise is licensed under the [Apache License, Version 2.0](LICENSE). See [NOTICE](NOTICE) for attribution. The
+web fonts under `web/` are licensed separately under the SIL Open Font License 1.1.
 
 ## Contact
 

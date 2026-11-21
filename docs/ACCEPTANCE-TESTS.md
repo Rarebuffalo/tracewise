@@ -163,7 +163,7 @@ Version 2.0, 2026-10-18. Each test maps to [SPEC.md](SPEC.md) FS-IDs. Benchmark 
 
 | ID | Pass |
 |---|---|
-| AT-CMP-01 | Head-to-head with The Plumber on public synthetic repos in an approved test org. This is the **only** basis for any comparative claim. |
+| AT-CMP-01 | Head-to-head with a comparable product on public synthetic repos in an approved test org. This is the **only** basis for any comparative claim. |
 
 ## 12. MVP gate ("core complete")
 

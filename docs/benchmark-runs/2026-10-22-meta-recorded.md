@@ -3,7 +3,7 @@
 **Command:** `uv run python -m tracewise.bench meta --recorded research/final-evidence-review/evidence/public-ci`
 (exit 0). Read in place; nothing was copied, written or fetched. No network, no credentials.
 
-**Evidence:** the anonymous, read-only fetch of 2026-10-17 (`research/final-evidence-review/evidence/FETCH-LOG.tsv`).
+**Evidence:** the anonymous, read-only fetch of 2026-10-17 (research/final-evidence-review/evidence/FETCH-LOG.tsv).
 Job lists came from `/runs/{id}/jobs` (latest attempt); the runner checked that every job is attempt 1.
 
 | Case | Status | Label derived from metadata | Documents |

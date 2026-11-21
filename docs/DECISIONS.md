@@ -1,6 +1,6 @@
 # Decisions Log (canonical)
 
-Replaces `research/archive/2026-10-15-s1-plan/OPEN-QUESTIONS.md`.
+Replaces research/archive/2026-10-15-s1-plan/OPEN-QUESTIONS.md.
 
 ## Closed (2026-10-18, by the user)
 
@@ -40,5 +40,5 @@ Replaces `research/archive/2026-10-15-s1-plan/OPEN-QUESTIONS.md`.
 |---|---|---|
 | O-1 | Approve a dedicated GitHub test org + dev App (you create; project-scoped) | T-801 (LIVE) |
 | O-2 | Provide an OpenAI key in your local env for the measured evaluation | T-605 |
-| O-3 | Optional head-to-head with The Plumber (AT-CMP-01) | Any comparative claim |
+| O-3 | Optional head-to-head with a comparable product (AT-CMP-01) | Any comparative claim |
 | O-4 | Hosting and pricing | Pilot (T-1002; after T-605 cost measurement) |

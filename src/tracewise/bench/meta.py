@@ -58,7 +58,7 @@ def key_for(name: str, repo: str, params: dict[str, Any]) -> str:
     return f"{name}|{repo}|" + ",".join(f"{k}={params[k]}" for k in sorted(params))
 
 
-# The anonymous fetch of 2026-10-17 (research/final-evidence-review/evidence/FETCH-LOG.tsv). Job lists were fetched
+# The anonymous fetch of 2026-10-17 (see tests/fixtures/github/README.md). Job lists were fetched
 # from /runs/{id}/jobs (latest attempt); every job in them is attempt 1, which `_jobs` checks before use.
 RECORDED_INDEX: tuple[dict[str, Any], ...] = (
     {

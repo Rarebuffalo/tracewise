@@ -4,8 +4,8 @@ This implements your decisions Q1–Q6 of 2026-10-18. It is written **before** a
 
 Sources:
 
-- [REPOSITORY-AUDIT-2026-10-18.md](../research/REPOSITORY-AUDIT-2026-10-18.md);
-- `research/final-evidence-review/IMPLEMENTATION-PLAN-CORRECTION-MATRIX.md` (CM-IDs).
+- REPOSITORY-AUDIT-2026-10-18.md;
+- research/final-evidence-review/IMPLEMENTATION-PLAN-CORRECTION-MATRIX.md (CM-IDs).
 
 ## 0. Approach
 
@@ -15,9 +15,9 @@ Instead, a **new canonical set** is written in `docs/`. Still-valid S1 content i
 
 | Canonical file (new) | Replaces (archived, not deleted) |
 |---|---|
-| `docs/SPEC.md` | `research/final-audit-public/VERIFIED-FEATURE-SPEC.md` (S3, stays in place as an audit record); S2 `research/VERIFIED-FEATURE-SPEC.md` |
+| `docs/SPEC.md` | research/final-audit-public/VERIFIED-FEATURE-SPEC.md (S3, stays in place as an audit record); S2 `research/VERIFIED-FEATURE-SPEC.md` |
 | `docs/ARCHITECTURE.md` (ADRs v2) | `research/ARCHITECTURE-DECISIONS.md`, `research/DECISION-REGISTER.md` |
-| `docs/BENCHMARK.md` | `research/04-failure-benchmark.md` §2, `research/TEST-AND-RELEASE-PLAN.md` §2, `research/final-evidence-review/BENCHMARK-AND-GROUND-TRUTH-REVIEW.md` §3–4 (record kept), S3 B-17 |
+| `docs/BENCHMARK.md` | `research/04-failure-benchmark.md` §2, `research/TEST-AND-RELEASE-PLAN.md` §2, research/final-evidence-review/BENCHMARK-AND-GROUND-TRUTH-REVIEW.md §3–4 (record kept), S3 B-17 |
 | `docs/ACCEPTANCE-TESTS.md` | S3 `TRACEWISE-PARITY-ACCEPTANCE-TESTS.md` (record kept); S2 duplicate; `research/TEST-AND-RELEASE-PLAN.md` |
 | `docs/IMPLEMENTATION-PLAN.md` | `research/IMPLEMENTATION-PLAN.md`, `research/RESOURCE-AND-SETUP-CHECKLIST.md` |
 | `docs/TASKS.md` (backlog + estimate) | `research/IMPLEMENTATION-TASKS.md` |
@@ -70,7 +70,7 @@ Instead, a **new canonical set** is written in `docs/`. Still-valid S1 content i
 | S3 tests AT-DX-15 / ATR-09 real-accuracy gates (≥70%) | Unmeasurable, and implies a performance claim | Removed. Only synthetic targets (labelled *targets*, not results) and metadata-track checks remain. |
 | S1 cost and latency figures, "60 seconds" copy | Unsupported claims | Removed from the canonical set. Measured later. |
 | Q3 "Python + TypeScript" | Ambiguous: product implementation language vs **supported customer-repo languages** | Implementation stays **Python only**. Nothing in the GitHub integration requires TypeScript, and the MVP has no UI. Analysis supports **Python and TypeScript customer repos** (pytest/ruff/mypy and tsc/jest/vitest/eslint). See D-2. |
-| Q5 git staging | `research/final-audit/evidence/` holds the quarantined third-party logs | Files stay untouched on disk. Proposed `.gitignore` entry so they never enter history (D-3). |
+| Q5 git staging | research/final-audit/evidence/ holds the quarantined third-party logs | Files stay untouched on disk. Proposed `.gitignore` entry so they never enter history (D-3). |
 | "R-04" naming | In S1 docs "R-04" means *research doc 04*; in S2 "R-01…R-15" are quarantined real cases | The canonical docs say "doc 04"; the R-case IDs are not reused |
 
 ## 3. Decisions flagged (defaults applied unless you say otherwise)
@@ -79,7 +79,7 @@ Instead, a **new canonical set** is written in `docs/`. Still-valid S1 content i
 |---|---|---|
 | **D-1** | G-2 threshold on the metadata-only lower bound | Report the lower bound with its CI. **≥15% supports BUILD.** Below 15% does **not** alone trigger ABANDON, because dependency and environment causes are uncountable without logs. Interviews (G-1) and commitments (G-3) decide. |
 | **D-2** | Q3 interpretation | Python-only implementation; Python + TypeScript customer-repo support |
-| **D-3** | Git history excludes `research/final-audit/evidence/` (quarantined) | Excluded via `.gitignore`; files untouched |
+| **D-3** | Git history excludes research/final-audit/evidence/ (quarantined) | Excluded via `.gitignore`; files untouched |
 
 ## 4. Exact file-operation plan
 

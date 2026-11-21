@@ -6,7 +6,7 @@ Version 2.0, 2026-10-18. Supersedes all earlier specs (see `research/README.md` 
 
 | Prefix | Document |
 |---|---|
-| EV-… | `research/final-evidence-review/EVIDENCE-LEDGER.md` |
+| EV-… | research/final-evidence-review/EVIDENCE-LEDGER.md |
 | AT-… | [ACCEPTANCE-TESTS.md](ACCEPTANCE-TESTS.md) |
 | T-… | [TASKS.md](TASKS.md) |
 
